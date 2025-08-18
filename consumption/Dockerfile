@@ -25,7 +25,7 @@ WORKDIR /app
 # Copy the compiled binary from the builder stage
 COPY --from=builder /app/myapp .
 
-# Expose the port your application listens on (if applicable)
+# Expose the port your application listens on
 EXPOSE 8080
 
 # Command to run the application when the container starts

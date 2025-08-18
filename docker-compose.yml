@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  registry:
+    build:
+      context: ./registry
+    container_name: registry
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_PATH=devices.db
+    restart: unless-stopped
+
+  consumption:
+    build:
+      context: ./consumption
+    container_name: consumption
+    ports:
+      - "8081:8080"
+    environment:
+      - DB_PATH=consumption.db
+      - REGISTRY_URL=http://registry:8080
+      - SERVICE_TOKEN=dev-token
+      - LEDGER_URL=http://localhost:9090
+    depends_on:
+      - registry
+    restart: unless-stopped
