@@ -343,11 +343,32 @@ func (s *Service) sendToLedger(ctx context.Context, kind, refID, payload string)
 		log.Printf("[sendToLedger] unknown kind: %s, refID: %s, payload: %s", kind, refID, payload)
 		return fmt.Errorf("unknown kind: %s", kind)
 	}
-	req, _ := http.NewRequestWithContext(ctx, "POST", s.cfg.LedgerURL+"/debit", bytes.NewBufferString(payload))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Idempotency-Key", refID)
 
-	log.Printf("[sendToLedger] POST %s/debit kind=%s refID=%s payload=%s", s.cfg.LedgerURL, kind, refID, payload)
+	// Unmarshal batch payload
+	var batch Batch
+	if err := json.Unmarshal([]byte(payload), &batch); err != nil {
+		log.Printf("[sendToLedger] unmarshal batch: %v", err)
+		return err
+	}
+
+	// Map to ledger DebitRequest
+	ledgerReq := map[string]any{
+		"device_id":       batch.DeviceID,
+		"amount_sats":     int64(batch.TotalSats),
+		"reason":          fmt.Sprintf("consumption batch %s", batch.ID),
+		"idempotency_key": batch.ID,
+		"allow_negative":  true, // Allow negative balance for consumption
+	}
+
+	js, _ := json.Marshal(ledgerReq)
+	req, _ := http.NewRequestWithContext(ctx, "POST", s.cfg.LedgerURL+"/debit", bytes.NewBuffer(js))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", batch.ID)
+	req.Header.Set("X-Service-Token", s.cfg.ServiceToken)
+
+	log.Printf("[sendToLedger] POST %s/debit device_id=%s amount_sats=%d batch_id=%s", s.cfg.LedgerURL, batch.DeviceID, int64(batch.TotalSats), batch.ID)
+	log.Printf("[sendToLedger] payload: %s", string(js))
+
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		log.Printf("[sendToLedger] error: %v", err)
