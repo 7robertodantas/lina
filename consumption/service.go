@@ -357,7 +357,7 @@ func (s *Service) sendToLedger(ctx context.Context, kind, refID, payload string)
 		"amount_sats":     int64(batch.TotalSats),
 		"reason":          fmt.Sprintf("consumption batch %s", batch.ID),
 		"idempotency_key": batch.ID,
-		"allow_negative":  true, // Allow negative balance for consumption
+		"allow_negative":  false, // Allow negative balance for consumption
 	}
 
 	js, _ := json.Marshal(ledgerReq)
