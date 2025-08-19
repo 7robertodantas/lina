@@ -2,7 +2,10 @@ version: '3.8'
 services:
   registry:
     build:
-      context: ./registry
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: registry
     container_name: registry
     ports:
       - "8080:8080"
@@ -12,7 +15,10 @@ services:
 
   consumption:
     build:
-      context: ./consumption
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: consumption
     container_name: consumption
     ports:
       - "8081:8080"
@@ -24,9 +30,13 @@ services:
     depends_on:
       - registry
     restart: unless-stopped
+
   ledger:
     build:
-      context: ./ledger
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: ledger
     container_name: ledger
     ports:
       - "8082:8080"
