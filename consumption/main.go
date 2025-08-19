@@ -48,7 +48,7 @@ func loadConfig() Config {
 		RegistryBaseURL:    getenv("REGISTRY_URL", "http://localhost:8080"),
 		ServiceToken:       getenv("SERVICE_TOKEN", "dev-token"),
 		RegistryCacheTTL:   durationEnv("REGISTRY_CACHE_TTL", 2*time.Minute),
-		LedgerURL:          getenv("LEDGER_URL", "http://localhost:9090"),
+		LedgerURL:          getenv("LEDGER_URL", "http://localhost:8080"),
 		WorkerBatchSize:    intEnv("WORKER_BATCH_SIZE", 50),
 		WorkerPollInterval: durationEnv("WORKER_POLL_INTERVAL", 500*time.Millisecond),
 		DispatcherEvery:    durationEnv("DISPATCHER_EVERY", 2*time.Second),
@@ -238,7 +238,7 @@ func (rc *registryClient) GetConfig(ctx context.Context, deviceID string) (Devic
 			return c.cfg, nil
 		}
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", rc.baseURL+"/devices/config-internal?deviceId="+deviceID, nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", rc.baseURL+"/internal/devices/config?deviceId="+deviceID, nil)
 	req.Header.Set("X-Service-Token", rc.token)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -564,8 +564,18 @@ func (s *Service) enqueueOutbox(ctx context.Context, kind, refID string, payload
 	return err
 }
 
-func nullInt(v int64) any { if v == 0 { return nil }; return v }
-func truncate(s string, n int) string { if len(s) <= n { return s }; return s[:n] }
+func nullInt(v int64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
 
 /*** Worker loop ***/
 func (s *Service) workerLoop(ctx context.Context) {
@@ -787,17 +797,21 @@ func (s *Service) dispatchOnce(ctx context.Context, limit int) {
 
 func (s *Service) sendToLedger(ctx context.Context, kind, refID, payload string) error {
 	if kind != "BatchReady" {
+		log.Printf("[sendToLedger] unknown kind: %s, refID: %s, payload: %s", kind, refID, payload)
 		return fmt.Errorf("unknown kind: %s", kind)
 	}
 	req, _ := http.NewRequestWithContext(ctx, "POST", s.cfg.LedgerURL+"/debit", bytes.NewBufferString(payload))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", refID)
 
+	log.Printf("[sendToLedger] POST %s/debit kind=%s refID=%s payload=%s", s.cfg.LedgerURL, kind, refID, payload)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		log.Printf("[sendToLedger] error: %v", err)
 		return err
 	}
 	defer resp.Body.Close()
+	log.Printf("[sendToLedger] response status: %s", resp.Status)
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("ledger status: %s", resp.Status)
 	}
@@ -888,6 +902,165 @@ func (s *Service) health(c *gin.Context) {
 	c.JSON(200, gin.H{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)})
 }
 
+func nullInt64ToNative(v sql.NullInt64) any {
+	if v.Valid {
+		return v.Int64
+	}
+	return nil
+}
+
+func nullFloat64ToNative(v sql.NullFloat64) any {
+	if v.Valid {
+		return v.Float64
+	}
+	return nil
+}
+
+func nullStringToNative(v sql.NullString) any {
+	if v.Valid {
+		return v.String
+	}
+	return nil
+}
+
+// Internal support endpoints
+func (s *Service) getDeviceState(c *gin.Context) {
+	deviceID := c.Query("device_id")
+	if deviceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing device_id"})
+		return
+	}
+	var st deviceState
+	row := s.db.QueryRow(`SELECT partial_remainder, current_bucket, sum_in_bucket, sum_for_threshold, last_counter, last_ts, updated_at FROM device_state WHERE device_id=?`, deviceID)
+	err := row.Scan(&st.PartialRemainder, &st.CurrentBucket, &st.SumInBucket, &st.SumForThreshold, &st.LastCounter, &st.LastTS, &st.UpdatedAt)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"partial_remainder": st.PartialRemainder,
+		"current_bucket":    st.CurrentBucket,
+		"sum_in_bucket":     st.SumInBucket,
+		"sum_for_threshold": st.SumForThreshold,
+		"last_counter":      nullFloat64ToNative(st.LastCounter),
+		"last_ts":           nullInt64ToNative(st.LastTS),
+		"updated_at":        st.UpdatedAt,
+	})
+}
+
+func (s *Service) getQueue(c *gin.Context) {
+	deviceID := c.Query("device_id")
+	rows, err := s.db.Query(`SELECT q.id, q.status, q.attempts, q.worker_id, q.claimed_at, q.last_error, q.created_at, re.seq, re.ts, re.quantity, re.counter FROM queue_events q JOIN raw_events re ON re.id = q.raw_event_id WHERE re.device_id=? ORDER BY q.id DESC LIMIT 100`, deviceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, attempts, claimedAt, createdAt, seq, ts int64
+		var status string
+		var workerID, lastError sql.NullString
+		var quantity, counter sql.NullFloat64
+		err := rows.Scan(&id, &status, &attempts, &workerID, &claimedAt, &lastError, &createdAt, &seq, &ts, &quantity, &counter)
+		if err != nil {
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":         id,
+			"status":     status,
+			"attempts":   attempts,
+			"worker_id":  nullStringToNative(workerID),
+			"claimed_at": claimedAt,
+			"last_error": nullStringToNative(lastError),
+			"created_at": createdAt,
+			"seq":        seq,
+			"ts":         ts,
+			"quantity":   nullFloat64ToNative(quantity),
+			"counter":    nullFloat64ToNative(counter),
+		})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (s *Service) getBatches(c *gin.Context) {
+	deviceID := c.Query("device_id")
+	rows, err := s.db.Query(`SELECT id, device_id, window_start, window_end, units, unit, unit_price_sats, total_sats, status, created_at FROM consumption_batches WHERE device_id=? ORDER BY created_at DESC LIMIT 100`, deviceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	out := make([]map[string]any, 0)
+	for rows.Next() {
+		var id, deviceID string
+		var windowStart, windowEnd sql.NullInt64
+		var createdAt int64
+		var units, unitPrice, totalSats float64
+		var unit, status string
+		err := rows.Scan(&id, &deviceID, &windowStart, &windowEnd, &units, &unit, &unitPrice, &totalSats, &status, &createdAt)
+		if err != nil {
+			log.Printf("[getBatches] scan error: %v", err)
+			continue
+		}
+		out = append(out, map[string]any{
+			"id":              id,
+			"device_id":       deviceID,
+			"window_start":    nullInt64ToNative(windowStart),
+			"window_end":      nullInt64ToNative(windowEnd),
+			"units":           units,
+			"unit":            unit,
+			"unit_price_sats": unitPrice,
+			"total_sats":      totalSats,
+			"status":          status,
+			"created_at":      createdAt,
+		})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// Debug: dump all queue_events for all devices
+func (s *Service) getQueueAll(c *gin.Context) {
+	rows, err := s.db.Query(`SELECT q.id, q.status, q.attempts, q.worker_id, q.claimed_at, q.last_error, q.created_at, re.device_id, re.seq, re.ts, re.quantity, re.counter FROM queue_events q JOIN raw_events re ON re.id = q.raw_event_id ORDER BY q.id DESC LIMIT 200`)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var id, attempts, claimedAt, createdAt, seq, ts int64
+		var status, deviceID string
+		var workerID, lastError sql.NullString
+		var quantity, counter sql.NullFloat64
+		err := rows.Scan(&id, &status, &attempts, &workerID, &claimedAt, &lastError, &createdAt, &deviceID, &seq, &ts, &quantity, &counter)
+		if err != nil {
+			log.Printf("[getQueueAll] scan error: %v", err)
+			continue
+		}
+		log.Printf("[getQueueAll] row: id=%d status=%s attempts=%d worker_id=%s claimed_at=%d last_error=%s created_at=%d device_id=%s seq=%d ts=%d quantity=%v counter=%v",
+			id, status, attempts, workerID.String, claimedAt, lastError.String, createdAt, deviceID, seq, ts, quantity, counter)
+		out = append(out, map[string]any{
+			"id":         id,
+			"status":     status,
+			"attempts":   attempts,
+			"worker_id":  nullStringToNative(workerID),
+			"claimed_at": claimedAt,
+			"last_error": nullStringToNative(lastError),
+			"created_at": createdAt,
+			"device_id":  deviceID,
+			"seq":        seq,
+			"ts":         ts,
+			"quantity":   nullFloat64ToNative(quantity),
+			"counter":    nullFloat64ToNative(counter),
+		})
+	}
+	c.JSON(http.StatusOK, out)
+}
+
 /*
    ===========================
    Signature Verification
@@ -935,6 +1108,12 @@ func main() {
 	r := gin.Default()
 	r.POST("/consumptions", svc.postConsumptions)
 	r.GET("/health", svc.health)
+
+	// Internal support endpoints
+	r.GET("/internal/device-state", svc.getDeviceState)
+	r.GET("/internal/queue", svc.getQueue)
+	r.GET("/internal/batches", svc.getBatches)
+	r.GET("/internal/queue-all", svc.getQueueAll)
 
 	log.Printf("Consumption Service on :8080 (DB=%s)", cfg.DBPath)
 	if err := r.Run(":8080"); err != nil {

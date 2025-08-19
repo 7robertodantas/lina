@@ -20,7 +20,14 @@ services:
       - DB_PATH=consumption.db
       - REGISTRY_URL=http://registry:8080
       - SERVICE_TOKEN=dev-token
-      - LEDGER_URL=http://localhost:9090
+      - LEDGER_URL=http://ledger:8080
     depends_on:
       - registry
+    restart: unless-stopped
+  ledger:
+    build:
+      context: ./ledger
+    container_name: ledger
+    ports:
+      - "8082:8080"
     restart: unless-stopped

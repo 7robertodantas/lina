@@ -19,10 +19,10 @@ import (
 type Device struct {
 	ID              string  `json:"id"`
 	PublicKey       string  `json:"public_key"`
-	Unit            string  `json:"unit"`              // e.g., "sheet", "m3"
-	PricePerUnit    float64 `json:"price_per_unit"`    // cost in sats per unit
+	Unit            string  `json:"unit"`           // e.g., "sheet", "m3"
+	PricePerUnit    float64 `json:"price_per_unit"` // cost in sats per unit
 	SecretKey       string  `json:"secret_key"`
-	AggregationMode string  `json:"aggregation_mode"`  // e.g., "per-unit", "time-window", "value-threshold"
+	AggregationMode string  `json:"aggregation_mode"` // e.g., "per-unit", "time-window", "value-threshold"
 }
 
 // RegistryService manages the registered devices
@@ -132,6 +132,31 @@ func (s *RegistryService) GetDeviceConfig(c *gin.Context) {
 	})
 }
 
+// GetDeviceConfigInternal returns full device config for internal service calls
+func (s *RegistryService) GetDeviceConfigInternal(c *gin.Context) {
+	serviceToken := c.GetHeader("X-Service-Token")
+	if serviceToken != "dev-token" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid service token"})
+		return
+	}
+	deviceID := c.Query("deviceId")
+	if deviceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing deviceId"})
+		return
+	}
+	var d Device
+	query := `SELECT id, public_key, unit, price_per_unit, secret_key, aggregation_mode FROM devices WHERE id = ? LIMIT 1`
+	err := s.db.QueryRow(query, deviceID).Scan(&d.ID, &d.PublicKey, &d.Unit, &d.PricePerUnit, &d.SecretKey, &d.AggregationMode)
+	if err == sql.ErrNoRows {
+		c.JSON(http.StatusNotFound, gin.H{"error": "device not found"})
+		return
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	c.JSON(http.StatusOK, d)
+}
+
 // generateHMAC returns the HMAC-SHA256 of the message using the secret
 func generateHMAC(message, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
@@ -145,6 +170,8 @@ func main() {
 	r := gin.Default()
 	r.POST("/devices", service.RegisterDevice)
 	r.GET("/devices/config", service.GetDeviceConfig)
+
+	r.GET("/internal/devices/config", service.GetDeviceConfigInternal)
 
 	fmt.Println("Registry Service running at http://localhost:8080")
 	r.Run(":8080")
