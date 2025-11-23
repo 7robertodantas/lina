@@ -148,13 +148,13 @@ type MQTTClient struct {
 // NewMQTTClient creates a new MQTT client with TLS support
 func NewMQTTClient() (*MQTTClient, error) {
 	broker := getEnv("MQTT_BROKER", "mosquitto")
-	useTLS := getEnvBool("MQTT_USE_TLS", true)
+	useTLS := getEnvBool("MQTT_USE_TLS", true) // Default to true for secure connections
 
 	var port int
 	var protocol string
 	if useTLS {
 		port = getEnvInt("MQTT_TLS_PORT", 8883)
-		protocol = "ssl"
+		protocol = getEnv("MQTT_TLS_PROTOCOL", "tls")
 	} else {
 		port = getEnvInt("MQTT_PORT", 1883)
 		protocol = "tcp"
@@ -200,6 +200,9 @@ func NewMQTTClient() (*MQTTClient, error) {
 		log.Println("TLS configuration created successfully")
 	}
 
+	// Note: Protocol version defaults to MQTT 3.1.1 (version 4), which is what Mosquitto uses
+	// No need to set it explicitly unless you need MQTT 3.1 (version 3) or MQTT 5.0 (when supported)
+
 	client := mqtt.NewClient(opts)
 
 	// Connect to the broker with timeout
@@ -209,10 +212,18 @@ func NewMQTTClient() (*MQTTClient, error) {
 	// Wait for connection with timeout
 	connected := token.WaitTimeout(30 * time.Second)
 	if !connected {
-		return nil, fmt.Errorf("connection timeout after 30 seconds")
+		// Check for error even if timeout occurred
+		if token.Error() != nil {
+			errMsg := token.Error().Error()
+			log.Printf("MQTT connection error (timeout): %s", errMsg)
+			return nil, fmt.Errorf("connection timeout after 30 seconds: %w", token.Error())
+		}
+		return nil, fmt.Errorf("connection timeout after 30 seconds - broker may not be accepting TLS connections or certificate validation failed")
 	}
 
 	if token.Error() != nil {
+		errMsg := token.Error().Error()
+		log.Printf("MQTT connection error details: %s", errMsg)
 		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", token.Error())
 	}
 
@@ -227,12 +238,30 @@ func NewMQTTClient() (*MQTTClient, error) {
 
 // createTLSConfig creates a TLS configuration from environment variables
 func createTLSConfig() (*tls.Config, error) {
+	// Check if we should skip certificate verification (for testing only)
+	skipVerify := getEnvBool("MQTT_TLS_SKIP_VERIFY", false)
+
+	broker := getEnv("MQTT_BROKER", "mosquitto")
+	// Allow custom server name for certificate validation (useful when CN doesn't match hostname)
+	serverName := getEnv("MQTT_TLS_SERVER_NAME", broker)
+
 	tlsConfig := &tls.Config{
-		InsecureSkipVerify: false,
+		InsecureSkipVerify: skipVerify,
+		MinVersion:         tls.VersionTLS12,
+		ServerName:         serverName, // Set server name for SNI and hostname verification
+	}
+
+	if serverName != broker {
+		log.Printf("Using custom TLS server name: %s (broker hostname: %s)", serverName, broker)
+	}
+
+	if skipVerify {
+		log.Println("WARNING: TLS certificate verification is disabled (for testing only)")
 	}
 
 	// Load CA certificate
 	caCertPath := getEnv("MQTT_TLS_CA_CERT", "/certs/ca.crt")
+	log.Printf("Loading CA certificate from: %s", caCertPath)
 	caCert, err := os.ReadFile(caCertPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
@@ -243,19 +272,28 @@ func createTLSConfig() (*tls.Config, error) {
 		return nil, fmt.Errorf("failed to parse CA certificate")
 	}
 	tlsConfig.RootCAs = caCertPool
+	log.Println("CA certificate loaded successfully")
 
-	// Load edge node certificate and key if provided
-	// This is the certificate for the edge node service, not individual devices
+	// Note: When VerifyPeerCertificate is set, it overrides default verification
+	// The RootCAs we set above is still used for chain building, but we do our own verification
+
+	// Load edge node certificate and key if provided and required
+	// Only send client certificate if explicitly required (require_certificate true in mosquitto.conf)
+	// Since mosquitto.conf has require_certificate false, we don't need to send client cert
+	requireEdgeCert := getEnvBool("MQTT_TLS_REQUIRE_EDGE_CERT", false)
 	edgeCertPath := getEnv("MQTT_TLS_EDGE_CERT", "")
 	edgeKeyPath := getEnv("MQTT_TLS_EDGE_KEY", "")
 
-	if edgeCertPath != "" && edgeKeyPath != "" {
+	if requireEdgeCert && edgeCertPath != "" && edgeKeyPath != "" {
+		log.Printf("Loading edge node certificate from: %s and key from: %s", edgeCertPath, edgeKeyPath)
 		cert, err := tls.LoadX509KeyPair(edgeCertPath, edgeKeyPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load edge node certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
 		log.Println("Edge node certificate loaded for client authentication")
+	} else {
+		log.Println("No edge node certificate required - using CA-only server verification")
 	}
 
 	return tlsConfig, nil

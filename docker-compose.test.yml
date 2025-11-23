@@ -37,7 +37,10 @@ services:
       - MQTT_PORT=${MQTT_PORT:-1883}
       - MQTT_TLS_PORT=${MQTT_TLS_PORT:-8883}
       - MQTT_USE_TLS=${MQTT_USE_TLS:-true}
+      - MQTT_TLS_SKIP_VERIFY=${MQTT_TLS_SKIP_VERIFY:-false}
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
       - MQTT_TLS_CA_CERT=${MQTT_TLS_CA_CERT:-/certs/ca.crt}
+      - MQTT_TLS_REQUIRE_EDGE_CERT=${MQTT_TLS_REQUIRE_EDGE_CERT:-false}
       - MQTT_TLS_EDGE_CERT=${MQTT_TLS_EDGE_CERT:-/certs/edge.crt}
       - MQTT_TLS_EDGE_KEY=${MQTT_TLS_EDGE_KEY:-/certs/edge.key}
       - MQTT_CLIENT_ID=${MQTT_CLIENT_ID:-device-service}

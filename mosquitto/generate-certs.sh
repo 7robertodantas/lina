@@ -45,44 +45,109 @@ generate_ca() {
     echo -e "${GREEN}✓${NC} CA certificate generated"
 }
 
-# Function to generate server certificate
+# Function to generate server certificate with SANs
 generate_server() {
     if check_cert "$CERT_DIR/server.crt"; then
         return 0
     fi
     
-    echo "Generating server certificate..."
+    echo "Generating server certificate with Subject Alternative Names (SANs)..."
+    
+    # Create OpenSSL config file for server certificate with SANs
+    SERVER_CONF="$CERT_DIR/server.conf"
+    cat > "$SERVER_CONF" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = mosquitto
+O = LNPay
+C = US
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = mosquitto
+DNS.2 = localhost
+DNS.3 = *.mosquitto
+IP.1 = 127.0.0.1
+IP.2 = ::1
+EOF
+    
     openssl genrsa -out "$CERT_DIR/server.key" 2048
     openssl req -new -key "$CERT_DIR/server.key" \
         -out "$CERT_DIR/server.csr" \
-        -subj "/CN=mosquitto/O=LNPay/C=US"
+        -config "$SERVER_CONF"
     openssl x509 -req -in "$CERT_DIR/server.csr" \
         -CA "$CERT_DIR/ca.crt" \
         -CAkey "$CERT_DIR/ca.key" \
         -CAcreateserial \
         -out "$CERT_DIR/server.crt" \
-        -days 365
-    echo -e "${GREEN}✓${NC} Server certificate generated"
+        -days 365 \
+        -extensions v3_req \
+        -extfile "$SERVER_CONF"
+    
+    # Clean up config file
+    rm -f "$SERVER_CONF"
+    
+    echo -e "${GREEN}✓${NC} Server certificate generated with SANs (mosquitto, localhost)"
 }
 
-# Function to generate edge node certificate
+# Function to generate edge node certificate with SANs
 generate_edge() {
     if check_cert "$CERT_DIR/edge.crt"; then
         return 0
     fi
     
-    echo "Generating edge node certificate..."
+    echo "Generating edge node certificate with Subject Alternative Names (SANs)..."
+    
+    # Create OpenSSL config file for edge certificate with SANs
+    EDGE_CONF="$CERT_DIR/edge.conf"
+    cat > "$EDGE_CONF" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = edge-node
+O = LNPay
+C = US
+
+[v3_req]
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = clientAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = edge-node
+DNS.2 = localhost
+IP.1 = 127.0.0.1
+IP.2 = ::1
+EOF
+    
     openssl genrsa -out "$CERT_DIR/edge.key" 2048
     openssl req -new -key "$CERT_DIR/edge.key" \
         -out "$CERT_DIR/edge.csr" \
-        -subj "/CN=edge-node/O=LNPay/C=US"
+        -config "$EDGE_CONF"
     openssl x509 -req -in "$CERT_DIR/edge.csr" \
         -CA "$CERT_DIR/ca.crt" \
         -CAkey "$CERT_DIR/ca.key" \
         -CAcreateserial \
         -out "$CERT_DIR/edge.crt" \
-        -days 365
-    echo -e "${GREEN}✓${NC} Edge node certificate generated"
+        -days 365 \
+        -extensions v3_req \
+        -extfile "$EDGE_CONF"
+    
+    # Clean up config file
+    rm -f "$EDGE_CONF"
+    
+    echo -e "${GREEN}✓${NC} Edge node certificate generated with SANs"
 }
 
 # Check if OpenSSL is available
@@ -99,10 +164,10 @@ generate_ca
 generate_server
 generate_edge
 
-# Clean up CSR and serial files
+# Clean up CSR, serial, and config files
 echo ""
 echo "Cleaning up temporary files..."
-rm -f "$CERT_DIR"/*.csr "$CERT_DIR"/*.srl 2>/dev/null || true
+rm -f "$CERT_DIR"/*.csr "$CERT_DIR"/*.srl "$CERT_DIR"/*.conf 2>/dev/null || true
 
 echo ""
 echo "======================================================"
