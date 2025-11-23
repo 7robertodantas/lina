@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package iot.payperuse.edge.model.mqtt;
+
+option go_package = "gen/iot/payperuse/edge/model/mqtt";
+
+// ============================================================================
+// Heartbeat Channel (Device → Server)
+// Topic: devices/{id}/heartbeat
+// ============================================================================
+
+enum DeviceStatus {
+  DEVICE_STATUS_UNSPECIFIED = 0;
+  DEVICE_STATUS_ONLINE      = 1;
+  DEVICE_STATUS_OFFLINE     = 2;
+}
+
+message HeartbeatPayload {
+  string device_id = 1;
+  DeviceStatus status = 2;
+  string timestamp = 3;  // ISO-8601 timestamp
+}
+
+// ============================================================================
+// Configuration Channel (Server → Device)
+// Topic: devices/{id}/config (retained)
+// ============================================================================
+
+enum ReportingStrategy {
+  REPORTING_STRATEGY_UNSPECIFIED = 0;
+  REPORTING_STRATEGY_INTERVAL     = 1;  // "interval"
+  REPORTING_STRATEGY_DELTA        = 2;  // "delta"
+  REPORTING_STRATEGY_TOTAL        = 3;  // "total"
+}
+
+message ConfigPayload {
+  string device_id = 1;
+  string unit = 2;                    // e.g., "kWh", "L", "pages"
+  string unit_price = 3;              // price per unit as string
+  string pricing_unit = 4;           // "msat"
+  ReportingStrategy reporting_strategy = 5;
+  int32 reporting_interval = 6;       // seconds between reports
+  int32 heartbeat_interval = 7;      // expected heartbeat frequency (seconds)
+  int64 authorize_request_msat = 8;   // expected amount in each authorization request
+  string timestamp = 9;               // ISO-8601 timestamp
+}
+
+// ============================================================================
+// Command Channel (Server → Device)
+// Topic: devices/{id}/control
+// ============================================================================
+
+enum ControlCommand {
+  CONTROL_COMMAND_UNSPECIFIED = 0;
+  CONTROL_COMMAND_STOP         = 1;
+  CONTROL_COMMAND_PAUSE        = 2;
+  CONTROL_COMMAND_RESUME       = 3;
+  CONTROL_COMMAND_REBOOT       = 4;
+  CONTROL_COMMAND_PING         = 5;
+  CONTROL_COMMAND_UPDATE_CONFIG = 6;
+  CONTROL_COMMAND_AUTHORIZATION = 7;
+}
+
+message ControlPayload {
+  ControlCommand command = 1;
+  string reason = 2;                  // optional: context hint
+  string id = 3;                      // optional: for PING command
+  string authorization_id = 4;        // optional: for AUTHORIZATION command
+}
+
+// ============================================================================
+// Balance Channel (Server → Device)
+// Topic: devices/{id}/balance (retained)
+// ============================================================================
+
+message BalancePayload {
+  string device_id = 1;
+  int64 available_msat = 2;          // available balance excluding reserved
+  int64 reserved_msat = 3;            // amount reserved in active authorizations
+  int64 total_msat = 4;               // total credited amount
+  string timestamp = 5;               // ISO-8601 timestamp
+}
+
+// ============================================================================
+// Usage Channel (Device → Server)
+// Topic: devices/{id}/usage
+// ============================================================================
+
+message UsagePayload {
+  string device_id = 1;
+  string report_id = 2;               // unique identifier for idempotency
+  ReportingStrategy strategy = 3;     // "interval" | "delta" | "total"
+  double measure = 4;                  // amount consumed in this window
+  string unit = 5;                     // e.g., "kWh"
+  string timestamp = 6;                // ISO-8601 timestamp
+}
+
+// ============================================================================
+// Authorization Channel
+// ============================================================================
+
+// Request: devices/{id}/request/authorize (Device → Server)
+message AuthorizationRequestPayload {
+  string device_id = 1;
+  string request_id = 2;              // unique request identifier for idempotency
+  int64 request_msat = 3;             // desired prepaid allowance
+  string reason = 4;                  // optional: context hint (e.g., "STARTUP")
+  string timestamp = 5;               // ISO-8601 timestamp
+}
+
+// Response: devices/{id}/response/authorize (Server → Device)
+enum AuthorizationStatus {
+  AUTHORIZATION_STATUS_UNSPECIFIED = 0;
+  AUTHORIZATION_STATUS_GRANTED    = 1;
+  AUTHORIZATION_STATUS_ACTIVE     = 2;
+  AUTHORIZATION_STATUS_REJECTED   = 3;
+}
+
+message AuthorizationResponsePayload {
+  string device_id = 1;
+  string request_id = 2;              // matches request identifier
+  AuthorizationStatus status = 3;
+  
+  // Present when status is GRANTED or ACTIVE
+  string authorization_id = 4;
+  int64 granted_msat = 5;
+  int64 remaining_msat = 6;
+  string issued_at = 7;               // ISO-8601 timestamp
+  string expires_at = 8;               // ISO-8601 timestamp
+  
+  // Present when status is ACTIVE or REJECTED
+  string reason = 9;                  // e.g., "ALREADY_ACTIVE" or "INSUFFICIENT_FUNDS"
+  
+  // Present when status is REJECTED
+  int64 available_msat = 10;          // current available balance
+}
+
+// ============================================================================
+// Funding Channel
+// ============================================================================
+
+// Request: devices/{id}/request/invoice (Device → Server)
+message InvoiceRequestPayload {
+  string device_id = 1;
+  string request_id = 2;              // unique request identifier
+  int64 amount_msat = 3;             // requested amount in millisatoshis
+  string reason = 4;                  // e.g., "USER_TOPUP"
+  string timestamp = 5;                // ISO-8601 timestamp
+}
+
+// Response: devices/{id}/response/invoice (Server → Device)
+enum InvoiceStatus {
+  INVOICE_STATUS_UNSPECIFIED = 0;
+  INVOICE_STATUS_CREATED     = 1;
+  INVOICE_STATUS_SETTLED     = 2;
+  INVOICE_STATUS_EXPIRED     = 3;
+}
+
+message InvoiceResponsePayload {
+  string device_id = 1;
+  string request_id = 2;              // matches request identifier
+  InvoiceStatus status = 3;           // CREATED
+  string invoice_id = 4;
+  string bolt11 = 5;                   // BOLT11 payment request string
+  int64 amount_msat = 6;
+  string expires_at = 7;               // ISO-8601 timestamp
+}
+
+// Events: devices/{id}/events/invoice (Server → Device)
+message InvoiceEventPayload {
+  string device_id = 1;
+  string invoice_id = 2;
+  InvoiceStatus status = 3;           // CREATED | SETTLED | EXPIRED
+  int64 amount_received_msat = 4;     // present when SETTLED
+  int64 balance_msat = 5;             // present when SETTLED
+  string timestamp = 6;                // ISO-8601 timestamp
+}
