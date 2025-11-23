@@ -1,58 +1,60 @@
-version: '3.8'
+version: '3.9'
 services:
-  registry:
+  mosquitto:
     build:
-      context: .
+      context: ./mosquitto
       dockerfile: Dockerfile
-      args:
-        SERVICE: registry
-    container_name: registry
+    container_name: mosquitto
     ports:
-      - "9080:8080"
+      - "${MQTT_PORT:-1883}:1883"   # Non-TLS port
+      - "${MQTT_TLS_PORT:-8883}:8883" # TLS port
+    volumes:
+      # Only persist data directory (dynamic-security.json and mosquitto.db)
+      - ./mosquitto/data:/mosquitto/data
     environment:
-      - DB_PATH=devices.db
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - MQTT_DYNSEC_ADMIN_USER=${MQTT_DYNSEC_ADMIN_USER:-}
+      - MQTT_DYNSEC_ADMIN_PASSWORD=${MQTT_DYNSEC_ADMIN_PASSWORD:-}
+    healthcheck:
+      # Test MQTT broker by attempting a TLS connection on port 8883 with credentials
+      # If connection is refused, broker is not ready (exit 1)
+      # If connection succeeds or auth error occurs, broker is ready (exit 0)
+      # Uses credentials from environment variables if allow_anonymous is false
+      test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
-  consumption:
+  device:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        SERVICE: consumption
-    container_name: consumption
+        SERVICE: device
+    container_name: device
     ports:
-      - "9081:8080"
+      - "9084:8080"
     environment:
-      - DB_PATH=consumption.db
-      - REGISTRY_URL=http://registry:8080
-      - SERVICE_TOKEN=dev-token
-      - LEDGER_URL=http://ledger:8080
+      - MQTT_BROKER=${MQTT_BROKER:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_TLS_PORT=${MQTT_TLS_PORT:-8883}
+      - MQTT_USE_TLS=${MQTT_USE_TLS:-true}
+      - MQTT_TLS_SKIP_VERIFY=${MQTT_TLS_SKIP_VERIFY:-false}
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      - MQTT_TLS_CA_CERT=${MQTT_TLS_CA_CERT:-/certs/ca.crt}
+      - MQTT_TLS_REQUIRE_EDGE_CERT=${MQTT_TLS_REQUIRE_EDGE_CERT:-false}
+      - MQTT_TLS_EDGE_CERT=${MQTT_TLS_EDGE_CERT:-/certs/edge.crt}
+      - MQTT_TLS_EDGE_KEY=${MQTT_TLS_EDGE_KEY:-/certs/edge.key}
+      - MQTT_CLIENT_ID=${MQTT_CLIENT_ID:-device-service}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - MQTT_DYNSEC_ADMIN_USER=${MQTT_DYNSEC_ADMIN_USER:-}
+      - MQTT_DYNSEC_ADMIN_PASSWORD=${MQTT_DYNSEC_ADMIN_PASSWORD:-}
+    volumes:
+      - ./mosquitto/certs:/certs:ro
     depends_on:
-      - registry
-    restart: unless-stopped
-
-  ledger:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        SERVICE: ledger
-    container_name: ledger
-    ports:
-      - "9082:8080"
-    restart: unless-stopped
-
-  lightning:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        SERVICE: lightning
-    container_name: lightning
-    ports:
-      - "9083:8080"
-    environment:
-      LND_HOST: host.docker.internal:10001
-      LND_MACAROON_HEX: "${LND_MACAROON_HEX?Error: LND_MACAROON_HEX not set}"
-      LND_TLS_CERT_HEX: "${LND_TLS_CERT_HEX?Error: LND_TLS_CERT_HEX not set}"
-    restart: unless-stopped
+      mosquitto:
+        condition: service_healthy

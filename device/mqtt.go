@@ -269,4 +269,3 @@ func (m *MQTTClient) Disconnect() {
 func (m *MQTTClient) GetClient() mqtt.Client {
 	return m.client
 }
-
