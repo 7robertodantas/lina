@@ -12,11 +12,15 @@ services:
       - ./mosquitto/log:/mosquitto/log
       - ./mosquitto/certs:/mosquitto/certs:ro
     command: mosquitto -c /mosquitto/config/mosquitto.conf
+    environment:
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
     healthcheck:
-      # Test MQTT broker by attempting a connection
+      # Test MQTT broker by attempting a TLS connection on port 8883 with credentials
       # If connection is refused, broker is not ready (exit 1)
-      # If connection succeeds (even with timeout), broker is ready (exit 0)
-      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t 'test/health' -W 2 -C 1 -i healthcheck 2>&1 | grep -q 'Connection refused' && exit 1 || exit 0"]
+      # If connection succeeds or auth error occurs, broker is ready (exit 0)
+      # Uses credentials from environment variables if allow_anonymous is false
+      test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
       interval: 10s
       timeout: 5s
       retries: 5
