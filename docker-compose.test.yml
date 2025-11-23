@@ -1,5 +1,28 @@
-version: '3.8'
+version: '3.9'
 services:
+  mosquitto:
+    image: eclipse-mosquitto:2-openssl
+    container_name: mosquitto
+    ports:
+      - "${MQTT_PORT:-1883}:1883"   # Non-TLS port
+      - "${MQTT_TLS_PORT:-8883}:8883" # TLS port
+    volumes:
+      - ./mosquitto/config:/mosquitto/config:ro
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+      - ./mosquitto/certs:/mosquitto/certs:ro
+    command: mosquitto -c /mosquitto/config/mosquitto.conf
+    healthcheck:
+      # Test MQTT broker by attempting a connection
+      # If connection is refused, broker is not ready (exit 1)
+      # If connection succeeds (even with timeout), broker is ready (exit 0)
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -p 1883 -t 'test/health' -W 2 -C 1 -i healthcheck 2>&1 | grep -q 'Connection refused' && exit 1 || exit 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
   device:
     build:
       context: .
@@ -9,3 +32,19 @@ services:
     container_name: device
     ports:
       - "9084:8080"
+    environment:
+      - MQTT_BROKER=${MQTT_BROKER:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_TLS_PORT=${MQTT_TLS_PORT:-8883}
+      - MQTT_USE_TLS=${MQTT_USE_TLS:-true}
+      - MQTT_TLS_CA_CERT=${MQTT_TLS_CA_CERT:-/certs/ca.crt}
+      - MQTT_TLS_EDGE_CERT=${MQTT_TLS_EDGE_CERT:-/certs/edge.crt}
+      - MQTT_TLS_EDGE_KEY=${MQTT_TLS_EDGE_KEY:-/certs/edge.key}
+      - MQTT_CLIENT_ID=${MQTT_CLIENT_ID:-device-service}
+      - MQTT_USERNAME=${MQTT_USERNAME:-}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+    volumes:
+      - ./mosquitto/certs:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy

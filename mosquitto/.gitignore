@@ -1,0 +1,7 @@
+data/
+log/
+certs/*.crt
+certs/*.key
+certs/*.pem
+!certs/.gitkeep
+
