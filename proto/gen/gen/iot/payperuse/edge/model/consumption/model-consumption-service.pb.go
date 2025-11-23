@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v5.29.4
-// source: messages/model-consumption-service.proto
+// source: model/model-consumption-service.proto
 
 package consumption
 
@@ -52,11 +52,11 @@ func (x ConsumptionEventType) String() string {
 }
 
 func (ConsumptionEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_consumption_service_proto_enumTypes[0].Descriptor()
+	return file_model_model_consumption_service_proto_enumTypes[0].Descriptor()
 }
 
 func (ConsumptionEventType) Type() protoreflect.EnumType {
-	return &file_messages_model_consumption_service_proto_enumTypes[0]
+	return &file_model_model_consumption_service_proto_enumTypes[0]
 }
 
 func (x ConsumptionEventType) Number() protoreflect.EnumNumber {
@@ -65,7 +65,7 @@ func (x ConsumptionEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ConsumptionEventType.Descriptor instead.
 func (ConsumptionEventType) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_consumption_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_consumption_service_proto_rawDescGZIP(), []int{0}
 }
 
 // event.consumption: emitted after pricing a usage record.
@@ -81,7 +81,7 @@ type DeviceConsumptionRecordedEvent struct {
 
 func (x *DeviceConsumptionRecordedEvent) Reset() {
 	*x = DeviceConsumptionRecordedEvent{}
-	mi := &file_messages_model_consumption_service_proto_msgTypes[0]
+	mi := &file_model_model_consumption_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -93,7 +93,7 @@ func (x *DeviceConsumptionRecordedEvent) String() string {
 func (*DeviceConsumptionRecordedEvent) ProtoMessage() {}
 
 func (x *DeviceConsumptionRecordedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_consumption_service_proto_msgTypes[0]
+	mi := &file_model_model_consumption_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -106,7 +106,7 @@ func (x *DeviceConsumptionRecordedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceConsumptionRecordedEvent.ProtoReflect.Descriptor instead.
 func (*DeviceConsumptionRecordedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_consumption_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_consumption_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *DeviceConsumptionRecordedEvent) GetDeviceId() string {
@@ -150,7 +150,7 @@ type ConsumptionEvent struct {
 
 func (x *ConsumptionEvent) Reset() {
 	*x = ConsumptionEvent{}
-	mi := &file_messages_model_consumption_service_proto_msgTypes[1]
+	mi := &file_model_model_consumption_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -162,7 +162,7 @@ func (x *ConsumptionEvent) String() string {
 func (*ConsumptionEvent) ProtoMessage() {}
 
 func (x *ConsumptionEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_consumption_service_proto_msgTypes[1]
+	mi := &file_model_model_consumption_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -175,7 +175,7 @@ func (x *ConsumptionEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConsumptionEvent.ProtoReflect.Descriptor instead.
 func (*ConsumptionEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_consumption_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_consumption_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ConsumptionEvent) GetType() ConsumptionEventType {
@@ -211,11 +211,11 @@ type ConsumptionEvent_DeviceConsumptionRecorded struct {
 
 func (*ConsumptionEvent_DeviceConsumptionRecorded) isConsumptionEvent_Payload() {}
 
-var File_messages_model_consumption_service_proto protoreflect.FileDescriptor
+var File_model_model_consumption_service_proto protoreflect.FileDescriptor
 
-const file_messages_model_consumption_service_proto_rawDesc = "" +
+const file_model_model_consumption_service_proto_rawDesc = "" +
 	"\n" +
-	"(messages/model-consumption-service.proto\x12$iot.payperuse.edge.model.consumption\"\xa5\x01\n" +
+	"%model/model-consumption-service.proto\x12$iot.payperuse.edge.model.consumption\"\xa5\x01\n" +
 	"\x1eDeviceConsumptionRecordedEvent\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12\x1d\n" +
@@ -231,25 +231,25 @@ const file_messages_model_consumption_service_proto_rawDesc = "" +
 	"2CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED\x10\x01B*Z(gen/iot/payperuse/edge/model/consumptionb\x06proto3"
 
 var (
-	file_messages_model_consumption_service_proto_rawDescOnce sync.Once
-	file_messages_model_consumption_service_proto_rawDescData []byte
+	file_model_model_consumption_service_proto_rawDescOnce sync.Once
+	file_model_model_consumption_service_proto_rawDescData []byte
 )
 
-func file_messages_model_consumption_service_proto_rawDescGZIP() []byte {
-	file_messages_model_consumption_service_proto_rawDescOnce.Do(func() {
-		file_messages_model_consumption_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_messages_model_consumption_service_proto_rawDesc), len(file_messages_model_consumption_service_proto_rawDesc)))
+func file_model_model_consumption_service_proto_rawDescGZIP() []byte {
+	file_model_model_consumption_service_proto_rawDescOnce.Do(func() {
+		file_model_model_consumption_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_model_model_consumption_service_proto_rawDesc), len(file_model_model_consumption_service_proto_rawDesc)))
 	})
-	return file_messages_model_consumption_service_proto_rawDescData
+	return file_model_model_consumption_service_proto_rawDescData
 }
 
-var file_messages_model_consumption_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_messages_model_consumption_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_messages_model_consumption_service_proto_goTypes = []any{
+var file_model_model_consumption_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_model_model_consumption_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_model_model_consumption_service_proto_goTypes = []any{
 	(ConsumptionEventType)(0),              // 0: iot.payperuse.edge.model.consumption.ConsumptionEventType
 	(*DeviceConsumptionRecordedEvent)(nil), // 1: iot.payperuse.edge.model.consumption.DeviceConsumptionRecordedEvent
 	(*ConsumptionEvent)(nil),               // 2: iot.payperuse.edge.model.consumption.ConsumptionEvent
 }
-var file_messages_model_consumption_service_proto_depIdxs = []int32{
+var file_model_model_consumption_service_proto_depIdxs = []int32{
 	0, // 0: iot.payperuse.edge.model.consumption.ConsumptionEvent.type:type_name -> iot.payperuse.edge.model.consumption.ConsumptionEventType
 	1, // 1: iot.payperuse.edge.model.consumption.ConsumptionEvent.device_consumption_recorded:type_name -> iot.payperuse.edge.model.consumption.DeviceConsumptionRecordedEvent
 	2, // [2:2] is the sub-list for method output_type
@@ -259,30 +259,30 @@ var file_messages_model_consumption_service_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_messages_model_consumption_service_proto_init() }
-func file_messages_model_consumption_service_proto_init() {
-	if File_messages_model_consumption_service_proto != nil {
+func init() { file_model_model_consumption_service_proto_init() }
+func file_model_model_consumption_service_proto_init() {
+	if File_model_model_consumption_service_proto != nil {
 		return
 	}
-	file_messages_model_consumption_service_proto_msgTypes[1].OneofWrappers = []any{
+	file_model_model_consumption_service_proto_msgTypes[1].OneofWrappers = []any{
 		(*ConsumptionEvent_DeviceConsumptionRecorded)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_messages_model_consumption_service_proto_rawDesc), len(file_messages_model_consumption_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_model_model_consumption_service_proto_rawDesc), len(file_model_model_consumption_service_proto_rawDesc)),
 			NumEnums:      1,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_messages_model_consumption_service_proto_goTypes,
-		DependencyIndexes: file_messages_model_consumption_service_proto_depIdxs,
-		EnumInfos:         file_messages_model_consumption_service_proto_enumTypes,
-		MessageInfos:      file_messages_model_consumption_service_proto_msgTypes,
+		GoTypes:           file_model_model_consumption_service_proto_goTypes,
+		DependencyIndexes: file_model_model_consumption_service_proto_depIdxs,
+		EnumInfos:         file_model_model_consumption_service_proto_enumTypes,
+		MessageInfos:      file_model_model_consumption_service_proto_msgTypes,
 	}.Build()
-	File_messages_model_consumption_service_proto = out.File
-	file_messages_model_consumption_service_proto_goTypes = nil
-	file_messages_model_consumption_service_proto_depIdxs = nil
+	File_model_model_consumption_service_proto = out.File
+	file_model_model_consumption_service_proto_goTypes = nil
+	file_model_model_consumption_service_proto_depIdxs = nil
 }

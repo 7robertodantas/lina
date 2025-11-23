@@ -1,7 +1,7 @@
 # RPC Proto Definitions
 
 This directory contains Protocol Buffer definitions for the LNPay services, organized into:
-- **`messages/`** - Message definitions (enums, messages, events)
+- **`model/`** - Data model definitions (enums, messages, events, and other data structures)
 - **`interfaces/`** - Service definitions (gRPC services)
 
 ## Prerequisites
@@ -36,11 +36,11 @@ Just have Docker installed - no need to install protoc or plugins locally!
 
 **If you installed protoc locally:**
 ```bash
-# Generate all (messages + interfaces)
+# Generate all (models + interfaces)
 make generate
 
 # Or generate separately:
-make generate-messages   # Only message definitions
+make generate-models     # Only model definitions
 make generate-interfaces # Only service definitions (with gRPC)
 ```
 
@@ -51,20 +51,20 @@ make generate-docker
 
 ### Manual Generation
 
-**Messages (no gRPC):**
+**Models (no gRPC):**
 ```bash
-protoc --go_out=gen -I. -I=messages messages/*.proto
+protoc --go_out=gen -I. -I=model model/*.proto
 ```
 
 **Interfaces (with gRPC):**
 ```bash
-protoc --go_out=gen --go-grpc_out=gen -I. -I=interfaces -I=messages interfaces/*.proto
+protoc --go-grpc_out=gen -I. -I=interfaces -I=model interfaces/*.proto
 ```
 
 ## Generated Files
 
 The generation will create `*.pb.go` files in the `gen/` directory, organized by the proto package structure:
-- **Messages**: `gen/iot/payperuse/edge/model/*/` - Go structs for message definitions
+- **Models**: `gen/iot/payperuse/edge/model/*/` - Go structs for data model definitions
 - **Interfaces**: `gen/iot/payperuse/edge/interfaces/sync/*/` - Go structs and gRPC service code
 
 Files are generated based on the `go_package` option in each proto file, maintaining the package hierarchy.

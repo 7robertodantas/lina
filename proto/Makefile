@@ -8,32 +8,32 @@ GO_IMAGE := golang:$(GO_VERSION)-alpine
 PROTOC := $(if $(PROTOC_DOCKER),docker run --rm -v $(PWD):/workspace -w /workspace $(PROTOC_DOCKER),protoc)
 
 # Directories
-MESSAGES_DIR := messages
+MODEL_DIR := model
 INTERFACES_DIR := interfaces
 GEN_DIR := gen
 OUT_DIR := $(GEN_DIR)
 
-# Message proto files (only messages, no services)
-MESSAGE_PROTO_FILES := $(wildcard $(MESSAGES_DIR)/*.proto)
+# Model proto files (data models, enums, messages, events)
+MODEL_PROTO_FILES := $(wildcard $(MODEL_DIR)/*.proto)
 
 # Interface proto files (contain service definitions)
 INTERFACE_PROTO_FILES := $(wildcard $(INTERFACES_DIR)/*.proto)
 
-generate: generate-messages generate-interfaces
+generate: generate-models generate-interfaces
 	@echo "All generation complete!"
 
-generate-messages:
-	@echo "Generating Go code from message proto files..."
+generate-models:
+	@echo "Generating Go code from model proto files..."
 	@mkdir -p $(GEN_DIR)
-	@if [ -z "$(MESSAGE_PROTO_FILES)" ]; then \
-		echo "No message proto files found in $(MESSAGES_DIR)/"; \
+	@if [ -z "$(MODEL_PROTO_FILES)" ]; then \
+		echo "No model proto files found in $(MODEL_DIR)/"; \
 	else \
-		for proto in $(MESSAGE_PROTO_FILES); do \
+		for proto in $(MODEL_PROTO_FILES); do \
 			echo "Generating from $$proto..."; \
 			$(PROTOC) --go_out=$(OUT_DIR) \
-				-I. -I=$(MESSAGES_DIR) $$proto; \
+				-I. -I=$(MODEL_DIR) $$proto; \
 		done; \
-		echo "Message generation complete!"; \
+		echo "Model generation complete!"; \
 	fi
 
 generate-interfaces:
@@ -45,7 +45,7 @@ generate-interfaces:
 		for proto in $(INTERFACE_PROTO_FILES); do \
 			echo "Generating from $$proto..."; \
 			$(PROTOC) --go-grpc_out=$(OUT_DIR) \
-				-I. -I=$(INTERFACES_DIR) -I=$(MESSAGES_DIR) $$proto; \
+				-I. -I=$(INTERFACES_DIR) -I=$(MODEL_DIR) $$proto; \
 		done; \
 		echo "Interface generation complete!"; \
 	fi
@@ -62,8 +62,8 @@ generate-docker:
 		mkdir -p gen && \
 		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
 		go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
-		protoc --go_out=gen -I. -I=messages messages/*.proto && \
-		protoc --go-grpc_out=gen -I. -I=interfaces -I=messages interfaces/*.proto"
+		protoc --go_out=gen -I. -I=model model/*.proto && \
+		protoc --go-grpc_out=gen -I. -I=interfaces -I=model interfaces/*.proto"
 	@echo "Docker generation complete!"
 
 clean:
@@ -73,8 +73,8 @@ clean:
 
 help:
 	@echo "Available targets:"
-	@echo "  generate            - Generate Go code from all proto files (messages + interfaces)"
-	@echo "  generate-messages   - Generate Go code from message proto files only"
+	@echo "  generate            - Generate Go code from all proto files (models + interfaces)"
+	@echo "  generate-models     - Generate Go code from model proto files only"
 	@echo "  generate-interfaces - Generate Go code from interface proto files (with gRPC)"
 	@echo "  generate-docker     - Generate using Docker (no local protoc required)"
 	@echo "  clean               - Remove all generated Go files"

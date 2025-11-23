@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v5.29.4
-// source: messages/model-lightning-service.proto
+// source: model/model-lightning-service.proto
 
 package lightning
 
@@ -58,11 +58,11 @@ func (x InvoiceStatus) String() string {
 }
 
 func (InvoiceStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_lightning_service_proto_enumTypes[0].Descriptor()
+	return file_model_model_lightning_service_proto_enumTypes[0].Descriptor()
 }
 
 func (InvoiceStatus) Type() protoreflect.EnumType {
-	return &file_messages_model_lightning_service_proto_enumTypes[0]
+	return &file_model_model_lightning_service_proto_enumTypes[0]
 }
 
 func (x InvoiceStatus) Number() protoreflect.EnumNumber {
@@ -71,7 +71,7 @@ func (x InvoiceStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InvoiceStatus.Descriptor instead.
 func (InvoiceStatus) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{0}
 }
 
 // Envelope for entries in the event.lightning stream.
@@ -111,11 +111,11 @@ func (x LightningEventType) String() string {
 }
 
 func (LightningEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_lightning_service_proto_enumTypes[1].Descriptor()
+	return file_model_model_lightning_service_proto_enumTypes[1].Descriptor()
 }
 
 func (LightningEventType) Type() protoreflect.EnumType {
-	return &file_messages_model_lightning_service_proto_enumTypes[1]
+	return &file_model_model_lightning_service_proto_enumTypes[1]
 }
 
 func (x LightningEventType) Number() protoreflect.EnumNumber {
@@ -124,7 +124,7 @@ func (x LightningEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use LightningEventType.Descriptor instead.
 func (LightningEventType) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{1}
 }
 
 // Lightning invoice representation.
@@ -142,7 +142,7 @@ type Invoice struct {
 
 func (x *Invoice) Reset() {
 	*x = Invoice{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[0]
+	mi := &file_model_model_lightning_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -154,7 +154,7 @@ func (x *Invoice) String() string {
 func (*Invoice) ProtoMessage() {}
 
 func (x *Invoice) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[0]
+	mi := &file_model_model_lightning_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -167,7 +167,7 @@ func (x *Invoice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Invoice.ProtoReflect.Descriptor instead.
 func (*Invoice) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Invoice) GetInvoiceId() string {
@@ -224,7 +224,7 @@ type CreateInvoiceRequest struct {
 
 func (x *CreateInvoiceRequest) Reset() {
 	*x = CreateInvoiceRequest{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[1]
+	mi := &file_model_model_lightning_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -236,7 +236,7 @@ func (x *CreateInvoiceRequest) String() string {
 func (*CreateInvoiceRequest) ProtoMessage() {}
 
 func (x *CreateInvoiceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[1]
+	mi := &file_model_model_lightning_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -249,7 +249,7 @@ func (x *CreateInvoiceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateInvoiceRequest.ProtoReflect.Descriptor instead.
 func (*CreateInvoiceRequest) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *CreateInvoiceRequest) GetDeviceId() string {
@@ -282,7 +282,7 @@ type CreateInvoiceResponse struct {
 
 func (x *CreateInvoiceResponse) Reset() {
 	*x = CreateInvoiceResponse{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[2]
+	mi := &file_model_model_lightning_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -294,7 +294,7 @@ func (x *CreateInvoiceResponse) String() string {
 func (*CreateInvoiceResponse) ProtoMessage() {}
 
 func (x *CreateInvoiceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[2]
+	mi := &file_model_model_lightning_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -307,7 +307,7 @@ func (x *CreateInvoiceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateInvoiceResponse.ProtoReflect.Descriptor instead.
 func (*CreateInvoiceResponse) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{2}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CreateInvoiceResponse) GetInvoice() *Invoice {
@@ -326,7 +326,7 @@ type InvoiceCreatedEvent struct {
 
 func (x *InvoiceCreatedEvent) Reset() {
 	*x = InvoiceCreatedEvent{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[3]
+	mi := &file_model_model_lightning_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -338,7 +338,7 @@ func (x *InvoiceCreatedEvent) String() string {
 func (*InvoiceCreatedEvent) ProtoMessage() {}
 
 func (x *InvoiceCreatedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[3]
+	mi := &file_model_model_lightning_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -351,7 +351,7 @@ func (x *InvoiceCreatedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvoiceCreatedEvent.ProtoReflect.Descriptor instead.
 func (*InvoiceCreatedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{3}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *InvoiceCreatedEvent) GetInvoice() *Invoice {
@@ -374,7 +374,7 @@ type InvoiceSettledEvent struct {
 
 func (x *InvoiceSettledEvent) Reset() {
 	*x = InvoiceSettledEvent{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[4]
+	mi := &file_model_model_lightning_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -386,7 +386,7 @@ func (x *InvoiceSettledEvent) String() string {
 func (*InvoiceSettledEvent) ProtoMessage() {}
 
 func (x *InvoiceSettledEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[4]
+	mi := &file_model_model_lightning_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -399,7 +399,7 @@ func (x *InvoiceSettledEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvoiceSettledEvent.ProtoReflect.Descriptor instead.
 func (*InvoiceSettledEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{4}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *InvoiceSettledEvent) GetInvoiceId() string {
@@ -448,7 +448,7 @@ type InvoiceExpiredEvent struct {
 
 func (x *InvoiceExpiredEvent) Reset() {
 	*x = InvoiceExpiredEvent{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[5]
+	mi := &file_model_model_lightning_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -460,7 +460,7 @@ func (x *InvoiceExpiredEvent) String() string {
 func (*InvoiceExpiredEvent) ProtoMessage() {}
 
 func (x *InvoiceExpiredEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[5]
+	mi := &file_model_model_lightning_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -473,7 +473,7 @@ func (x *InvoiceExpiredEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvoiceExpiredEvent.ProtoReflect.Descriptor instead.
 func (*InvoiceExpiredEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{5}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *InvoiceExpiredEvent) GetInvoiceId() string {
@@ -512,7 +512,7 @@ type LightningEvent struct {
 
 func (x *LightningEvent) Reset() {
 	*x = LightningEvent{}
-	mi := &file_messages_model_lightning_service_proto_msgTypes[6]
+	mi := &file_model_model_lightning_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -524,7 +524,7 @@ func (x *LightningEvent) String() string {
 func (*LightningEvent) ProtoMessage() {}
 
 func (x *LightningEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_lightning_service_proto_msgTypes[6]
+	mi := &file_model_model_lightning_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -537,7 +537,7 @@ func (x *LightningEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LightningEvent.ProtoReflect.Descriptor instead.
 func (*LightningEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_lightning_service_proto_rawDescGZIP(), []int{6}
+	return file_model_model_lightning_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *LightningEvent) GetType() LightningEventType {
@@ -603,11 +603,11 @@ func (*LightningEvent_InvoiceSettled) isLightningEvent_Payload() {}
 
 func (*LightningEvent_InvoiceExpired) isLightningEvent_Payload() {}
 
-var File_messages_model_lightning_service_proto protoreflect.FileDescriptor
+var File_model_model_lightning_service_proto protoreflect.FileDescriptor
 
-const file_messages_model_lightning_service_proto_rawDesc = "" +
+const file_model_model_lightning_service_proto_rawDesc = "" +
 	"\n" +
-	"&messages/model-lightning-service.proto\x12\"iot.payperuse.edge.model.lightning\"\xe8\x01\n" +
+	"#model/model-lightning-service.proto\x12\"iot.payperuse.edge.model.lightning\"\xe8\x01\n" +
 	"\aInvoice\x12\x1d\n" +
 	"\n" +
 	"invoice_id\x18\x01 \x01(\tR\tinvoiceId\x12\x1b\n" +
@@ -657,20 +657,20 @@ const file_messages_model_lightning_service_proto_rawDesc = "" +
 	"$LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED\x10\x03B(Z&gen/iot/payperuse/edge/model/lightningb\x06proto3"
 
 var (
-	file_messages_model_lightning_service_proto_rawDescOnce sync.Once
-	file_messages_model_lightning_service_proto_rawDescData []byte
+	file_model_model_lightning_service_proto_rawDescOnce sync.Once
+	file_model_model_lightning_service_proto_rawDescData []byte
 )
 
-func file_messages_model_lightning_service_proto_rawDescGZIP() []byte {
-	file_messages_model_lightning_service_proto_rawDescOnce.Do(func() {
-		file_messages_model_lightning_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_messages_model_lightning_service_proto_rawDesc), len(file_messages_model_lightning_service_proto_rawDesc)))
+func file_model_model_lightning_service_proto_rawDescGZIP() []byte {
+	file_model_model_lightning_service_proto_rawDescOnce.Do(func() {
+		file_model_model_lightning_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_model_model_lightning_service_proto_rawDesc), len(file_model_model_lightning_service_proto_rawDesc)))
 	})
-	return file_messages_model_lightning_service_proto_rawDescData
+	return file_model_model_lightning_service_proto_rawDescData
 }
 
-var file_messages_model_lightning_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_messages_model_lightning_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
-var file_messages_model_lightning_service_proto_goTypes = []any{
+var file_model_model_lightning_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_model_model_lightning_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_model_model_lightning_service_proto_goTypes = []any{
 	(InvoiceStatus)(0),            // 0: iot.payperuse.edge.model.lightning.InvoiceStatus
 	(LightningEventType)(0),       // 1: iot.payperuse.edge.model.lightning.LightningEventType
 	(*Invoice)(nil),               // 2: iot.payperuse.edge.model.lightning.Invoice
@@ -681,7 +681,7 @@ var file_messages_model_lightning_service_proto_goTypes = []any{
 	(*InvoiceExpiredEvent)(nil),   // 7: iot.payperuse.edge.model.lightning.InvoiceExpiredEvent
 	(*LightningEvent)(nil),        // 8: iot.payperuse.edge.model.lightning.LightningEvent
 }
-var file_messages_model_lightning_service_proto_depIdxs = []int32{
+var file_model_model_lightning_service_proto_depIdxs = []int32{
 	0, // 0: iot.payperuse.edge.model.lightning.Invoice.status:type_name -> iot.payperuse.edge.model.lightning.InvoiceStatus
 	2, // 1: iot.payperuse.edge.model.lightning.CreateInvoiceResponse.invoice:type_name -> iot.payperuse.edge.model.lightning.Invoice
 	2, // 2: iot.payperuse.edge.model.lightning.InvoiceCreatedEvent.invoice:type_name -> iot.payperuse.edge.model.lightning.Invoice
@@ -696,12 +696,12 @@ var file_messages_model_lightning_service_proto_depIdxs = []int32{
 	0, // [0:7] is the sub-list for field type_name
 }
 
-func init() { file_messages_model_lightning_service_proto_init() }
-func file_messages_model_lightning_service_proto_init() {
-	if File_messages_model_lightning_service_proto != nil {
+func init() { file_model_model_lightning_service_proto_init() }
+func file_model_model_lightning_service_proto_init() {
+	if File_model_model_lightning_service_proto != nil {
 		return
 	}
-	file_messages_model_lightning_service_proto_msgTypes[6].OneofWrappers = []any{
+	file_model_model_lightning_service_proto_msgTypes[6].OneofWrappers = []any{
 		(*LightningEvent_InvoiceCreated)(nil),
 		(*LightningEvent_InvoiceSettled)(nil),
 		(*LightningEvent_InvoiceExpired)(nil),
@@ -710,18 +710,18 @@ func file_messages_model_lightning_service_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_messages_model_lightning_service_proto_rawDesc), len(file_messages_model_lightning_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_model_model_lightning_service_proto_rawDesc), len(file_model_model_lightning_service_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_messages_model_lightning_service_proto_goTypes,
-		DependencyIndexes: file_messages_model_lightning_service_proto_depIdxs,
-		EnumInfos:         file_messages_model_lightning_service_proto_enumTypes,
-		MessageInfos:      file_messages_model_lightning_service_proto_msgTypes,
+		GoTypes:           file_model_model_lightning_service_proto_goTypes,
+		DependencyIndexes: file_model_model_lightning_service_proto_depIdxs,
+		EnumInfos:         file_model_model_lightning_service_proto_enumTypes,
+		MessageInfos:      file_model_model_lightning_service_proto_msgTypes,
 	}.Build()
-	File_messages_model_lightning_service_proto = out.File
-	file_messages_model_lightning_service_proto_goTypes = nil
-	file_messages_model_lightning_service_proto_depIdxs = nil
+	File_model_model_lightning_service_proto = out.File
+	file_model_model_lightning_service_proto_goTypes = nil
+	file_model_model_lightning_service_proto_depIdxs = nil
 }

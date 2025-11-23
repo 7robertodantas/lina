@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v5.29.4
-// source: messages/model-device-service.proto
+// source: model/model-device-service.proto
 
 package device
 
@@ -58,11 +58,11 @@ func (x UsageReportingStrategy) String() string {
 }
 
 func (UsageReportingStrategy) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_device_service_proto_enumTypes[0].Descriptor()
+	return file_model_model_device_service_proto_enumTypes[0].Descriptor()
 }
 
 func (UsageReportingStrategy) Type() protoreflect.EnumType {
-	return &file_messages_model_device_service_proto_enumTypes[0]
+	return &file_model_model_device_service_proto_enumTypes[0]
 }
 
 func (x UsageReportingStrategy) Number() protoreflect.EnumNumber {
@@ -71,7 +71,7 @@ func (x UsageReportingStrategy) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UsageReportingStrategy.Descriptor instead.
 func (UsageReportingStrategy) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_device_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_device_service_proto_rawDescGZIP(), []int{0}
 }
 
 // Envelope for entries in the event.device stream.
@@ -105,11 +105,11 @@ func (x DeviceEventType) String() string {
 }
 
 func (DeviceEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_device_service_proto_enumTypes[1].Descriptor()
+	return file_model_model_device_service_proto_enumTypes[1].Descriptor()
 }
 
 func (DeviceEventType) Type() protoreflect.EnumType {
-	return &file_messages_model_device_service_proto_enumTypes[1]
+	return &file_model_model_device_service_proto_enumTypes[1]
 }
 
 func (x DeviceEventType) Number() protoreflect.EnumNumber {
@@ -118,7 +118,7 @@ func (x DeviceEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DeviceEventType.Descriptor instead.
 func (DeviceEventType) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_device_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_device_service_proto_rawDescGZIP(), []int{1}
 }
 
 // Normalized usage record derived from a device report.
@@ -136,7 +136,7 @@ type UsageRecord struct {
 
 func (x *UsageRecord) Reset() {
 	*x = UsageRecord{}
-	mi := &file_messages_model_device_service_proto_msgTypes[0]
+	mi := &file_model_model_device_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -148,7 +148,7 @@ func (x *UsageRecord) String() string {
 func (*UsageRecord) ProtoMessage() {}
 
 func (x *UsageRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_device_service_proto_msgTypes[0]
+	mi := &file_model_model_device_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -161,7 +161,7 @@ func (x *UsageRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UsageRecord.ProtoReflect.Descriptor instead.
 func (*UsageRecord) Descriptor() ([]byte, []int) {
-	return file_messages_model_device_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_device_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *UsageRecord) GetDeviceId() string {
@@ -216,7 +216,7 @@ type DeviceUsageReportedEvent struct {
 
 func (x *DeviceUsageReportedEvent) Reset() {
 	*x = DeviceUsageReportedEvent{}
-	mi := &file_messages_model_device_service_proto_msgTypes[1]
+	mi := &file_model_model_device_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -228,7 +228,7 @@ func (x *DeviceUsageReportedEvent) String() string {
 func (*DeviceUsageReportedEvent) ProtoMessage() {}
 
 func (x *DeviceUsageReportedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_device_service_proto_msgTypes[1]
+	mi := &file_model_model_device_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -241,7 +241,7 @@ func (x *DeviceUsageReportedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceUsageReportedEvent.ProtoReflect.Descriptor instead.
 func (*DeviceUsageReportedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_device_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_device_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *DeviceUsageReportedEvent) GetUsage() *UsageRecord {
@@ -264,7 +264,7 @@ type DeviceEvent struct {
 
 func (x *DeviceEvent) Reset() {
 	*x = DeviceEvent{}
-	mi := &file_messages_model_device_service_proto_msgTypes[2]
+	mi := &file_model_model_device_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -276,7 +276,7 @@ func (x *DeviceEvent) String() string {
 func (*DeviceEvent) ProtoMessage() {}
 
 func (x *DeviceEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_device_service_proto_msgTypes[2]
+	mi := &file_model_model_device_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -289,7 +289,7 @@ func (x *DeviceEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceEvent.ProtoReflect.Descriptor instead.
 func (*DeviceEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_device_service_proto_rawDescGZIP(), []int{2}
+	return file_model_model_device_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *DeviceEvent) GetType() DeviceEventType {
@@ -325,11 +325,11 @@ type DeviceEvent_UsageReported struct {
 
 func (*DeviceEvent_UsageReported) isDeviceEvent_Payload() {}
 
-var File_messages_model_device_service_proto protoreflect.FileDescriptor
+var File_model_model_device_service_proto protoreflect.FileDescriptor
 
-const file_messages_model_device_service_proto_rawDesc = "" +
+const file_model_model_device_service_proto_rawDesc = "" +
 	"\n" +
-	"#messages/model-device-service.proto\x12\x1fiot.payperuse.edge.model.device\"\xe8\x01\n" +
+	" model/model-device-service.proto\x12\x1fiot.payperuse.edge.model.device\"\xe8\x01\n" +
 	"\vUsageRecord\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\treport_id\x18\x02 \x01(\tR\breportId\x12S\n" +
@@ -353,27 +353,27 @@ const file_messages_model_device_service_proto_rawDesc = "" +
 	" DEVICE_EVENT_TYPE_USAGE_REPORTED\x10\x01B%Z#gen/iot/payperuse/edge/model/deviceb\x06proto3"
 
 var (
-	file_messages_model_device_service_proto_rawDescOnce sync.Once
-	file_messages_model_device_service_proto_rawDescData []byte
+	file_model_model_device_service_proto_rawDescOnce sync.Once
+	file_model_model_device_service_proto_rawDescData []byte
 )
 
-func file_messages_model_device_service_proto_rawDescGZIP() []byte {
-	file_messages_model_device_service_proto_rawDescOnce.Do(func() {
-		file_messages_model_device_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_messages_model_device_service_proto_rawDesc), len(file_messages_model_device_service_proto_rawDesc)))
+func file_model_model_device_service_proto_rawDescGZIP() []byte {
+	file_model_model_device_service_proto_rawDescOnce.Do(func() {
+		file_model_model_device_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_model_model_device_service_proto_rawDesc), len(file_model_model_device_service_proto_rawDesc)))
 	})
-	return file_messages_model_device_service_proto_rawDescData
+	return file_model_model_device_service_proto_rawDescData
 }
 
-var file_messages_model_device_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_messages_model_device_service_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_messages_model_device_service_proto_goTypes = []any{
+var file_model_model_device_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_model_model_device_service_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_model_model_device_service_proto_goTypes = []any{
 	(UsageReportingStrategy)(0),      // 0: iot.payperuse.edge.model.device.UsageReportingStrategy
 	(DeviceEventType)(0),             // 1: iot.payperuse.edge.model.device.DeviceEventType
 	(*UsageRecord)(nil),              // 2: iot.payperuse.edge.model.device.UsageRecord
 	(*DeviceUsageReportedEvent)(nil), // 3: iot.payperuse.edge.model.device.DeviceUsageReportedEvent
 	(*DeviceEvent)(nil),              // 4: iot.payperuse.edge.model.device.DeviceEvent
 }
-var file_messages_model_device_service_proto_depIdxs = []int32{
+var file_model_model_device_service_proto_depIdxs = []int32{
 	0, // 0: iot.payperuse.edge.model.device.UsageRecord.strategy:type_name -> iot.payperuse.edge.model.device.UsageReportingStrategy
 	2, // 1: iot.payperuse.edge.model.device.DeviceUsageReportedEvent.usage:type_name -> iot.payperuse.edge.model.device.UsageRecord
 	1, // 2: iot.payperuse.edge.model.device.DeviceEvent.type:type_name -> iot.payperuse.edge.model.device.DeviceEventType
@@ -385,30 +385,30 @@ var file_messages_model_device_service_proto_depIdxs = []int32{
 	0, // [0:4] is the sub-list for field type_name
 }
 
-func init() { file_messages_model_device_service_proto_init() }
-func file_messages_model_device_service_proto_init() {
-	if File_messages_model_device_service_proto != nil {
+func init() { file_model_model_device_service_proto_init() }
+func file_model_model_device_service_proto_init() {
+	if File_model_model_device_service_proto != nil {
 		return
 	}
-	file_messages_model_device_service_proto_msgTypes[2].OneofWrappers = []any{
+	file_model_model_device_service_proto_msgTypes[2].OneofWrappers = []any{
 		(*DeviceEvent_UsageReported)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_messages_model_device_service_proto_rawDesc), len(file_messages_model_device_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_model_model_device_service_proto_rawDesc), len(file_model_model_device_service_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_messages_model_device_service_proto_goTypes,
-		DependencyIndexes: file_messages_model_device_service_proto_depIdxs,
-		EnumInfos:         file_messages_model_device_service_proto_enumTypes,
-		MessageInfos:      file_messages_model_device_service_proto_msgTypes,
+		GoTypes:           file_model_model_device_service_proto_goTypes,
+		DependencyIndexes: file_model_model_device_service_proto_depIdxs,
+		EnumInfos:         file_model_model_device_service_proto_enumTypes,
+		MessageInfos:      file_model_model_device_service_proto_msgTypes,
 	}.Build()
-	File_messages_model_device_service_proto = out.File
-	file_messages_model_device_service_proto_goTypes = nil
-	file_messages_model_device_service_proto_depIdxs = nil
+	File_model_model_device_service_proto = out.File
+	file_model_model_device_service_proto_goTypes = nil
+	file_model_model_device_service_proto_depIdxs = nil
 }

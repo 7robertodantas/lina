@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.10
 // 	protoc        v5.29.4
-// source: messages/model-ledger-service.proto
+// source: model/model-ledger-service.proto
 
 package ledger
 
@@ -58,11 +58,11 @@ func (x AuthorizationStatus) String() string {
 }
 
 func (AuthorizationStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_ledger_service_proto_enumTypes[0].Descriptor()
+	return file_model_model_ledger_service_proto_enumTypes[0].Descriptor()
 }
 
 func (AuthorizationStatus) Type() protoreflect.EnumType {
-	return &file_messages_model_ledger_service_proto_enumTypes[0]
+	return &file_model_model_ledger_service_proto_enumTypes[0]
 }
 
 func (x AuthorizationStatus) Number() protoreflect.EnumNumber {
@@ -71,7 +71,7 @@ func (x AuthorizationStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use AuthorizationStatus.Descriptor instead.
 func (AuthorizationStatus) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{0}
 }
 
 // Envelope for entries in the event.ledger stream.
@@ -117,11 +117,11 @@ func (x LedgerEventType) String() string {
 }
 
 func (LedgerEventType) Descriptor() protoreflect.EnumDescriptor {
-	return file_messages_model_ledger_service_proto_enumTypes[1].Descriptor()
+	return file_model_model_ledger_service_proto_enumTypes[1].Descriptor()
 }
 
 func (LedgerEventType) Type() protoreflect.EnumType {
-	return &file_messages_model_ledger_service_proto_enumTypes[1]
+	return &file_model_model_ledger_service_proto_enumTypes[1]
 }
 
 func (x LedgerEventType) Number() protoreflect.EnumNumber {
@@ -130,7 +130,7 @@ func (x LedgerEventType) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use LedgerEventType.Descriptor instead.
 func (LedgerEventType) EnumDescriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{1}
 }
 
 // Authorization hold for a device.
@@ -148,7 +148,7 @@ type Authorization struct {
 
 func (x *Authorization) Reset() {
 	*x = Authorization{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[0]
+	mi := &file_model_model_ledger_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +160,7 @@ func (x *Authorization) String() string {
 func (*Authorization) ProtoMessage() {}
 
 func (x *Authorization) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[0]
+	mi := &file_model_model_ledger_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +173,7 @@ func (x *Authorization) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Authorization.ProtoReflect.Descriptor instead.
 func (*Authorization) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{0}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Authorization) GetDeviceId() string {
@@ -232,7 +232,7 @@ type BalanceProjection struct {
 
 func (x *BalanceProjection) Reset() {
 	*x = BalanceProjection{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[1]
+	mi := &file_model_model_ledger_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -244,7 +244,7 @@ func (x *BalanceProjection) String() string {
 func (*BalanceProjection) ProtoMessage() {}
 
 func (x *BalanceProjection) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[1]
+	mi := &file_model_model_ledger_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -257,7 +257,7 @@ func (x *BalanceProjection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BalanceProjection.ProtoReflect.Descriptor instead.
 func (*BalanceProjection) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{1}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *BalanceProjection) GetDeviceId() string {
@@ -307,7 +307,7 @@ type CreateAuthorizationRequest struct {
 
 func (x *CreateAuthorizationRequest) Reset() {
 	*x = CreateAuthorizationRequest{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[2]
+	mi := &file_model_model_ledger_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -319,7 +319,7 @@ func (x *CreateAuthorizationRequest) String() string {
 func (*CreateAuthorizationRequest) ProtoMessage() {}
 
 func (x *CreateAuthorizationRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[2]
+	mi := &file_model_model_ledger_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -332,7 +332,7 @@ func (x *CreateAuthorizationRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAuthorizationRequest.ProtoReflect.Descriptor instead.
 func (*CreateAuthorizationRequest) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{2}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *CreateAuthorizationRequest) GetDeviceId() string {
@@ -368,7 +368,7 @@ type CreateAuthorizationResponse struct {
 
 func (x *CreateAuthorizationResponse) Reset() {
 	*x = CreateAuthorizationResponse{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[3]
+	mi := &file_model_model_ledger_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -380,7 +380,7 @@ func (x *CreateAuthorizationResponse) String() string {
 func (*CreateAuthorizationResponse) ProtoMessage() {}
 
 func (x *CreateAuthorizationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[3]
+	mi := &file_model_model_ledger_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -393,7 +393,7 @@ func (x *CreateAuthorizationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateAuthorizationResponse.ProtoReflect.Descriptor instead.
 func (*CreateAuthorizationResponse) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{3}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CreateAuthorizationResponse) GetStatus() AuthorizationStatus {
@@ -434,7 +434,7 @@ type GetBalanceRequest struct {
 
 func (x *GetBalanceRequest) Reset() {
 	*x = GetBalanceRequest{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[4]
+	mi := &file_model_model_ledger_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -446,7 +446,7 @@ func (x *GetBalanceRequest) String() string {
 func (*GetBalanceRequest) ProtoMessage() {}
 
 func (x *GetBalanceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[4]
+	mi := &file_model_model_ledger_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -459,7 +459,7 @@ func (x *GetBalanceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBalanceRequest.ProtoReflect.Descriptor instead.
 func (*GetBalanceRequest) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{4}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GetBalanceRequest) GetDeviceId() string {
@@ -478,7 +478,7 @@ type GetBalanceResponse struct {
 
 func (x *GetBalanceResponse) Reset() {
 	*x = GetBalanceResponse{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[5]
+	mi := &file_model_model_ledger_service_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -490,7 +490,7 @@ func (x *GetBalanceResponse) String() string {
 func (*GetBalanceResponse) ProtoMessage() {}
 
 func (x *GetBalanceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[5]
+	mi := &file_model_model_ledger_service_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -503,7 +503,7 @@ func (x *GetBalanceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetBalanceResponse.ProtoReflect.Descriptor instead.
 func (*GetBalanceResponse) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{5}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *GetBalanceResponse) GetBalance() *BalanceProjection {
@@ -522,7 +522,7 @@ type AuthorizationCreatedEvent struct {
 
 func (x *AuthorizationCreatedEvent) Reset() {
 	*x = AuthorizationCreatedEvent{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[6]
+	mi := &file_model_model_ledger_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -534,7 +534,7 @@ func (x *AuthorizationCreatedEvent) String() string {
 func (*AuthorizationCreatedEvent) ProtoMessage() {}
 
 func (x *AuthorizationCreatedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[6]
+	mi := &file_model_model_ledger_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -547,7 +547,7 @@ func (x *AuthorizationCreatedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizationCreatedEvent.ProtoReflect.Descriptor instead.
 func (*AuthorizationCreatedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{6}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AuthorizationCreatedEvent) GetAuthorization() *Authorization {
@@ -568,7 +568,7 @@ type AuthorizationCompletedEvent struct {
 
 func (x *AuthorizationCompletedEvent) Reset() {
 	*x = AuthorizationCompletedEvent{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[7]
+	mi := &file_model_model_ledger_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -580,7 +580,7 @@ func (x *AuthorizationCompletedEvent) String() string {
 func (*AuthorizationCompletedEvent) ProtoMessage() {}
 
 func (x *AuthorizationCompletedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[7]
+	mi := &file_model_model_ledger_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -593,7 +593,7 @@ func (x *AuthorizationCompletedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizationCompletedEvent.ProtoReflect.Descriptor instead.
 func (*AuthorizationCompletedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{7}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AuthorizationCompletedEvent) GetAuthorizationId() string {
@@ -628,7 +628,7 @@ type AuthorizationExpiredEvent struct {
 
 func (x *AuthorizationExpiredEvent) Reset() {
 	*x = AuthorizationExpiredEvent{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[8]
+	mi := &file_model_model_ledger_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -640,7 +640,7 @@ func (x *AuthorizationExpiredEvent) String() string {
 func (*AuthorizationExpiredEvent) ProtoMessage() {}
 
 func (x *AuthorizationExpiredEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[8]
+	mi := &file_model_model_ledger_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -653,7 +653,7 @@ func (x *AuthorizationExpiredEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthorizationExpiredEvent.ProtoReflect.Descriptor instead.
 func (*AuthorizationExpiredEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{8}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AuthorizationExpiredEvent) GetAuthorizationId() string {
@@ -689,7 +689,7 @@ type DeviceCreditedEvent struct {
 
 func (x *DeviceCreditedEvent) Reset() {
 	*x = DeviceCreditedEvent{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[9]
+	mi := &file_model_model_ledger_service_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -701,7 +701,7 @@ func (x *DeviceCreditedEvent) String() string {
 func (*DeviceCreditedEvent) ProtoMessage() {}
 
 func (x *DeviceCreditedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[9]
+	mi := &file_model_model_ledger_service_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -714,7 +714,7 @@ func (x *DeviceCreditedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceCreditedEvent.ProtoReflect.Descriptor instead.
 func (*DeviceCreditedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{9}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DeviceCreditedEvent) GetDeviceId() string {
@@ -758,7 +758,7 @@ type DeviceDebitedEvent struct {
 
 func (x *DeviceDebitedEvent) Reset() {
 	*x = DeviceDebitedEvent{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[10]
+	mi := &file_model_model_ledger_service_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -770,7 +770,7 @@ func (x *DeviceDebitedEvent) String() string {
 func (*DeviceDebitedEvent) ProtoMessage() {}
 
 func (x *DeviceDebitedEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[10]
+	mi := &file_model_model_ledger_service_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -783,7 +783,7 @@ func (x *DeviceDebitedEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceDebitedEvent.ProtoReflect.Descriptor instead.
 func (*DeviceDebitedEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{10}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeviceDebitedEvent) GetDeviceId() string {
@@ -838,7 +838,7 @@ type LedgerEvent struct {
 
 func (x *LedgerEvent) Reset() {
 	*x = LedgerEvent{}
-	mi := &file_messages_model_ledger_service_proto_msgTypes[11]
+	mi := &file_model_model_ledger_service_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -850,7 +850,7 @@ func (x *LedgerEvent) String() string {
 func (*LedgerEvent) ProtoMessage() {}
 
 func (x *LedgerEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_messages_model_ledger_service_proto_msgTypes[11]
+	mi := &file_model_model_ledger_service_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -863,7 +863,7 @@ func (x *LedgerEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LedgerEvent.ProtoReflect.Descriptor instead.
 func (*LedgerEvent) Descriptor() ([]byte, []int) {
-	return file_messages_model_ledger_service_proto_rawDescGZIP(), []int{11}
+	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *LedgerEvent) GetType() LedgerEventType {
@@ -959,11 +959,11 @@ func (*LedgerEvent_DeviceCredited) isLedgerEvent_Payload() {}
 
 func (*LedgerEvent_DeviceDebited) isLedgerEvent_Payload() {}
 
-var File_messages_model_ledger_service_proto protoreflect.FileDescriptor
+var File_model_model_ledger_service_proto protoreflect.FileDescriptor
 
-const file_messages_model_ledger_service_proto_rawDesc = "" +
+const file_model_model_ledger_service_proto_rawDesc = "" +
 	"\n" +
-	"#messages/model-ledger-service.proto\x12\x1fiot.payperuse.edge.model.ledger\"\xdd\x01\n" +
+	" model/model-ledger-service.proto\x12\x1fiot.payperuse.edge.model.ledger\"\xdd\x01\n" +
 	"\rAuthorization\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12!\n" +
@@ -1037,20 +1037,20 @@ const file_messages_model_ledger_service_proto_rawDesc = "" +
 	" LEDGER_EVENT_TYPE_DEVICE_DEBITED\x10\x05B%Z#gen/iot/payperuse/edge/model/ledgerb\x06proto3"
 
 var (
-	file_messages_model_ledger_service_proto_rawDescOnce sync.Once
-	file_messages_model_ledger_service_proto_rawDescData []byte
+	file_model_model_ledger_service_proto_rawDescOnce sync.Once
+	file_model_model_ledger_service_proto_rawDescData []byte
 )
 
-func file_messages_model_ledger_service_proto_rawDescGZIP() []byte {
-	file_messages_model_ledger_service_proto_rawDescOnce.Do(func() {
-		file_messages_model_ledger_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_messages_model_ledger_service_proto_rawDesc), len(file_messages_model_ledger_service_proto_rawDesc)))
+func file_model_model_ledger_service_proto_rawDescGZIP() []byte {
+	file_model_model_ledger_service_proto_rawDescOnce.Do(func() {
+		file_model_model_ledger_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_model_model_ledger_service_proto_rawDesc), len(file_model_model_ledger_service_proto_rawDesc)))
 	})
-	return file_messages_model_ledger_service_proto_rawDescData
+	return file_model_model_ledger_service_proto_rawDescData
 }
 
-var file_messages_model_ledger_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_messages_model_ledger_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
-var file_messages_model_ledger_service_proto_goTypes = []any{
+var file_model_model_ledger_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
+var file_model_model_ledger_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_model_model_ledger_service_proto_goTypes = []any{
 	(AuthorizationStatus)(0),            // 0: iot.payperuse.edge.model.ledger.AuthorizationStatus
 	(LedgerEventType)(0),                // 1: iot.payperuse.edge.model.ledger.LedgerEventType
 	(*Authorization)(nil),               // 2: iot.payperuse.edge.model.ledger.Authorization
@@ -1066,7 +1066,7 @@ var file_messages_model_ledger_service_proto_goTypes = []any{
 	(*DeviceDebitedEvent)(nil),          // 12: iot.payperuse.edge.model.ledger.DeviceDebitedEvent
 	(*LedgerEvent)(nil),                 // 13: iot.payperuse.edge.model.ledger.LedgerEvent
 }
-var file_messages_model_ledger_service_proto_depIdxs = []int32{
+var file_model_model_ledger_service_proto_depIdxs = []int32{
 	0,  // 0: iot.payperuse.edge.model.ledger.CreateAuthorizationResponse.status:type_name -> iot.payperuse.edge.model.ledger.AuthorizationStatus
 	2,  // 1: iot.payperuse.edge.model.ledger.CreateAuthorizationResponse.authorization:type_name -> iot.payperuse.edge.model.ledger.Authorization
 	3,  // 2: iot.payperuse.edge.model.ledger.GetBalanceResponse.balance:type_name -> iot.payperuse.edge.model.ledger.BalanceProjection
@@ -1084,12 +1084,12 @@ var file_messages_model_ledger_service_proto_depIdxs = []int32{
 	0,  // [0:10] is the sub-list for field type_name
 }
 
-func init() { file_messages_model_ledger_service_proto_init() }
-func file_messages_model_ledger_service_proto_init() {
-	if File_messages_model_ledger_service_proto != nil {
+func init() { file_model_model_ledger_service_proto_init() }
+func file_model_model_ledger_service_proto_init() {
+	if File_model_model_ledger_service_proto != nil {
 		return
 	}
-	file_messages_model_ledger_service_proto_msgTypes[11].OneofWrappers = []any{
+	file_model_model_ledger_service_proto_msgTypes[11].OneofWrappers = []any{
 		(*LedgerEvent_AuthorizationCreated)(nil),
 		(*LedgerEvent_AuthorizationCompleted)(nil),
 		(*LedgerEvent_AuthorizationExpired)(nil),
@@ -1100,18 +1100,18 @@ func file_messages_model_ledger_service_proto_init() {
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_messages_model_ledger_service_proto_rawDesc), len(file_messages_model_ledger_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_model_model_ledger_service_proto_rawDesc), len(file_model_model_ledger_service_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_messages_model_ledger_service_proto_goTypes,
-		DependencyIndexes: file_messages_model_ledger_service_proto_depIdxs,
-		EnumInfos:         file_messages_model_ledger_service_proto_enumTypes,
-		MessageInfos:      file_messages_model_ledger_service_proto_msgTypes,
+		GoTypes:           file_model_model_ledger_service_proto_goTypes,
+		DependencyIndexes: file_model_model_ledger_service_proto_depIdxs,
+		EnumInfos:         file_model_model_ledger_service_proto_enumTypes,
+		MessageInfos:      file_model_model_ledger_service_proto_msgTypes,
 	}.Build()
-	File_messages_model_ledger_service_proto = out.File
-	file_messages_model_ledger_service_proto_goTypes = nil
-	file_messages_model_ledger_service_proto_depIdxs = nil
+	File_model_model_ledger_service_proto = out.File
+	file_model_model_ledger_service_proto_goTypes = nil
+	file_model_model_ledger_service_proto_depIdxs = nil
 }
