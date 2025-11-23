@@ -7,14 +7,18 @@ services:
       - "${MQTT_PORT:-1883}:1883"   # Non-TLS port
       - "${MQTT_TLS_PORT:-8883}:8883" # TLS port
     volumes:
-      - ./mosquitto/config:/mosquitto/config:ro
+      - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
       - ./mosquitto/certs:/mosquitto/certs:ro
+      - ./mosquitto/generate-dynsec.sh:/mosquitto/generate-dynsec.sh:ro
+    entrypoint: ["/mosquitto/config/entrypoint.sh"]
     command: mosquitto -c /mosquitto/config/mosquitto.conf
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME:-}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-}
+      - MQTT_DYNSEC_ADMIN_USER=${MQTT_DYNSEC_ADMIN_USER:-}
+      - MQTT_DYNSEC_ADMIN_PASSWORD=${MQTT_DYNSEC_ADMIN_PASSWORD:-}
     healthcheck:
       # Test MQTT broker by attempting a TLS connection on port 8883 with credentials
       # If connection is refused, broker is not ready (exit 1)
