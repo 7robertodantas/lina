@@ -241,10 +241,28 @@ func NewMQTTClient() (*MQTTClient, error) {
 
 // Publish publishes a message to the specified topic
 func (m *MQTTClient) Publish(topic string, qos byte, retained bool, payload []byte) error {
+	// Check if client is connected before attempting to publish
+	if !m.client.IsConnected() {
+		return fmt.Errorf("MQTT client is not connected")
+	}
+
 	token := m.client.Publish(topic, qos, retained, payload)
-	if token.Wait() && token.Error() != nil {
+
+	// Wait for publish to complete with timeout (important for QoS 1/2 to get PUBACK/PUBREC)
+	if !token.WaitTimeout(10 * time.Second) {
+		return fmt.Errorf("timeout waiting for publish acknowledgment")
+	}
+
+	// Check for errors after waiting
+	if token.Error() != nil {
 		return fmt.Errorf("failed to publish message: %w", token.Error())
 	}
+
+	// For QoS 1, verify client is still connected (broker might disconnect on denial)
+	if qos >= 1 && !m.client.IsConnected() {
+		return fmt.Errorf("client disconnected after publish - broker may have denied the publish")
+	}
+
 	log.Printf("Published message to topic: %s", topic)
 	return nil
 }

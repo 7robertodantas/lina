@@ -85,25 +85,68 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Create devices_role for /devices/# wildcard topic access
-echo "Creating role: devices_role for /devices/# wildcard topic access"
-mosquitto_ctrl $CTRL_OPTS dynsec createRole devices_role
+# Create device_service_role for specific device topic access
+echo "Creating role: device_service_role for device service topic access"
+mosquitto_ctrl $CTRL_OPTS dynsec createRole device_service_role
 if [ $? -ne 0 ]; then
-    echo "Failed to create role devices_role"
+    echo "Failed to create role device_service_role"
     exit 1
 fi
 
-# Allow subscribe/publish to /devices/# (all topics under /devices/)
+# Add subscribe ACLs for device_service_role
 # aclspec format: <acltype> <topicFilter> allow|deny
-echo "Adding ACL for devices_role to allow subscribe,publish for topic /devices/#"
-mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL devices_role publishClientSend '/devices/#' allow 1
+echo "Adding subscribe ACLs for device_service_role"
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role subscribePattern '/devices/#/heartbeat' allow 1
 if [ $? -ne 0 ]; then
-    echo "Failed to add publish ACL for devices_role"
+    echo "Failed to add subscribe ACL for /devices/#/heartbeat"
     exit 1
 fi
-mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL devices_role subscribePattern '/devices/#' allow 1
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role subscribePattern '/devices/#/usage' allow 1
 if [ $? -ne 0 ]; then
-    echo "Failed to add subscribe ACL for devices_role"
+    echo "Failed to add subscribe ACL for /devices/#/usage"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role subscribePattern '/devices/#/request/authorize' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add subscribe ACL for /devices/#/request/authorize"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role subscribePattern '/devices/#/request/invoice' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add subscribe ACL for /devices/#/request/invoice"
+    exit 1
+fi
+
+# Add publish ACLs for device_service_role
+echo "Adding publish ACLs for device_service_role"
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role publishClientSend '/devices/#/config' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add publish ACL for /devices/#/config"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role publishClientSend '/devices/#/control' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add publish ACL for /devices/#/control"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role publishClientSend '/devices/#/balance' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add publish ACL for /devices/#/balance"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role publishClientSend '/devices/#/response/authorize' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add publish ACL for /devices/#/response/authorize"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role publishClientSend '/devices/#/response/invoice' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add publish ACL for /devices/#/response/invoice"
+    exit 1
+fi
+mosquitto_ctrl $CTRL_OPTS dynsec addRoleACL device_service_role publishClientSend '/devices/#/events/invoice' allow 1
+if [ $? -ne 0 ]; then
+    echo "Failed to add publish ACL for /devices/#/events/invoice"
     exit 1
 fi
 
@@ -115,10 +158,10 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-echo "Assigning role devices_role to user $MQTT_USERNAME"
-mosquitto_ctrl $CTRL_OPTS dynsec addClientRole "$MQTT_USERNAME" devices_role 1
+echo "Assigning role device_service_role to user $MQTT_USERNAME"
+mosquitto_ctrl $CTRL_OPTS dynsec addClientRole "$MQTT_USERNAME" device_service_role 1
 if [ $? -ne 0 ]; then
-    echo "Failed to assign role devices_role to user"
+    echo "Failed to assign role device_service_role to user"
     exit 1
 fi
 
