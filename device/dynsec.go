@@ -108,6 +108,187 @@ func isAlreadyExistsError(errMsg string) bool {
 		strings.Contains(errLower, "client already exists")
 }
 
+// listRoles lists all roles using the dynamic security API
+func (d *DynSecService) listRoles() ([]string, error) {
+	commandID := d.getNextCommandID()
+	command := map[string]interface{}{
+		"command": commandID,
+		"commands": []map[string]interface{}{
+			{
+				"command": "listRoles",
+			},
+		},
+	}
+
+	// Drain old responses
+	for {
+		select {
+		case <-d.responseCh:
+		default:
+			goto sendCommand
+		}
+	}
+sendCommand:
+
+	commandJSON, err := json.Marshal(command)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	controlTopic := "$CONTROL/dynamic-security/v1"
+	log.Printf("Listing roles (command %d)", commandID)
+
+	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	if !token.WaitTimeout(5 * time.Second) {
+		return nil, fmt.Errorf("timeout publishing listRoles command")
+	}
+	if token.Error() != nil {
+		return nil, fmt.Errorf("failed to publish listRoles command: %w", token.Error())
+	}
+
+	timeout := time.After(10 * time.Second)
+	select {
+	case response := <-d.responseCh:
+		// Parse response format: response["responses"][0]["data"]["roles"]
+		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
+			if respMap, ok := resp[0].(map[string]interface{}); ok {
+				// Check for error first
+				if errMsg, hasErr := respMap["error"]; hasErr {
+					return nil, fmt.Errorf("listRoles failed: %v", errMsg)
+				}
+				// Extract roles from data field
+				if data, ok := respMap["data"].(map[string]interface{}); ok {
+					if roles, ok := data["roles"].([]interface{}); ok {
+						roleNames := make([]string, 0, len(roles))
+						for _, role := range roles {
+							// Roles can be strings or objects with rolename field
+							if roleStr, ok := role.(string); ok {
+								roleNames = append(roleNames, roleStr)
+							} else if roleMap, ok := role.(map[string]interface{}); ok {
+								if rolename, ok := roleMap["rolename"].(string); ok {
+									roleNames = append(roleNames, rolename)
+								}
+							}
+						}
+						return roleNames, nil
+					}
+				}
+			}
+		}
+		// Log the response for debugging
+		responseJSON, _ := json.MarshalIndent(response, "", "  ")
+		log.Printf("Unexpected listRoles response format: %s", string(responseJSON))
+		return nil, fmt.Errorf("unexpected response format from listRoles")
+	case <-timeout:
+		return nil, fmt.Errorf("timeout waiting for listRoles response")
+	}
+}
+
+// listClients lists all clients using the dynamic security API
+func (d *DynSecService) listClients() ([]string, error) {
+	commandID := d.getNextCommandID()
+	command := map[string]interface{}{
+		"command": commandID,
+		"commands": []map[string]interface{}{
+			{
+				"command": "listClients",
+			},
+		},
+	}
+
+	// Drain old responses
+	for {
+		select {
+		case <-d.responseCh:
+		default:
+			goto sendCommand
+		}
+	}
+sendCommand:
+
+	commandJSON, err := json.Marshal(command)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	controlTopic := "$CONTROL/dynamic-security/v1"
+	log.Printf("Listing clients (command %d)", commandID)
+
+	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	if !token.WaitTimeout(5 * time.Second) {
+		return nil, fmt.Errorf("timeout publishing listClients command")
+	}
+	if token.Error() != nil {
+		return nil, fmt.Errorf("failed to publish listClients command: %w", token.Error())
+	}
+
+	timeout := time.After(10 * time.Second)
+	select {
+	case response := <-d.responseCh:
+		// Parse response format: response["responses"][0]["data"]["clients"]
+		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
+			if respMap, ok := resp[0].(map[string]interface{}); ok {
+				// Check for error first
+				if errMsg, hasErr := respMap["error"]; hasErr {
+					return nil, fmt.Errorf("listClients failed: %v", errMsg)
+				}
+				// Extract clients from data field
+				if data, ok := respMap["data"].(map[string]interface{}); ok {
+					if clients, ok := data["clients"].([]interface{}); ok {
+						clientNames := make([]string, 0, len(clients))
+						for _, client := range clients {
+							// Clients are returned as strings (usernames)
+							if clientStr, ok := client.(string); ok {
+								clientNames = append(clientNames, clientStr)
+							} else if clientMap, ok := client.(map[string]interface{}); ok {
+								// Handle object format if it exists
+								if username, ok := clientMap["username"].(string); ok {
+									clientNames = append(clientNames, username)
+								}
+							}
+						}
+						return clientNames, nil
+					}
+				}
+			}
+		}
+		// Log the response for debugging
+		responseJSON, _ := json.MarshalIndent(response, "", "  ")
+		log.Printf("Unexpected listClients response format: %s", string(responseJSON))
+		return nil, fmt.Errorf("unexpected response format from listClients")
+	case <-timeout:
+		return nil, fmt.Errorf("timeout waiting for listClients response")
+	}
+}
+
+// roleExists checks if a role exists
+func (d *DynSecService) roleExists(roleName string) (bool, error) {
+	roles, err := d.listRoles()
+	if err != nil {
+		return false, err
+	}
+	for _, role := range roles {
+		if role == roleName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// clientExists checks if a client exists
+func (d *DynSecService) clientExists(username string) (bool, error) {
+	clients, err := d.listClients()
+	if err != nil {
+		return false, err
+	}
+	for _, client := range clients {
+		if client == username {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // executeCommand sends a command to the dynamic security plugin and waits for response
 func (d *DynSecService) executeCommand(command map[string]interface{}) error {
 	commandID := d.getNextCommandID()
@@ -209,19 +390,30 @@ func (d *DynSecService) ProvisionDevice(deviceID string) error {
 	// Generate a simple password (in production, use a secure random password)
 	clientPassword := fmt.Sprintf("%s_password", deviceID)
 
-	// Step 1: Create role for the device
-	log.Printf("Creating role: %s", roleName)
-	createRoleCmd := map[string]interface{}{
-		"commands": []map[string]interface{}{
-			{
-				"command":  "createRole",
-				"rolename": roleName,
-			},
-		},
+	// Step 1: Check if role exists, create if missing
+	log.Printf("Checking if role exists: %s", roleName)
+	roleExists, err := d.roleExists(roleName)
+	if err != nil {
+		log.Printf("Warning: Failed to check if role exists, will attempt to create: %v", err)
+		roleExists = false // Assume it doesn't exist and try to create
 	}
-	if err := d.executeCommand(createRoleCmd); err != nil {
-		// Role might already exist, log but continue
-		log.Printf("Note: Role creation returned error (may already exist): %v", err)
+
+	if !roleExists {
+		log.Printf("Creating role: %s", roleName)
+		createRoleCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "createRole",
+					"rolename": roleName,
+				},
+			},
+		}
+		if err := d.executeCommand(createRoleCmd); err != nil {
+			return fmt.Errorf("failed to create role %s: %w", roleName, err)
+		}
+		log.Printf("Role %s created successfully", roleName)
+	} else {
+		log.Printf("Role %s already exists, skipping creation", roleName)
 	}
 
 	// Step 2: Add publish ACLs for the role (batch all publish ACLs in one command)
@@ -286,20 +478,31 @@ func (d *DynSecService) ProvisionDevice(deviceID string) error {
 		return fmt.Errorf("failed to add subscribe ACLs: %w", err)
 	}
 
-	// Step 4: Create client with deviceID as username
-	log.Printf("Creating client: %s", clientUsername)
-	createClientCmd := map[string]interface{}{
-		"commands": []map[string]interface{}{
-			{
-				"command":  "createClient",
-				"username": clientUsername,
-				"password": clientPassword,
-			},
-		},
+	// Step 4: Check if client exists, create if missing
+	log.Printf("Checking if client exists: %s", clientUsername)
+	clientExists, err := d.clientExists(clientUsername)
+	if err != nil {
+		log.Printf("Warning: Failed to check if client exists, will attempt to create: %v", err)
+		clientExists = false // Assume it doesn't exist and try to create
 	}
-	if err := d.executeCommand(createClientCmd); err != nil {
-		// Client might already exist, log but continue
-		log.Printf("Note: Client creation returned error (may already exist): %v", err)
+
+	if !clientExists {
+		log.Printf("Creating client: %s", clientUsername)
+		createClientCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "createClient",
+					"username": clientUsername,
+					"password": clientPassword,
+				},
+			},
+		}
+		if err := d.executeCommand(createClientCmd); err != nil {
+			return fmt.Errorf("failed to create client %s: %w", clientUsername, err)
+		}
+		log.Printf("Client %s created successfully", clientUsername)
+	} else {
+		log.Printf("Client %s already exists, skipping creation", clientUsername)
 	}
 
 	// Step 5: Assign role to client
@@ -315,7 +518,12 @@ func (d *DynSecService) ProvisionDevice(deviceID string) error {
 		},
 	}
 	if err := d.executeCommand(addRoleCmd); err != nil {
-		return fmt.Errorf("failed to assign role to client: %w", err)
+		// "Internal error" from addClientRole usually means role or client doesn't exist
+		errStr := err.Error()
+		if strings.Contains(strings.ToLower(errStr), "internal error") {
+			return fmt.Errorf("failed to assign role %s to client %s: %w (this usually means the role or client doesn't exist - verify steps 1 and 4 succeeded)", roleName, clientUsername, err)
+		}
+		return fmt.Errorf("failed to assign role %s to client %s: %w", roleName, clientUsername, err)
 	}
 
 	log.Printf("Successfully provisioned device: %s", deviceID)
