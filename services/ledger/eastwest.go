@@ -17,14 +17,14 @@ import (
 // EastWestServer implements the LedgerService gRPC server
 type EastWestServer struct {
 	ledgerpb.UnimplementedLedgerServiceServer
-	svc           *Service
+	repo          *LedgerRepository
 	streamHandler *StreamHandler
 }
 
 // NewEastWestServer creates a new east-west gRPC server
-func NewEastWestServer(svc *Service, streamHandler *StreamHandler) *EastWestServer {
+func NewEastWestServer(repo *LedgerRepository, streamHandler *StreamHandler) *EastWestServer {
 	return &EastWestServer{
-		svc:           svc,
+		repo:          repo,
 		streamHandler: streamHandler,
 	}
 }
@@ -41,25 +41,25 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		return nil, status.Errorf(codes.InvalidArgument, "request_msat must be > 0")
 	}
 
-	tx, err := s.svc.db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.repo.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to begin transaction: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	// Ensure balance row exists
-	if err := s.svc.ensureBalanceRow(ctx, tx, req.DeviceId); err != nil {
+	if err := s.repo.EnsureBalanceRow(ctx, tx, req.DeviceId); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to ensure balance: %v", err)
 	}
 
 	// Get current balance (already in msat)
-	balanceMsat, err := s.svc.getBalance(ctx, tx, req.DeviceId)
+	balanceMsat, err := s.repo.GetBalance(ctx, tx, req.DeviceId)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to get balance: %v", err)
 	}
 
 	// Check if authorization with this request_id already exists (idempotency)
-	existingAuth, authStatus, err := s.getAuthorizationByRequestID(ctx, tx, req.RequestId)
+	existingAuth, authStatus, err := s.repo.GetAuthorizationByRequestID(ctx, tx, req.RequestId)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, status.Errorf(codes.Internal, "failed to check authorization: %v", err)
 	}
@@ -106,15 +106,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	expiresAt := now.Add(10 * time.Minute).Format(time.RFC3339) // 10 minute expiry
 
 	// Insert authorization
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO authorizations(
-			authorization_id, device_id, request_id, granted_msat, remaining_msat,
-			issued_at, expires_at, status, created_at
-		) VALUES(?,?,?,?,?,?,?,?,?)`,
-		authID, req.DeviceId, req.RequestId, req.RequestMsat, req.RequestMsat,
-		issuedAt, expiresAt, "active", time.Now().Unix(),
-	)
-	if err != nil {
+	if err := s.repo.CreateAuthorization(ctx, tx, authID, req.DeviceId, req.RequestId, req.RequestMsat, issuedAt, expiresAt); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create authorization: %v", err)
 	}
 
@@ -130,7 +122,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		AllowNegative: false,  // We already checked balance above
 		CorrelationID: authID, // Use authorization_id as correlation_id
 	}
-	_, err = s.svc.applyDebit(ctx, tx, debitReq)
+	_, err = s.repo.ApplyDebit(ctx, tx, debitReq)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create debit entry: %v", err)
 	}
@@ -164,36 +156,4 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		Status:        ledgermodel.AuthorizationStatus_AUTHORIZATION_STATUS_GRANTED,
 		Authorization: auth,
 	}, nil
-}
-
-// getAuthorizationByRequestID retrieves an authorization by request_id
-// Returns: authorization, status string, error
-func (s *EastWestServer) getAuthorizationByRequestID(ctx context.Context, tx *sql.Tx, requestID string) (*ledgermodel.Authorization, string, error) {
-	var authID, deviceID, issuedAt, expiresAt, authStatus string
-	var grantedMsat, remainingMsat int64
-
-	row := tx.QueryRowContext(ctx, `
-		SELECT authorization_id, device_id, granted_msat, remaining_msat, issued_at, expires_at, status
-		FROM authorizations
-		WHERE request_id = ?
-		ORDER BY created_at DESC
-		LIMIT 1`,
-		requestID,
-	)
-
-	err := row.Scan(&authID, &deviceID, &grantedMsat, &remainingMsat, &issuedAt, &expiresAt, &authStatus)
-	if err != nil {
-		return nil, "", err
-	}
-
-	auth := &ledgermodel.Authorization{
-		DeviceId:        deviceID,
-		AuthorizationId: authID,
-		GrantedMsat:     grantedMsat,
-		RemainingMsat:   remainingMsat,
-		IssuedAt:        issuedAt,
-		ExpiresAt:       expiresAt,
-	}
-
-	return auth, authStatus, nil
 }

@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -12,16 +10,12 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/robertodantas/lnpay/library"
 	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
 	"google.golang.org/grpc"
-	_ "modernc.org/sqlite"
 )
 
 /*
@@ -68,87 +62,6 @@ func loadConfig() Config {
 
 /*
    =========================================
-   SQLite init (WAL + schema)
-   =========================================
-*/
-
-func initDB(cfg Config) *sql.DB {
-	// WAL + busy_timeout for concurrent writers on edge devices.
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", cfg.DBPath, cfg.BusyTimeoutMS)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		log.Fatalf("db open: %v", err)
-	}
-
-	stmts := []string{
-		// Accounts / balances
-		`CREATE TABLE IF NOT EXISTS balances(
-			device_id TEXT PRIMARY KEY,
-			balance_msat INTEGER NOT NULL DEFAULT 0,
-			updated_at INTEGER NOT NULL
-		);`,
-		// Ledger entries (append-only)
-		`CREATE TABLE IF NOT EXISTS ledger_entries(
-			id TEXT PRIMARY KEY,
-			device_id TEXT NOT NULL,
-			entry_type TEXT NOT NULL,        -- credit|debit
-			amount_msat INTEGER NOT NULL,    -- positive for credits & transfer_in; positive value also stored for debit, semantics defined by entry_type
-			balance_after INTEGER NOT NULL,  -- balance after applying this entry (in msat)
-			reason TEXT,
-			correlation_id TEXT,             -- optional foreign corr id from caller
-			created_at INTEGER NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_ledger_device_time ON ledger_entries(device_id, created_at DESC);`,
-
-		// Idempotency registry: one row per unique client request
-		`CREATE TABLE IF NOT EXISTS idempotency(
-			idempotency_key TEXT PRIMARY KEY,
-			kind TEXT NOT NULL,              -- credit|debit
-			request_hash TEXT NOT NULL,      -- lightweight dedupe guard (payload hash)
-			response_json TEXT NOT NULL,     -- cached successful response
-			created_at INTEGER NOT NULL
-		);`,
-
-		// Authorizations: holds for device spending
-		`CREATE TABLE IF NOT EXISTS authorizations(
-			authorization_id TEXT PRIMARY KEY,
-			device_id TEXT NOT NULL,
-			request_id TEXT NOT NULL,        -- unique request identifier for idempotency
-			granted_msat INTEGER NOT NULL,
-			remaining_msat INTEGER NOT NULL,
-			issued_at TEXT NOT NULL,          -- ISO-8601 timestamp
-			expires_at TEXT NOT NULL,         -- ISO-8601 timestamp
-			status TEXT NOT NULL,            -- active|completed|expired
-			created_at INTEGER NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_auth_device_status ON authorizations(device_id, status, expires_at);`,
-		`CREATE INDEX IF NOT EXISTS idx_auth_request_id ON authorizations(request_id);`,
-	}
-	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
-			log.Fatalf("schema: %v", err)
-		}
-	}
-	return db
-}
-
-/*
-   =========================================
-   Service state
-   =========================================
-*/
-
-type Service struct {
-	cfg Config
-	db  *sql.DB
-}
-
-func NewService(cfg Config, db *sql.DB) *Service {
-	return &Service{cfg: cfg, db: db}
-}
-
-/*
-   =========================================
    Models & helpers
    =========================================
 */
@@ -181,8 +94,6 @@ type EntryResponse struct {
 	CorrelationID string `json:"correlation_id,omitempty"`
 }
 
-func now() int64 { return time.Now().Unix() }
-
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -206,360 +117,19 @@ func djb2(b []byte) uint64 {
 
 /*
    =========================================
-   Auth (simple service token)
-   =========================================
-*/
-
-func (s *Service) authMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		got := c.GetHeader("X-Service-Token")
-		if s.cfg.ServiceToken == "" || got == s.cfg.ServiceToken {
-			c.Next()
-			return
-		}
-		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-	}
-}
-
-/*
-   =========================================
-   Core ledger operations (transactional)
-   =========================================
-*/
-
-func (s *Service) ensureBalanceRow(ctx context.Context, tx *sql.Tx, deviceID string) error {
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO balances(device_id, balance_msat, updated_at)
-		 VALUES(?,?,?)
-		 ON CONFLICT(device_id) DO NOTHING`,
-		deviceID, 0, now(),
-	)
-	return err
-}
-
-func (s *Service) getBalance(ctx context.Context, tx *sql.Tx, deviceID string) (int64, error) {
-	var bal int64
-	row := tx.QueryRowContext(ctx, `SELECT balance_msat FROM balances WHERE device_id=?`, deviceID)
-	switch err := row.Scan(&bal); err {
-	case nil:
-		return bal, nil
-	case sql.ErrNoRows:
-		return 0, nil
-	default:
-		return 0, err
-	}
-}
-
-func (s *Service) applyCredit(ctx context.Context, tx *sql.Tx, in CreditRequest) (EntryResponse, error) {
-	if in.AmountMsat <= 0 {
-		return EntryResponse{}, errors.New("amount must be > 0")
-	}
-	if err := s.ensureBalanceRow(ctx, tx, in.DeviceID); err != nil {
-		return EntryResponse{}, err
-	}
-	// Add funds
-	_, err := tx.ExecContext(ctx, `
-		UPDATE balances SET balance_msat = balance_msat + ?, updated_at=?
-		 WHERE device_id=?`, in.AmountMsat, now(), in.DeviceID)
-	if err != nil {
-		return EntryResponse{}, err
-	}
-	// Read new balance
-	bal, err := s.getBalance(ctx, tx, in.DeviceID)
-	if err != nil {
-		return EntryResponse{}, err
-	}
-	entry := EntryResponse{
-		EntryID:       uuid.NewString(),
-		DeviceID:      in.DeviceID,
-		EntryType:     "credit",
-		AmountMsat:    in.AmountMsat,
-		BalanceAfter:  bal,
-		Reason:        in.Reason,
-		CreatedAt:     now(),
-		CorrelationID: in.CorrelationID,
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
-		VALUES(?,?,?,?,?,?,?,?)`,
-		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountMsat, entry.BalanceAfter, in.Reason, in.CorrelationID, entry.CreatedAt,
-	)
-	return entry, err
-}
-
-func (s *Service) applyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (EntryResponse, error) {
-	if in.AmountMsat <= 0 {
-		return EntryResponse{}, errors.New("amount must be > 0")
-	}
-	if err := s.ensureBalanceRow(ctx, tx, in.DeviceID); err != nil {
-		return EntryResponse{}, err
-	}
-	// Funds check
-	if !in.AllowNegative {
-		bal, err := s.getBalance(ctx, tx, in.DeviceID)
-		if err != nil {
-			return EntryResponse{}, err
-		}
-		if bal < in.AmountMsat {
-			return EntryResponse{}, fmt.Errorf("insufficient funds: have %d need %d", bal, in.AmountMsat)
-		}
-	}
-	// Subtract
-	_, err := tx.ExecContext(ctx, `
-		UPDATE balances SET balance_msat = balance_msat - ?, updated_at=?
-		 WHERE device_id=?`, in.AmountMsat, now(), in.DeviceID)
-	if err != nil {
-		return EntryResponse{}, err
-	}
-	// Read new balance
-	bal, err := s.getBalance(ctx, tx, in.DeviceID)
-	if err != nil {
-		return EntryResponse{}, err
-	}
-	entry := EntryResponse{
-		EntryID:       uuid.NewString(),
-		DeviceID:      in.DeviceID,
-		EntryType:     "debit",
-		AmountMsat:    in.AmountMsat,
-		BalanceAfter:  bal,
-		Reason:        in.Reason,
-		CreatedAt:     now(),
-		CorrelationID: in.CorrelationID,
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
-		VALUES(?,?,?,?,?,?,?,?)`,
-		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountMsat, entry.BalanceAfter, in.Reason, in.CorrelationID, entry.CreatedAt,
-	)
-	return entry, err
-}
-
-/*
-   =========================================
-   Idempotency helpers
-   =========================================
-*/
-
-func (s *Service) getCachedIdem(ctx context.Context, key string) (kind string, resp []byte, ok bool, err error) {
-	row := s.db.QueryRowContext(ctx, `SELECT kind, response_json FROM idempotency WHERE idempotency_key=?`, key)
-	var k string
-	var r string
-	if e := row.Scan(&k, &r); e == sql.ErrNoRows {
-		return "", nil, false, nil
-	} else if e != nil {
-		return "", nil, false, e
-	}
-	return k, []byte(r), true, nil
-}
-
-func (s *Service) saveIdem(ctx context.Context, tx *sql.Tx, key, kind, reqHash string, response any) error {
-	js, _ := json.Marshal(response)
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO idempotency(idempotency_key, kind, request_hash, response_json, created_at)
-		VALUES(?,?,?,?,?)`,
-		key, kind, reqHash, string(js), now(),
-	)
-	return err
-}
-
-/*
-   =========================================
-   HTTP Handlers
-   =========================================
-*/
-
-func (s *Service) health(c *gin.Context) {
-	c.JSON(200, gin.H{"status": "ok", "time": time.Now().UTC().Format(time.RFC3339)})
-}
-
-func (s *Service) postCredit(c *gin.Context) {
-	var in CreditRequest
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	// Idempotency short-circuit
-	if kind, blob, ok, err := s.getCachedIdem(c, in.IdempotencyKey); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	} else if ok && kind == "credit" {
-		var out EntryResponse
-		_ = json.Unmarshal(blob, &out)
-		c.JSON(http.StatusOK, out)
-		return
-	}
-
-	ctx := c
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "begin"})
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	out, err := s.applyCredit(ctx, tx, in)
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-	if err := s.saveIdem(ctx, tx, in.IdempotencyKey, "credit", hashReq("credit", in), out); err != nil {
-		c.JSON(409, gin.H{"error": "idempotency conflict"})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		c.JSON(500, gin.H{"error": "commit"})
-		return
-	}
-	c.JSON(http.StatusOK, out)
-}
-
-func (s *Service) postDebit(c *gin.Context) {
-	var in DebitRequest
-	if err := c.ShouldBindJSON(&in); err != nil {
-		log.Printf("postDebit bind error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	if kind, blob, ok, err := s.getCachedIdem(c, in.IdempotencyKey); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	} else if ok && kind == "debit" {
-		var out EntryResponse
-		_ = json.Unmarshal(blob, &out)
-		c.JSON(http.StatusOK, out)
-		return
-	}
-
-	ctx := c
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "begin"})
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	out, err := s.applyDebit(ctx, tx, in)
-	if err != nil {
-		// Do not persist idempotency for failed attempts
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-	if err := s.saveIdem(ctx, tx, in.IdempotencyKey, "debit", hashReq("debit", in), out); err != nil {
-		c.JSON(409, gin.H{"error": "idempotency conflict"})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		c.JSON(500, gin.H{"error": "commit"})
-		return
-	}
-	c.JSON(http.StatusOK, out)
-}
-
-func (s *Service) getBalanceHandler(c *gin.Context) {
-	deviceID := c.Query("device_id")
-	if deviceID == "" {
-		c.JSON(400, gin.H{"error": "missing device_id"})
-		return
-	}
-	tx, err := s.db.BeginTx(c, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "begin"})
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-	_ = s.ensureBalanceRow(c, tx, deviceID)
-	bal, err := s.getBalance(c, tx, deviceID)
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		c.JSON(500, gin.H{"error": "commit"})
-		return
-	}
-	c.JSON(200, gin.H{"device_id": deviceID, "balance_msat": bal})
-}
-
-func (s *Service) listEntries(c *gin.Context) {
-	deviceID := c.Query("device_id")
-	if deviceID == "" {
-		c.JSON(400, gin.H{"error": "missing device_id"})
-		return
-	}
-	limit := min(intEnv("DEFAULT_PAGE_SIZE", 50), s.cfg.MaxPageSize)
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = min(n, s.cfg.MaxPageSize)
-		}
-	}
-	// cursor = created_at:id for keyset pagination (newest first)
-	var cursorCreated int64 = 1<<62 - 1 // effectively +Inf
-	var cursorID string = "zzzz"
-	if cur := c.Query("cursor"); cur != "" {
-		parts := strings.Split(cur, ":")
-		if len(parts) == 2 {
-			if t, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
-				cursorCreated = t
-				cursorID = parts[1]
-			}
-		}
-	}
-
-	rows, err := s.db.Query(`
-		SELECT id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at
-		  FROM ledger_entries
-		 WHERE device_id = ?
-		   AND (created_at < ? OR (created_at = ? AND id < ?))
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT ?`,
-		deviceID, cursorCreated, cursorCreated, cursorID, limit,
-	)
-	if err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-
-	var resp []EntryResponse
-	var lastCreated int64
-	var lastID string
-	for rows.Next() {
-		var e EntryResponse
-		var reason, corr sql.NullString
-		if err := rows.Scan(&e.EntryID, &e.EntryType, &e.AmountMsat, &e.BalanceAfter, &reason, &corr, &e.CreatedAt); err != nil {
-			continue
-		}
-		e.DeviceID = deviceID
-		if reason.Valid {
-			e.Reason = reason.String
-		}
-		if corr.Valid {
-			e.CorrelationID = corr.String
-		}
-		resp = append(resp, e)
-		lastCreated = e.CreatedAt
-		lastID = e.EntryID
-	}
-
-	nextCursor := ""
-	if len(resp) == limit {
-		nextCursor = fmt.Sprintf("%d:%s", lastCreated, lastID)
-	}
-	c.JSON(200, gin.H{"items": resp, "next_cursor": nextCursor})
-}
-
-/*
-   =========================================
    main
    =========================================
 */
 
 func main() {
 	cfg := loadConfig()
-	db := initDB(cfg)
-	defer db.Close()
 
-	svc := NewService(cfg, db)
+	// Initialize repository (creates DB connection and tables)
+	repo, err := NewLedgerRepository(cfg.DBPath, cfg.BusyTimeoutMS)
+	if err != nil {
+		log.Fatalf("Failed to initialize ledger repository: %v", err)
+	}
+	defer repo.Close()
 
 	// Connect to Redis stream
 	log.Println("Connecting to Redis...")
@@ -571,7 +141,7 @@ func main() {
 	log.Println("Redis stream client connected successfully")
 
 	// Create stream handler
-	streamHandler := NewStreamHandler(streamClient, svc)
+	streamHandler := NewStreamHandler(streamClient, repo)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -599,7 +169,7 @@ func main() {
 		}
 
 		grpcServer := grpc.NewServer()
-		eastWestServer := NewEastWestServer(svc, streamHandler)
+		eastWestServer := NewEastWestServer(repo, streamHandler)
 		ledgerpb.RegisterLedgerServiceServer(grpcServer, eastWestServer)
 
 		log.Printf("gRPC server listening on %s", cfg.GRPCAddr)
@@ -608,27 +178,18 @@ func main() {
 		}
 	}()
 
-	// Start HTTP server
-	r := gin.Default()
-	r.GET("/health", svc.health)
+	// Initialize and start northbound REST API
+	log.Println("Initializing northbound REST API...")
+	northbound := NewNorthboundInterface(repo, cfg)
 
-	// Protect mutating endpoints with service token
-	auth := r.Group("/", svc.authMiddleware())
-	auth.POST("/credit", svc.postCredit)
-	auth.POST("/debit", svc.postDebit)
-
-	// Read endpoints
-	r.GET("/balance", svc.getBalanceHandler)
-	r.GET("/entries", svc.listEntries)
-
-	log.Printf("Ledger Service HTTP listening on %s (DB=%s)", cfg.ListenAddr, cfg.DBPath)
-
-	// Start HTTP server in a goroutine
+	// Start northbound server in a goroutine
 	go func() {
-		if err := r.Run(cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
+		if err := northbound.Start(cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start northbound API server: %v", err)
 		}
 	}()
+
+	log.Printf("Ledger Service HTTP listening on %s (DB=%s)", cfg.ListenAddr, cfg.DBPath)
 
 	// Wait for interrupt signal to gracefully shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -637,5 +198,13 @@ func main() {
 
 	log.Println("Shutting down ledger service...")
 	cancel() // Cancel context to stop consumers
+
+	// Gracefully shutdown northbound server
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+	if err := northbound.Stop(shutdownCtx); err != nil {
+		log.Printf("Error shutting down northbound server: %v", err)
+	}
+
 	log.Println("Ledger service stopped")
 }

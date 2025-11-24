@@ -19,16 +19,16 @@ import (
 // StreamHandler handles Redis stream operations for the ledger service
 type StreamHandler struct {
 	streamClient *library.StreamClient
-	svc          *Service
+	repo         *LedgerRepository
 	consumerName string
 	groupName    string
 }
 
 // NewStreamHandler creates a new stream handler
-func NewStreamHandler(streamClient *library.StreamClient, svc *Service) *StreamHandler {
+func NewStreamHandler(streamClient *library.StreamClient, repo *LedgerRepository) *StreamHandler {
 	return &StreamHandler{
 		streamClient: streamClient,
-		svc:          svc,
+		repo:         repo,
 		consumerName: "ledger-service",
 		groupName:    "ledger-consumers",
 	}
@@ -130,7 +130,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		return fmt.Errorf("missing device_id in consumption event")
 	}
 
-	tx, err := sh.svc.db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -138,23 +138,8 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 
 	// Find active authorization for the device
 	// Order by created_at DESC to get the most recent active authorization
-	var authorizationID string
-	var remainingMsat int64
-	var grantedMsat int64
-	var expiresAt string
-	var status string
-
 	now := time.Now().Format(time.RFC3339)
-	row := tx.QueryRowContext(ctx, `
-		SELECT authorization_id, remaining_msat, granted_msat, expires_at, status
-		FROM authorizations
-		WHERE device_id = ? AND status = 'active' AND expires_at > ?
-		ORDER BY created_at DESC
-		LIMIT 1`,
-		deviceID, now,
-	)
-
-	err = row.Scan(&authorizationID, &remainingMsat, &grantedMsat, &expiresAt, &status)
+	authorizationID, remainingMsat, _, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// No active authorization found - return error to skip event (will be retried later)
@@ -184,13 +169,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		newStatus = "completed"
 	}
 
-	_, err = tx.ExecContext(ctx, `
-		UPDATE authorizations
-		SET remaining_msat = ?, status = ?
-		WHERE authorization_id = ?`,
-		newRemaining, newStatus, authorizationID,
-	)
-	if err != nil {
+	if err := sh.repo.UpdateAuthorization(ctx, tx, authorizationID, newRemaining, newStatus); err != nil {
 		return fmt.Errorf("failed to update authorization: %w", err)
 	}
 
@@ -318,52 +297,22 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 	now := time.Now().Format(time.RFC3339)
 
 	// Find expired active authorizations
-	rows, err := sh.svc.db.QueryContext(ctx, `
-		SELECT authorization_id, device_id, expires_at
-		FROM authorizations
-		WHERE status = 'active' AND expires_at < ?`,
-		now,
-	)
+	expired, err := sh.repo.GetExpiredAuthorizations(ctx, now)
 	if err != nil {
 		return fmt.Errorf("failed to query expired authorizations: %w", err)
-	}
-	defer rows.Close()
-
-	var expired []struct {
-		authorizationID string
-		deviceID        string
-		expiresAt       string
-	}
-
-	for rows.Next() {
-		var auth struct {
-			authorizationID string
-			deviceID        string
-			expiresAt       string
-		}
-		if err := rows.Scan(&auth.authorizationID, &auth.deviceID, &auth.expiresAt); err != nil {
-			continue
-		}
-		expired = append(expired, auth)
 	}
 
 	// Update expired authorizations and publish events
 	for _, auth := range expired {
-		tx, err := sh.svc.db.BeginTx(ctx, &sql.TxOptions{})
+		tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{})
 		if err != nil {
 			log.Printf("Failed to begin transaction for expiration: %v", err)
 			continue
 		}
 
-		_, err = tx.ExecContext(ctx, `
-			UPDATE authorizations
-			SET status = 'expired'
-			WHERE authorization_id = ?`,
-			auth.authorizationID,
-		)
-		if err != nil {
+		if err := sh.repo.MarkAuthorizationExpired(ctx, tx, auth.AuthorizationID); err != nil {
 			tx.Rollback()
-			log.Printf("Failed to update expired authorization %s: %v", auth.authorizationID, err)
+			log.Printf("Failed to update expired authorization %s: %v", auth.AuthorizationID, err)
 			continue
 		}
 
@@ -374,7 +323,7 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 
 		// Publish expiration event
 		timestamp := time.Now().Format(time.RFC3339)
-		if err := sh.PublishAuthorizationExpired(ctx, auth.authorizationID, auth.deviceID, timestamp); err != nil {
+		if err := sh.PublishAuthorizationExpired(ctx, auth.AuthorizationID, auth.DeviceID, timestamp); err != nil {
 			log.Printf("Failed to publish AuthorizationExpired event: %v", err)
 		}
 	}
