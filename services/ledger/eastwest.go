@@ -94,13 +94,9 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	}
 
 	// Create new authorization
-	// Generate short hex ID like "h-b412" or "h-9f31"
 	nanos := time.Now().UnixNano()
 	hexID := fmt.Sprintf("%x", nanos)
-	if len(hexID) > 4 {
-		hexID = hexID[len(hexID)-4:] // take last 4 hex digits
-	}
-	authID := fmt.Sprintf("h-%s", hexID)
+	authID := hexID
 	now := time.Now()
 	issuedAt := now.Format(time.RFC3339)
 	expiresAt := now.Add(10 * time.Minute).Format(time.RFC3339) // 10 minute expiry
