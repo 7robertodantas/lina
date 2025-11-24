@@ -40,9 +40,14 @@ if [ ! -f "$DYNSEC_FILE" ]; then
     chmod 0700 "$DYNSEC_FILE"
     chmod 755 "$DYNSEC_DIR"
     
-    # Start mosquitto in the background
+    # Start mosquitto in the background (we'll keep it running)
+    # Use the provided command if available, otherwise use default
     echo "Starting mosquitto in background to configure dynamic security..."
-    mosquitto -c /mosquitto/config/mosquitto.conf &
+    if [ $# -eq 0 ]; then
+        mosquitto -c /mosquitto/config/mosquitto.conf &
+    else
+        "$@" &
+    fi
     MOSQUITTO_PID=$!
     
     # Wait for mosquitto to be ready (accepting connections and plugin loaded)
@@ -78,16 +83,18 @@ if [ ! -f "$DYNSEC_FILE" ]; then
         exit 1
     fi
     
-    # Stop the background mosquitto
-    echo "Stopping background mosquitto..."
-    kill $MOSQUITTO_PID 2>/dev/null
-    wait $MOSQUITTO_PID 2>/dev/null
-    
     echo "dynamic-security.json generated and configured successfully"
+    echo "Mosquitto is running in background (PID: $MOSQUITTO_PID)"
+    
+    # Keep mosquitto running and wait for it (this becomes the main process)
+    # If mosquitto dies, the container will exit
+    wait $MOSQUITTO_PID
+    EXIT_CODE=$?
+    echo "Mosquitto process exited with code $EXIT_CODE"
+    exit $EXIT_CODE
 else
     echo "dynamic-security.json already exists, skipping generation"
+    # Start mosquitto with the provided command
+    exec "$@"
 fi
-
-# Start mosquitto with the provided command
-exec "$@"
 
