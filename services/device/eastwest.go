@@ -88,9 +88,10 @@ func NewLedgerClient() (*LedgerClient, error) {
 	log.Printf("Connecting to ledger gRPC service at %s...", addr)
 
 	// Configure keepalive for long-lived connections
+	// Time: 30s is a reasonable interval to avoid "too_many_pings" errors
 	keepaliveParams := keepalive.ClientParameters{
-		Time:                10 * time.Second,
-		Timeout:             3 * time.Second,
+		Time:                30 * time.Second,
+		Timeout:             10 * time.Second,
 		PermitWithoutStream: true,
 	}
 
