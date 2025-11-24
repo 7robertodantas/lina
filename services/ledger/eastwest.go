@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	ledgerpb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/interfaces/sync/ledger"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/model/ledger"
+	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
+	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
 )
 
 // EastWestServer implements the LedgerService gRPC server

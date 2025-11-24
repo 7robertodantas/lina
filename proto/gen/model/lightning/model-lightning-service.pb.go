@@ -654,7 +654,7 @@ const file_model_model_lightning_service_proto_rawDesc = "" +
 	" LIGHTNING_EVENT_TYPE_UNSPECIFIED\x10\x00\x12(\n" +
 	"$LIGHTNING_EVENT_TYPE_INVOICE_CREATED\x10\x01\x12(\n" +
 	"$LIGHTNING_EVENT_TYPE_INVOICE_SETTLED\x10\x02\x12(\n" +
-	"$LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED\x10\x03B$Z\"iot/payperuse/edge/model/lightningb\x06proto3"
+	"$LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED\x10\x03B:Z8github.com/robertodantas/lnpay/proto/gen/model/lightningb\x06proto3"
 
 var (
 	file_model_model_lightning_service_proto_rawDescOnce sync.Once

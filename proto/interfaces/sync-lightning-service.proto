@@ -1,7 +1,7 @@
 syntax = "proto3";
 package iot.payperuse.edge.interfaces.sync.lightning;
 
-option go_package = "iot/payperuse/edge/interfaces/sync/lightning";
+option go_package = "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning";
 
 import "model/model-lightning-service.proto";
 

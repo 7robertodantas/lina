@@ -11,7 +11,7 @@ PROTOC := $(if $(PROTOC_DOCKER),docker run --rm -v $(PWD):/workspace -w /workspa
 MODEL_DIR := model
 INTERFACES_DIR := interfaces
 GEN_DIR := gen
-OUT_DIR := $(GEN_DIR)
+OUT_DIR := .
 
 # Model proto files (data models, enums, messages, events)
 MODEL_PROTO_FILES := $(wildcard $(MODEL_DIR)/*.proto)
@@ -31,6 +31,7 @@ generate-models:
 		for proto in $(MODEL_PROTO_FILES); do \
 			echo "Generating from $$proto..."; \
 			$(PROTOC) --go_out=$(OUT_DIR) \
+				--go_opt=module=github.com/robertodantas/lnpay/proto \
 				-I. -I=$(MODEL_DIR) $$proto; \
 		done; \
 		echo "Model generation complete!"; \
@@ -45,6 +46,7 @@ generate-interfaces:
 		for proto in $(INTERFACE_PROTO_FILES); do \
 			echo "Generating from $$proto..."; \
 			$(PROTOC) --go-grpc_out=$(OUT_DIR) \
+				--go-grpc_opt=module=github.com/robertodantas/lnpay/proto \
 				-I. -I=$(INTERFACES_DIR) -I=$(MODEL_DIR) $$proto; \
 		done; \
 		echo "Interface generation complete!"; \
@@ -62,8 +64,8 @@ generate-docker:
 		mkdir -p gen && \
 		go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
 		go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest && \
-		protoc --go_out=gen -I. -I=model model/*.proto && \
-		protoc --go-grpc_out=gen -I. -I=interfaces -I=model interfaces/*.proto"
+		protoc --go_out=. --go_opt=module=github.com/robertodantas/lnpay/proto -I. -I=model model/*.proto && \
+		protoc --go-grpc_out=. --go-grpc_opt=module=github.com/robertodantas/lnpay/proto -I. -I=interfaces -I=model interfaces/*.proto"
 	@echo "Docker generation complete!"
 
 clean:

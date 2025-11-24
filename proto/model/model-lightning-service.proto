@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package iot.payperuse.edge.model.lightning;
 
-option go_package = "iot/payperuse/edge/model/lightning";
+option go_package = "github.com/robertodantas/lnpay/proto/gen/model/lightning";
 
 // Status of a Lightning invoice.
 enum InvoiceStatus {

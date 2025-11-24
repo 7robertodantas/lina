@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package iot.payperuse.edge.interfaces.sync.ledger;
 
-option go_package = "iot/payperuse/edge/interfaces/sync/ledger";
+option go_package = "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger";
 
 import "model/model-ledger-service.proto";
 

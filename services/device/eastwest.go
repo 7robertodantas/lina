@@ -10,8 +10,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	ledgerpb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/interfaces/sync/ledger"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/model/ledger"
+	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
+	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
 )
 
 // LedgerClient wraps the gRPC client for the ledger service
@@ -78,4 +78,3 @@ func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID st
 
 	return resp, nil
 }
-

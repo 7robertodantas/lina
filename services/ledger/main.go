@@ -16,7 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	ledgerpb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/interfaces/sync/ledger"
+	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
 	"google.golang.org/grpc"
 	_ "modernc.org/sqlite"
 )
