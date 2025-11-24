@@ -118,6 +118,23 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		return nil, status.Errorf(codes.Internal, "failed to create authorization: %v", err)
 	}
 
+	// Create debit ledger entry for the authorization
+	reason := req.Reason
+	if reason == "" {
+		reason = "AUTHORIZATION_HOLD"
+	}
+	debitReq := DebitRequest{
+		DeviceID:      req.DeviceId,
+		AmountMsat:    req.RequestMsat,
+		Reason:        reason,
+		AllowNegative: false,  // We already checked balance above
+		CorrelationID: authID, // Use authorization_id as correlation_id
+	}
+	_, err = s.svc.applyDebit(ctx, tx, debitReq)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create debit entry: %v", err)
+	}
+
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
