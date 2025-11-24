@@ -80,19 +80,6 @@ services:
       redis:
         condition: service_healthy
 
-  # registry:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #     args:
-  #       SERVICE: registry
-  #   container_name: registry
-  #   ports:
-  #     - "9080:8080"
-  #   environment:
-  #     - DB_PATH=devices.db
-  #   restart: unless-stopped
-
   # consumption:
   #   build:
   #     context: .
