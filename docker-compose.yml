@@ -1,5 +1,20 @@
 version: '3.9'
 services:
+  redis:
+    build:
+      context: ./redis
+      dockerfile: Dockerfile
+    container_name: redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   mosquitto:
     build:
       context: ./mosquitto
@@ -53,10 +68,16 @@ services:
       - MQTT_PASSWORD=${MQTT_PASSWORD:-}
       - MQTT_DYNSEC_ADMIN_USER=${MQTT_DYNSEC_ADMIN_USER:-}
       - MQTT_DYNSEC_ADMIN_PASSWORD=${MQTT_DYNSEC_ADMIN_PASSWORD:-}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
     volumes:
       - ./mosquitto/certs:/certs:ro
     depends_on:
       mosquitto:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # registry:

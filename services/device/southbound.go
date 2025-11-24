@@ -15,13 +15,15 @@ import (
 
 // SouthboundInterface handles MQTT subscriptions for device messages
 type SouthboundInterface struct {
-	mqttClient *MQTTClient
+	mqttClient   *MQTTClient
+	streamClient *StreamClient
 }
 
 // NewSouthboundInterface creates a new southbound interface
-func NewSouthboundInterface(mqttClient *MQTTClient) *SouthboundInterface {
+func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient) *SouthboundInterface {
 	return &SouthboundInterface{
-		mqttClient: mqttClient,
+		mqttClient:   mqttClient,
+		streamClient: streamClient,
 	}
 }
 
@@ -98,6 +100,12 @@ func (sb *SouthboundInterface) handleUsage(client mqtt.Client, msg mqtt.Message)
 		payload.GetUnit(),
 		payload.GetTimestamp(),
 	)
+
+	// Publish DeviceUsageReportedEvent to Redis stream
+	if err := sb.streamClient.PublishDeviceUsageReportedEvent(&payload); err != nil {
+		log.Printf("Error publishing usage event to Redis stream: %v", err)
+		return
+	}
 }
 
 // handleAuthorizationRequest processes authorization requests from devices

@@ -141,6 +141,15 @@ func main() {
 	defer mqttClient.Disconnect()
 	log.Println("MQTT client connected successfully")
 
+	// Connect to Redis
+	log.Println("Connecting to Redis...")
+	streamClient, err := NewStreamClient()
+	if err != nil {
+		log.Fatalf("Failed to create Redis stream client: %v", err)
+	}
+	defer streamClient.Close()
+	log.Println("Redis stream client connected successfully")
+
 	// Initialize and start northbound REST API
 	log.Println("Initializing northbound REST API...")
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
@@ -155,7 +164,7 @@ func main() {
 
 	// Initialize and start southbound interface
 	log.Println("Initializing southbound interface...")
-	southbound := NewSouthboundInterface(mqttClient)
+	southbound := NewSouthboundInterface(mqttClient, streamClient)
 	if err := southbound.Start(); err != nil {
 		log.Fatalf("Failed to start southbound interface: %v", err)
 	}
