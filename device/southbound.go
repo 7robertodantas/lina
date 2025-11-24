@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -66,7 +67,7 @@ func (sb *SouthboundInterface) handleHeartbeat(client mqtt.Client, msg mqtt.Mess
 	deviceID := extractDeviceID(topic)
 
 	var payload mqttpb.HeartbeatPayload
-	if err := protojson.Unmarshal(msg.Payload(), &payload); err != nil {
+	if err := payload.UnmarshalJSON(msg.Payload()); err != nil {
 		log.Printf("Error parsing heartbeat payload from device %s: %v", deviceID, err)
 		return
 	}
@@ -84,7 +85,7 @@ func (sb *SouthboundInterface) handleUsage(client mqtt.Client, msg mqtt.Message)
 	deviceID := extractDeviceID(topic)
 
 	var payload mqttpb.UsagePayload
-	if err := protojson.Unmarshal(msg.Payload(), &payload); err != nil {
+	if err := payload.UnmarshalJSON(msg.Payload()); err != nil {
 		log.Printf("Error parsing usage payload from device %s: %v", deviceID, err)
 		return
 	}
@@ -105,6 +106,7 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 	deviceID := extractDeviceID(topic)
 
 	var request mqttpb.AuthorizationRequestPayload
+	// AuthorizationRequestPayload doesn't have enums, so we can use protojson.Unmarshal directly
 	if err := protojson.Unmarshal(msg.Payload(), &request); err != nil {
 		log.Printf("Error parsing authorization request payload from device %s: %v", deviceID, err)
 		return
@@ -131,8 +133,8 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 		ExpiresAt:       time.Now().Add(1 * time.Hour).Format(time.RFC3339),
 	}
 
-	// Serialize response to JSON
-	responseJSON, err := protojson.Marshal(response)
+	// Serialize response to JSON with short enum names
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
 		log.Printf("Error marshaling authorization response: %v", err)
 		return
@@ -154,6 +156,7 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 	deviceID := extractDeviceID(topic)
 
 	var request mqttpb.InvoiceRequestPayload
+	// InvoiceRequestPayload doesn't have enums, so we can use protojson.Unmarshal directly
 	if err := protojson.Unmarshal(msg.Payload(), &request); err != nil {
 		log.Printf("Error parsing invoice request payload from device %s: %v", deviceID, err)
 		return
@@ -178,8 +181,8 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 		ExpiresAt:  time.Now().Add(1 * time.Hour).Format(time.RFC3339),
 	}
 
-	// Serialize response to JSON
-	responseJSON, err := protojson.Marshal(response)
+	// Serialize response to JSON with short enum names
+	responseJSON, err := json.Marshal(response)
 	if err != nil {
 		log.Printf("Error marshaling invoice response: %v", err)
 		return

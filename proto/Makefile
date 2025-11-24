@@ -68,8 +68,10 @@ generate-docker:
 
 clean:
 	@echo "Cleaning generated files..."
-	@rm -rf $(GEN_DIR)
-	@echo "Clean complete!"
+	@find $(GEN_DIR) -type f -name "*.pb.go" -delete
+	@find $(GEN_DIR) -type f -name "*_grpc.pb.go" -delete
+	@find $(GEN_DIR) -type d -empty -delete
+	@echo "Clean complete! (preserved json_marshal.go files)"
 
 help:
 	@echo "Available targets:"
