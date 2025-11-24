@@ -72,6 +72,8 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
+      - LEDGER_GRPC_HOST=${LEDGER_GRPC_HOST:-ledger}
+      - LEDGER_GRPC_PORT=${LEDGER_GRPC_PORT:-9090}
     volumes:
       - ./mosquitto/certs:/certs:ro
     depends_on:
@@ -79,6 +81,26 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      ledger:
+        condition: service_started
+
+  ledger:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: ledger
+    container_name: ledger
+    # ports:
+    #   - "9082:8080"  # HTTP port
+    #   - "${LEDGER_GRPC_PORT:-9090}:9090"  # gRPC port
+    environment:
+      - DB_PATH=${LEDGER_DB_PATH:-ledger.db}
+      - SERVICE_TOKEN=${LEDGER_SERVICE_TOKEN:-dev-token}
+      - LISTEN_ADDR=${LEDGER_LISTEN_ADDR:-:8080}
+      - GRPC_ADDR=${LEDGER_GRPC_ADDR:-:9090}
+    restart: unless-stopped
+
 
   # consumption:
   #   build:
@@ -96,17 +118,6 @@ services:
   #     - LEDGER_URL=http://ledger:8080
   #   depends_on:
   #     - registry
-  #   restart: unless-stopped
-
-  # ledger:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #     args:
-  #       SERVICE: ledger
-  #   container_name: ledger
-  #   ports:
-  #     - "9082:8080"
   #   restart: unless-stopped
 
   # lightning:

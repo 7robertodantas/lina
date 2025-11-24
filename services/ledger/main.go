@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	ledgerpb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/interfaces/sync/ledger"
+	"google.golang.org/grpc"
 	_ "modernc.org/sqlite"
 )
 
@@ -28,6 +31,7 @@ type Config struct {
 	DBPath        string
 	ServiceToken  string
 	ListenAddr    string
+	GRPCAddr      string
 	MaxPageSize   int
 	BusyTimeoutMS int
 }
@@ -53,6 +57,7 @@ func loadConfig() Config {
 		DBPath:        getenv("DB_PATH", "ledger.db"),
 		ServiceToken:  getenv("SERVICE_TOKEN", "dev-token"),
 		ListenAddr:    getenv("LISTEN_ADDR", ":8080"),
+		GRPCAddr:      getenv("GRPC_ADDR", ":9090"),
 		MaxPageSize:   intEnv("MAX_PAGE_SIZE", 200),
 		BusyTimeoutMS: intEnv("BUSY_TIMEOUT_MS", 5000),
 	}
@@ -100,6 +105,19 @@ func initDB(cfg Config) *sql.DB {
 			response_json TEXT NOT NULL,     -- cached successful response
 			created_at INTEGER NOT NULL
 		);`,
+
+		// Authorizations: holds for device spending
+		`CREATE TABLE IF NOT EXISTS authorizations(
+			authorization_id TEXT PRIMARY KEY,
+			device_id TEXT NOT NULL,
+			granted_msat INTEGER NOT NULL,
+			remaining_msat INTEGER NOT NULL,
+			issued_at TEXT NOT NULL,          -- ISO-8601 timestamp
+			expires_at TEXT NOT NULL,         -- ISO-8601 timestamp
+			status TEXT NOT NULL,            -- active|completed|expired
+			created_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_device_status ON authorizations(device_id, status, expires_at);`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -532,6 +550,24 @@ func main() {
 
 	svc := NewService(cfg, db)
 
+	// Start gRPC server in a goroutine
+	go func() {
+		lis, err := net.Listen("tcp", cfg.GRPCAddr)
+		if err != nil {
+			log.Fatalf("failed to listen on %s: %v", cfg.GRPCAddr, err)
+		}
+
+		grpcServer := grpc.NewServer()
+		eastWestServer := NewEastWestServer(svc)
+		ledgerpb.RegisterLedgerServiceServer(grpcServer, eastWestServer)
+
+		log.Printf("gRPC server listening on %s", cfg.GRPCAddr)
+		if err := grpcServer.Serve(lis); err != nil {
+			log.Fatalf("failed to serve gRPC: %v", err)
+		}
+	}()
+
+	// Start HTTP server
 	r := gin.Default()
 	r.GET("/health", svc.health)
 
@@ -544,7 +580,7 @@ func main() {
 	r.GET("/balance", svc.getBalanceHandler)
 	r.GET("/entries", svc.listEntries)
 
-	log.Printf("Ledger Service listening on %s (DB=%s)", cfg.ListenAddr, cfg.DBPath)
+	log.Printf("Ledger Service HTTP listening on %s (DB=%s)", cfg.ListenAddr, cfg.DBPath)
 	if err := r.Run(cfg.ListenAddr); err != nil {
 		log.Fatal(err)
 	}

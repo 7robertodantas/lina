@@ -3,7 +3,7 @@ package iot.payperuse.edge.interfaces.sync.lightning;
 
 option go_package = "iot/payperuse/edge/interfaces/sync/lightning";
 
-import "model-lightning-service.proto";
+import "model/model-lightning-service.proto";
 
 service LightningService {
   // Creates a Lightning invoice for the given device and amount.
