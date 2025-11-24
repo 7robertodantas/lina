@@ -539,6 +539,161 @@ func (d *DynSecService) GetDeviceCredentials(deviceID string) (username, passwor
 	return username, password
 }
 
+// ProvisionDeviceService provisions the device service user with ACLs to subscribe to device topics
+func (d *DynSecService) ProvisionDeviceService(username, password string) error {
+	if username == "" {
+		return fmt.Errorf("device service username is required")
+	}
+
+	roleName := "device_service_role"
+
+	// Step 1: Check if role exists, create if missing
+	log.Printf("Checking if device service role exists: %s", roleName)
+	roleExists, err := d.roleExists(roleName)
+	if err != nil {
+		log.Printf("Warning: Failed to check if role exists, will attempt to create: %v", err)
+		roleExists = false
+	}
+
+	if !roleExists {
+		log.Printf("Creating device service role: %s", roleName)
+		createRoleCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "createRole",
+					"rolename": roleName,
+				},
+			},
+		}
+		if err := d.executeCommand(createRoleCmd); err != nil {
+			return fmt.Errorf("failed to create device service role %s: %w", roleName, err)
+		}
+		log.Printf("Device service role %s created successfully", roleName)
+	} else {
+		log.Printf("Device service role %s already exists, skipping creation", roleName)
+	}
+
+	// Step 2: Add subscribe ACLs for device topics
+	subscribeTopics := []string{
+		"/devices/+/heartbeat",
+		"/devices/+/usage",
+		"/devices/+/request/authorize",
+		"/devices/+/request/invoice",
+	}
+
+	log.Printf("Adding %d subscribe ACLs for device service role: %s", len(subscribeTopics), roleName)
+	subscribeACLCommands := make([]map[string]interface{}, 0, len(subscribeTopics))
+	for _, topic := range subscribeTopics {
+		log.Printf("  - Adding subscribe ACL for topic: %s", topic)
+		subscribeACLCommands = append(subscribeACLCommands, map[string]interface{}{
+			"command":  "addRoleACL",
+			"rolename": roleName,
+			"acltype":  "subscribePattern",
+			"topic":    topic,
+			"allow":    true,
+			"priority": 5,
+		})
+	}
+
+	addSubscribeACLCmd := map[string]interface{}{
+		"commands": subscribeACLCommands,
+	}
+	if err := d.executeCommand(addSubscribeACLCmd); err != nil {
+		log.Printf("ERROR: Failed to add subscribe ACLs: %v", err)
+		// Continue even if some ACLs already exist
+	}
+
+	// Step 3: Add publish ACLs for device service responses
+	publishTopics := []string{
+		"/devices/+/response/authorize",
+		"/devices/+/response/invoice",
+		"/devices/+/config",
+		"/devices/+/control",
+		"/devices/+/balance",
+	}
+
+	log.Printf("Adding %d publish ACLs for device service role: %s", len(publishTopics), roleName)
+	publishACLCommands := make([]map[string]interface{}, 0, len(publishTopics))
+	for _, topic := range publishTopics {
+		log.Printf("  - Adding publish ACL for topic: %s", topic)
+		publishACLCommands = append(publishACLCommands, map[string]interface{}{
+			"command":  "addRoleACL",
+			"rolename": roleName,
+			"acltype":  "publishClientSend",
+			"topic":    topic,
+			"allow":    true,
+			"priority": 5,
+		})
+	}
+
+	addPublishACLCmd := map[string]interface{}{
+		"commands": publishACLCommands,
+	}
+	if err := d.executeCommand(addPublishACLCmd); err != nil {
+		log.Printf("ERROR: Failed to add publish ACLs: %v", err)
+		// Continue even if some ACLs already exist
+	}
+
+	// Step 4: Check if device service client exists, create if missing
+	log.Printf("Checking if device service client exists: %s", username)
+	clientExists, err := d.clientExists(username)
+	if err != nil {
+		log.Printf("Warning: Failed to check if client exists, will attempt to create: %v", err)
+		clientExists = false
+	}
+
+	if !clientExists {
+		log.Printf("Creating device service client: %s", username)
+		createClientCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "createClient",
+					"username": username,
+					"password": password,
+				},
+			},
+		}
+		if err := d.executeCommand(createClientCmd); err != nil {
+			return fmt.Errorf("failed to create device service client %s: %w", username, err)
+		}
+		log.Printf("Device service client %s created successfully", username)
+	} else {
+		log.Printf("Device service client %s already exists, updating password", username)
+		// Update password if client exists
+		setPasswordCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "setClientPassword",
+					"username": username,
+					"password": password,
+				},
+			},
+		}
+		if err := d.executeCommand(setPasswordCmd); err != nil {
+			log.Printf("Warning: Failed to update password for device service client: %v", err)
+		}
+	}
+
+	// Step 5: Assign device_service_role to the device service client
+	log.Printf("Assigning device service role %s to client %s", roleName, username)
+	addRoleCmd := map[string]interface{}{
+		"commands": []map[string]interface{}{
+			{
+				"command":  "addClientRole",
+				"username": username,
+				"rolename": roleName,
+			},
+		},
+	}
+	if err := d.executeCommand(addRoleCmd); err != nil {
+		log.Printf("Warning: Failed to assign role to device service client: %v (role might already be assigned)", err)
+		// Continue even if role is already assigned
+	}
+
+	log.Printf("Successfully provisioned device service: %s", username)
+	return nil
+}
+
 // Disconnect disconnects from the MQTT broker
 func (d *DynSecService) Disconnect() {
 	if d.client != nil {

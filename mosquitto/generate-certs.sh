@@ -67,7 +67,7 @@ O = LNPay
 C = US
 
 [v3_req]
-keyUsage = keyEncipherment, dataEncipherment
+keyUsage = digitalSignature, keyEncipherment, dataEncipherment
 extendedKeyUsage = serverAuth
 subjectAltName = @alt_names
 
@@ -77,6 +77,7 @@ DNS.2 = localhost
 DNS.3 = *.mosquitto
 IP.1 = 127.0.0.1
 IP.2 = ::1
+IP.3 = 192.168.65.1
 EOF
     
     openssl genrsa -out "$CERT_DIR/server.key" 2048

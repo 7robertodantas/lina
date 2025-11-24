@@ -116,6 +116,7 @@ DNS.2 = localhost
 DNS.3 = *.mosquitto
 IP.1 = 127.0.0.1
 IP.2 = ::1
+IP.3 = 192.168.65.1
 EOF
 
 openssl req -new -key certs/server.key -out certs/server.csr -config certs/server.conf

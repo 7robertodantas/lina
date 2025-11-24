@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
@@ -147,6 +150,22 @@ func main() {
 	}
 	defer dynSecService.Disconnect()
 
+	// Provision device service user with ACLs to subscribe to device topics
+	deviceServiceUsername := getEnv("MQTT_USERNAME", "device-service")
+	deviceServicePassword := getEnv("MQTT_PASSWORD", "")
+	if deviceServicePassword == "" {
+		deviceServicePassword = "device-service-password" // Default password if not set
+		log.Printf("Warning: MQTT_PASSWORD not set, using default password")
+	}
+
+	log.Printf("Provisioning device service user: %s", deviceServiceUsername)
+	if err := dynSecService.ProvisionDeviceService(deviceServiceUsername, deviceServicePassword); err != nil {
+		log.Printf("Failed to provision device service user: %v", err)
+		// Continue even if provisioning fails (user might already be provisioned)
+	} else {
+		log.Println("Device service user provisioned successfully")
+	}
+
 	// Example: Provision device123
 	log.Println("Provisioning device123...")
 	if err := dynSecService.ProvisionDevice("device123"); err != nil {
@@ -165,26 +184,19 @@ func main() {
 	defer mqttClient.Disconnect()
 	log.Println("MQTT client connected successfully")
 
-	// Example: Emit a usage record event
-	jsonData, err := EmitUsageRecord(
-		"device-123",
-		"report-456",
-		"kWh",
-		2.5,
-		devicepb.UsageReportingStrategy_USAGE_STRATEGY_DELTA,
-	)
-	if err != nil {
-		log.Printf("Error emitting usage record: %v", err)
-		return
+	// Initialize and start southbound interface
+	log.Println("Initializing southbound interface...")
+	southbound := NewSouthboundInterface(mqttClient)
+	if err := southbound.Start(); err != nil {
+		log.Fatalf("Failed to start southbound interface: %v", err)
 	}
 
-	// Publish usage record to MQTT
-	deviceID := "device-123"
-	topic := fmt.Sprintf("devices/%s/usage", deviceID)
-	if err := mqttClient.Publish(topic, 1, false, jsonData); err != nil {
-		log.Printf("Error publishing to MQTT: %v", err)
-		return
-	}
+	log.Println("Device service is running. Press Ctrl+C to stop...")
 
-	log.Println("Usage record published successfully")
+	// Wait for interrupt signal to gracefully shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+
+	log.Println("Shutting down device service...")
 }

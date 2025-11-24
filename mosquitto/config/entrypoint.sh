@@ -19,11 +19,11 @@ DYNSEC_DIR="/mosquitto/data"
 mkdir -p "$DYNSEC_DIR"
 chmod 755 "$DYNSEC_DIR"
 
-# Check if dynamic-security.json exists, if not, generate it
+# Check if dynamic-security.json exists, if not, initialize it
 if [ ! -f "$DYNSEC_FILE" ]; then
-    echo "dynamic-security.json not found. Generating it..."
+    echo "dynamic-security.json not found. Initializing it..."
     
-    # First, initialize the dynamic-security.json file (this doesn't need a running broker)
+    # Initialize the dynamic-security.json file (this doesn't need a running broker)
     /mosquitto/generate-dynsec.sh init-only
     if [ $? -ne 0 ]; then
         echo "Failed to initialize dynamic-security.json"
@@ -40,61 +40,12 @@ if [ ! -f "$DYNSEC_FILE" ]; then
     chmod 0700 "$DYNSEC_FILE"
     chmod 755 "$DYNSEC_DIR"
     
-    # Start mosquitto in the background (we'll keep it running)
-    # Use the provided command if available, otherwise use default
-    echo "Starting mosquitto in background to configure dynamic security..."
-    if [ $# -eq 0 ]; then
-        mosquitto -c /mosquitto/config/mosquitto.conf &
-    else
-        "$@" &
-    fi
-    MOSQUITTO_PID=$!
-    
-    # Wait for mosquitto to be ready (accepting connections and plugin loaded)
-    echo "Waiting for mosquitto to be ready..."
-    MAX_ATTEMPTS=30
-    ATTEMPT=0
-    while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-        # Try to connect - if we get "Connection refused", broker isn't ready yet
-        OUTPUT=$(mosquitto_sub -h 127.0.0.1 -p 8883 --cafile /mosquitto/certs/ca.crt -t 'test/health' -W 1 -C 1 -i healthcheck-test 2>&1)
-        if echo "$OUTPUT" | grep -q "Connection refused"; then
-            ATTEMPT=$((ATTEMPT + 1))
-            sleep 1
-        else
-            # Any other result means broker is accepting connections
-            # Wait a bit more to ensure dynamic security plugin is fully loaded
-            sleep 3
-            echo "Mosquitto is ready"
-            break
-        fi
-    done
-    
-    if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-        echo "Mosquitto failed to start within timeout"
-        kill $MOSQUITTO_PID 2>/dev/null
-        exit 1
-    fi
-    
-    # Now configure dynamic security (this needs a running broker)
-    /mosquitto/generate-dynsec.sh configure
-    if [ $? -ne 0 ]; then
-        echo "Failed to configure dynamic-security.json"
-        kill $MOSQUITTO_PID 2>/dev/null
-        exit 1
-    fi
-    
-    echo "dynamic-security.json generated and configured successfully"
-    echo "Mosquitto is running in background (PID: $MOSQUITTO_PID)"
-    
-    # Keep mosquitto running and wait for it (this becomes the main process)
-    # If mosquitto dies, the container will exit
-    wait $MOSQUITTO_PID
-    EXIT_CODE=$?
-    echo "Mosquitto process exited with code $EXIT_CODE"
-    exit $EXIT_CODE
+    echo "dynamic-security.json initialized successfully"
+    echo "Note: Device service will configure users and roles on startup"
 else
-    echo "dynamic-security.json already exists, skipping generation"
-    # Start mosquitto with the provided command
-    exec "$@"
+    echo "dynamic-security.json already exists, skipping initialization"
 fi
+
+# Start mosquitto with the provided command
+exec "$@"
 
