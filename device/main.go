@@ -1,10 +1,11 @@
 package main
 
 import (
-	"database/sql"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,52 +14,10 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
-	_ "modernc.org/sqlite"
-
 	// Import the generated proto package
 	// Note: The path matches the go_package in the proto file + the gen/ output directory
 	devicepb "github.com/robertodantas/lnpay/proto/gen/gen/iot/payperuse/edge/model/device"
 )
-
-// Device represents a registered IoT device
-type Device struct {
-	ID              string  `json:"id"`
-	PublicKey       string  `json:"public_key"`
-	Unit            string  `json:"unit"`           // e.g., "sheet", "m3"
-	PricePerUnit    float64 `json:"price_per_unit"` // cost in sats per unit
-	SecretKey       string  `json:"secret_key"`
-	AggregationMode string  `json:"aggregation_mode"` // e.g., "per-unit", "time-window", "value-threshold"
-}
-
-// RegistryService manages the registered devices
-type RegistryService struct {
-	db *sql.DB
-}
-
-// NewRegistryService creates and initializes the SQLite database
-func NewRegistryService(dbPath string) *RegistryService {
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		log.Fatalf("failed to connect to SQLite: %v", err)
-	}
-
-	// Create the devices table with aggregation_mode support
-	createTable := `
-	CREATE TABLE IF NOT EXISTS devices (
-		id TEXT PRIMARY KEY,
-		public_key TEXT,
-		unit TEXT,
-		price_per_unit REAL,
-		secret_key TEXT,
-		aggregation_mode TEXT DEFAULT 'per-unit'
-	);`
-
-	if _, err := db.Exec(createTable); err != nil {
-		log.Fatalf("failed to create table: %v", err)
-	}
-
-	return &RegistryService{db: db}
-}
 
 // EmitUsageRecord creates and serializes a DeviceUsageReportedEvent
 // This demonstrates how to use the generated proto files to emit events
@@ -140,8 +99,14 @@ func ExampleEmitUsageRecord() {
 func main() {
 	log.Println("Starting device service...")
 
-	_ = NewRegistryService("devices.db")
-	log.Println("Registry service initialized")
+	// Initialize device repository
+	dbPath := getEnv("DB_PATH", "devices.db")
+	repo, err := NewDeviceRepository(dbPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize device repository: %v", err)
+	}
+	defer repo.Close()
+	log.Println("Device repository initialized")
 
 	// Initialize dynamic security service
 	log.Println("Initializing dynamic security service...")
@@ -167,15 +132,6 @@ func main() {
 		log.Println("Device service user provisioned successfully")
 	}
 
-	// Example: Provision device123
-	log.Println("Provisioning device123...")
-	if err := dynSecService.ProvisionDevice("device123"); err != nil {
-		log.Printf("Failed to provision device123: %v", err)
-		// Continue even if provisioning fails (device might already be provisioned)
-	} else {
-		log.Println("Device123 provisioned successfully")
-	}
-
 	// Connect to MQTT broker
 	log.Println("Connecting to MQTT broker...")
 	mqttClient, err := NewMQTTClient()
@@ -185,6 +141,18 @@ func main() {
 	defer mqttClient.Disconnect()
 	log.Println("MQTT client connected successfully")
 
+	// Initialize and start northbound REST API
+	log.Println("Initializing northbound REST API...")
+	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
+
+	// Start northbound server in a goroutine
+	apiAddr := getEnv("API_ADDR", ":8080")
+	go func() {
+		if err := northbound.Start(apiAddr); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start northbound API server: %v", err)
+		}
+	}()
+
 	// Initialize and start southbound interface
 	log.Println("Initializing southbound interface...")
 	southbound := NewSouthboundInterface(mqttClient)
@@ -193,6 +161,7 @@ func main() {
 	}
 
 	log.Println("Device service is running. Press Ctrl+C to stop...")
+	log.Printf("Northbound REST API available at http://localhost%s", apiAddr)
 
 	// Wait for interrupt signal to gracefully shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -200,4 +169,13 @@ func main() {
 	<-sigChan
 
 	log.Println("Shutting down device service...")
+
+	// Gracefully shutdown northbound server
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := northbound.Stop(ctx); err != nil {
+		log.Printf("Error shutting down northbound server: %v", err)
+	}
+
+	log.Println("Device service stopped")
 }

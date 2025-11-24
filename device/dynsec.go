@@ -382,13 +382,12 @@ sendCommand:
 
 // ProvisionDevice provisions a new device with dynamic security
 // It creates a role, client, and sets up ACL rules for the device
-func (d *DynSecService) ProvisionDevice(deviceID string) error {
+func (d *DynSecService) ProvisionDevice(deviceID, password string) error {
 	log.Printf("Provisioning device: %s", deviceID)
 
 	roleName := fmt.Sprintf("device_%s_role", deviceID)
 	clientUsername := deviceID
-	// Generate a simple password (in production, use a secure random password)
-	clientPassword := fmt.Sprintf("%s_password", deviceID)
+	clientPassword := password
 
 	// Step 1: Check if role exists, create if missing
 	log.Printf("Checking if role exists: %s", roleName)
