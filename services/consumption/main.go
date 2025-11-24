@@ -5,56 +5,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"github.com/robertodantas/lnpay/library"
 )
 
-/*
-   =========================================
-   Config & bootstrap
-   =========================================
-*/
-
-type Config struct {
-	DBPath        string
-	ServiceToken  string
-	ListenAddr    string
-	GRPCAddr      string
-	MaxPageSize   int
-	BusyTimeoutMS int
-}
-
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func intEnv(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return def
-}
-
-func loadConfig() Config {
-	return Config{
-		DBPath:        getenv("DB_PATH", "consumption.db"),
-		ServiceToken:  getenv("SERVICE_TOKEN", "dev-token"),
-		ListenAddr:    getenv("LISTEN_ADDR", ":8080"),
-		GRPCAddr:      getenv("GRPC_ADDR", ":9090"),
-		MaxPageSize:   intEnv("MAX_PAGE_SIZE", 200),
-		BusyTimeoutMS: intEnv("BUSY_TIMEOUT_MS", 5000),
-	}
-}
-
 func main() {
-	cfg := loadConfig()
+	cfg := LoadConfig()
 	repository, err := NewConsumptionRepository(cfg.DBPath, cfg.BusyTimeoutMS)
 	if err != nil {
 		log.Fatalf("Failed to create consumption repository: %v", err)

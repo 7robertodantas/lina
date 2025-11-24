@@ -99,9 +99,10 @@ func ExampleEmitUsageRecord() {
 func main() {
 	log.Println("Starting device service...")
 
+	cfg := LoadConfig()
+
 	// Initialize device repository
-	dbPath := getEnv("DB_PATH", "devices.db")
-	repo, err := NewDeviceRepository(dbPath)
+	repo, err := NewDeviceRepository(cfg.DBPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize device repository: %v", err)
 	}
@@ -110,15 +111,18 @@ func main() {
 
 	// Initialize dynamic security service
 	log.Println("Initializing dynamic security service...")
-	dynSecService, err := NewDynSecService()
+	dynSecService, err := NewDynSecService(cfg)
 	if err != nil {
 		log.Fatalf("Failed to initialize dynamic security service: %v", err)
 	}
 	defer dynSecService.Disconnect()
 
 	// Provision device service user with ACLs to subscribe to device topics
-	deviceServiceUsername := getEnv("MQTT_USERNAME", "device-service")
-	deviceServicePassword := getEnv("MQTT_PASSWORD", "")
+	deviceServiceUsername := cfg.MQTTUsername
+	if deviceServiceUsername == "" {
+		deviceServiceUsername = "device-service"
+	}
+	deviceServicePassword := cfg.MQTTPassword
 	if deviceServicePassword == "" {
 		deviceServicePassword = "device-service-password" // Default password if not set
 		log.Printf("Warning: MQTT_PASSWORD not set, using default password")
@@ -134,7 +138,7 @@ func main() {
 
 	// Connect to MQTT broker
 	log.Println("Connecting to MQTT broker...")
-	mqttClient, err := NewMQTTClient()
+	mqttClient, err := NewMQTTClient(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create MQTT client: %v", err)
 	}
@@ -152,7 +156,7 @@ func main() {
 
 	// Connect to ledger service via gRPC
 	log.Println("Connecting to ledger service...")
-	ledgerClient, err := NewLedgerClient()
+	ledgerClient, err := NewLedgerClient(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create ledger gRPC client: %v", err)
 	}
@@ -164,9 +168,8 @@ func main() {
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
 
 	// Start northbound server in a goroutine
-	apiAddr := getEnv("API_ADDR", ":8080")
 	go func() {
-		if err := northbound.Start(apiAddr); err != nil && err != http.ErrServerClosed {
+		if err := northbound.Start(cfg.APIAddr); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Failed to start northbound API server: %v", err)
 		}
 	}()
@@ -179,7 +182,7 @@ func main() {
 	}
 
 	log.Println("Device service is running. Press Ctrl+C to stop...")
-	log.Printf("Northbound REST API available at http://localhost%s", apiAddr)
+	log.Printf("Northbound REST API available at http://localhost%s", cfg.APIAddr)
 
 	// Wait for interrupt signal to gracefully shutdown
 	sigChan := make(chan os.Signal, 1)

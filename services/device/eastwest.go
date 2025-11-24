@@ -80,9 +80,9 @@ func loggingUnaryInterceptor(ctx context.Context, method string, req, reply inte
 }
 
 // NewLedgerClient creates a new gRPC client connection to the ledger service
-func NewLedgerClient() (*LedgerClient, error) {
-	host := getEnv("LEDGER_GRPC_HOST", "ledger")
-	port := getEnvInt("LEDGER_GRPC_PORT", 9090)
+func NewLedgerClient(cfg Config) (*LedgerClient, error) {
+	host := cfg.LedgerGRPCHost
+	port := cfg.LedgerGRPCPort
 
 	addr := fmt.Sprintf("%s:%d", host, port)
 	log.Printf("Connecting to ledger gRPC service at %s...", addr)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robertodantas/lnpay/library"
 )
 
 // NorthboundInterface handles REST API endpoints
@@ -105,7 +106,7 @@ func (nb *NorthboundInterface) listDeviceEntries(c *gin.Context) {
 		return
 	}
 
-	limit := min(intEnv("DEFAULT_PAGE_SIZE", 50), nb.cfg.MaxPageSize)
+	limit := min(library.IntEnv("DEFAULT_PAGE_SIZE", 50), nb.cfg.MaxPageSize)
 	if v := c.Query("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			limit = min(n, nb.cfg.MaxPageSize)

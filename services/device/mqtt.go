@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strconv"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -32,40 +31,17 @@ type MQTTConnectionOptions struct {
 	KeepAlive time.Duration
 }
 
-// Helper functions for environment variables
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
-func getEnvInt(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if boolValue, err := strconv.ParseBool(value); err == nil {
-			return boolValue
-		}
-	}
-	return defaultValue
-}
-
-// createTLSConfig creates a TLS configuration from environment variables
-func createTLSConfig() (*tls.Config, error) {
+// createTLSConfig creates a TLS configuration from config
+func createTLSConfig(cfg Config) (*tls.Config, error) {
 	// Check if we should skip certificate verification (for testing only)
-	skipVerify := getEnvBool("MQTT_TLS_SKIP_VERIFY", false)
+	skipVerify := cfg.MQTTTLSSkipVerify
 
-	broker := getEnv("MQTT_BROKER", "mosquitto")
+	broker := cfg.MQTTBroker
 	// Allow custom server name for certificate validation (useful when CN doesn't match hostname)
-	serverName := getEnv("MQTT_TLS_SERVER_NAME", broker)
+	serverName := cfg.MQTTTLSServerName
+	if serverName == "" {
+		serverName = broker
+	}
 
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: skipVerify,
@@ -82,7 +58,7 @@ func createTLSConfig() (*tls.Config, error) {
 	}
 
 	// Load CA certificate
-	caCertPath := getEnv("MQTT_TLS_CA_CERT", "/certs/ca.crt")
+	caCertPath := cfg.MQTTTLSCACert
 	log.Printf("Loading CA certificate from: %s", caCertPath)
 	caCert, err := os.ReadFile(caCertPath)
 	if err != nil {
@@ -97,13 +73,9 @@ func createTLSConfig() (*tls.Config, error) {
 	log.Println("CA certificate loaded successfully")
 
 	// Load edge node certificate and key if provided and required
-	requireEdgeCert := getEnvBool("MQTT_TLS_REQUIRE_EDGE_CERT", false)
-	edgeCertPath := getEnv("MQTT_TLS_EDGE_CERT", "")
-	edgeKeyPath := getEnv("MQTT_TLS_EDGE_KEY", "")
-
-	if requireEdgeCert && edgeCertPath != "" && edgeKeyPath != "" {
-		log.Printf("Loading edge node certificate from: %s and key from: %s", edgeCertPath, edgeKeyPath)
-		cert, err := tls.LoadX509KeyPair(edgeCertPath, edgeKeyPath)
+	if cfg.MQTTTLSRequireEdgeCert && cfg.MQTTTLSEdgeCert != "" && cfg.MQTTTLSEdgeKey != "" {
+		log.Printf("Loading edge node certificate from: %s and key from: %s", cfg.MQTTTLSEdgeCert, cfg.MQTTTLSEdgeKey)
+		cert, err := tls.LoadX509KeyPair(cfg.MQTTTLSEdgeCert, cfg.MQTTTLSEdgeKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load edge node certificate: %w", err)
 		}
@@ -117,7 +89,7 @@ func createTLSConfig() (*tls.Config, error) {
 }
 
 // buildMQTTOptions creates MQTT client options from connection options
-func buildMQTTOptions(opts *MQTTConnectionOptions) (*mqtt.ClientOptions, error) {
+func buildMQTTOptions(opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOptions, error) {
 	brokerURL := fmt.Sprintf("%s://%s:%d", opts.Protocol, opts.Broker, opts.Port)
 
 	mqttOpts := mqtt.NewClientOptions()
@@ -147,7 +119,7 @@ func buildMQTTOptions(opts *MQTTConnectionOptions) (*mqtt.ClientOptions, error) 
 	// Configure TLS if enabled
 	if opts.UseTLS {
 		log.Println("Configuring TLS for MQTT connection...")
-		tlsConfig, err := createTLSConfig()
+		tlsConfig, err := createTLSConfig(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
@@ -159,8 +131,8 @@ func buildMQTTOptions(opts *MQTTConnectionOptions) (*mqtt.ClientOptions, error) 
 }
 
 // ConnectMQTT connects to MQTT broker with the given options and returns the client
-func ConnectMQTT(opts *MQTTConnectionOptions) (mqtt.Client, error) {
-	mqttOpts, err := buildMQTTOptions(opts)
+func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
+	mqttOpts, err := buildMQTTOptions(opts, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -196,24 +168,24 @@ func ConnectMQTT(opts *MQTTConnectionOptions) (mqtt.Client, error) {
 	return client, nil
 }
 
-// NewMQTTClient creates a new MQTT client with TLS support using default options
-func NewMQTTClient() (*MQTTClient, error) {
-	broker := getEnv("MQTT_BROKER", "mosquitto")
-	useTLS := getEnvBool("MQTT_USE_TLS", true)
+// NewMQTTClient creates a new MQTT client with TLS support using config
+func NewMQTTClient(cfg Config) (*MQTTClient, error) {
+	broker := cfg.MQTTBroker
+	useTLS := cfg.MQTTUseTLS
 
 	var port int
 	var protocol string
 	if useTLS {
-		port = getEnvInt("MQTT_TLS_PORT", 8883)
-		protocol = getEnv("MQTT_TLS_PROTOCOL", "tls")
+		port = cfg.MQTTTLSPort
+		protocol = cfg.MQTTTLSProtocol
 	} else {
-		port = getEnvInt("MQTT_PORT", 1883)
+		port = cfg.MQTTPort
 		protocol = "tcp"
 	}
 
-	clientID := getEnv("MQTT_CLIENT_ID", "device-service")
-	username := getEnv("MQTT_USERNAME", "")
-	password := getEnv("MQTT_PASSWORD", "")
+	clientID := cfg.MQTTClientID
+	username := cfg.MQTTUsername
+	password := cfg.MQTTPassword
 
 	opts := &MQTTConnectionOptions{
 		ClientID:  clientID,
@@ -227,7 +199,7 @@ func NewMQTTClient() (*MQTTClient, error) {
 		KeepAlive: 60 * time.Second,
 	}
 
-	client, err := ConnectMQTT(opts)
+	client, err := ConnectMQTT(opts, cfg)
 	if err != nil {
 		return nil, err
 	}

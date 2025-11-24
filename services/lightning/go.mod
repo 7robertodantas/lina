@@ -5,6 +5,7 @@ go 1.25.4
 require (
 	github.com/lightninglabs/lndclient v0.19.3-0
 	github.com/lightningnetwork/lnd v0.19.3-beta
+	github.com/robertodantas/lnpay/library v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.65.0-dev
 )
 
@@ -41,6 +42,7 @@ require (
 	github.com/decred/dcrd/crypto/blake256 v1.0.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.3.0 // indirect
 	github.com/decred/dcrd/lru v1.1.2 // indirect
+	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
 	github.com/docker/cli v28.0.1+incompatible // indirect
 	github.com/docker/docker v28.0.1+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
@@ -119,6 +121,7 @@ require (
 	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.26.0 // indirect
 	github.com/prometheus/procfs v0.6.0 // indirect
+	github.com/redis/go-redis/v9 v9.17.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/fastuuid v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
@@ -189,3 +192,6 @@ replace github.com/btcsuite/btcd/btcec => github.com/btcsuite/btcd/btcec/v2 v2.3
 // We want to format raw bytes as hex instead of base64. The forked version
 // allows us to specify that as an option.
 replace google.golang.org/protobuf => github.com/lightninglabs/protobuf-go-hex-display v1.33.0-hex-display
+
+// Local dependencies
+replace github.com/robertodantas/lnpay/library => ../../library

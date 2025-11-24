@@ -20,22 +20,22 @@ type DynSecService struct {
 }
 
 // NewDynSecService creates a new dynamic security service using MQTT topic API
-func NewDynSecService() (*DynSecService, error) {
-	broker := getEnv("MQTT_BROKER", "mosquitto")
-	useTLS := getEnvBool("MQTT_USE_TLS", true)
+func NewDynSecService(cfg Config) (*DynSecService, error) {
+	broker := cfg.MQTTBroker
+	useTLS := cfg.MQTTUseTLS
 
 	var port int
 	var protocol string
 	if useTLS {
-		port = getEnvInt("MQTT_TLS_PORT", 8883)
-		protocol = getEnv("MQTT_TLS_PROTOCOL", "tls")
+		port = cfg.MQTTTLSPort
+		protocol = cfg.MQTTTLSProtocol
 	} else {
-		port = getEnvInt("MQTT_PORT", 1883)
+		port = cfg.MQTTPort
 		protocol = "tcp"
 	}
 
-	adminUser := getEnv("MQTT_DYNSEC_ADMIN_USER", "admin")
-	adminPass := getEnv("MQTT_DYNSEC_ADMIN_PASSWORD", "admin")
+	adminUser := cfg.MQTTDynSecAdminUser
+	adminPass := cfg.MQTTDynSecAdminPassword
 	clientID := fmt.Sprintf("dynsec-admin-%d", time.Now().Unix())
 
 	opts := &MQTTConnectionOptions{
@@ -52,7 +52,7 @@ func NewDynSecService() (*DynSecService, error) {
 
 	log.Printf("Connecting to MQTT broker for dynamic security: %s://%s:%d", protocol, broker, port)
 
-	client, err := ConnectMQTT(opts)
+	client, err := ConnectMQTT(opts, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", err)
 	}

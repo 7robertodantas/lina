@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/lightninglabs/lndclient"
@@ -17,12 +16,6 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
-type LNDConfig struct {
-	Host        string
-	TLSCertHex  string
-	MacaroonHex string
-	Network     string // "mainnet", "testnet", or "regtest"
-}
 
 type LNDClient struct {
 	conn           *grpc.ClientConn
@@ -32,9 +25,9 @@ type LNDClient struct {
 }
 
 // NewLNDClient creates a new LND client from hex-encoded credentials
-func NewLNDClient(cfg LNDConfig) (*LNDClient, error) {
+func NewLNDClient(cfg Config) (*LNDClient, error) {
 	// Decode hex TLS certificate
-	tlsCertBytes, err := hex.DecodeString(cfg.TLSCertHex)
+	tlsCertBytes, err := hex.DecodeString(cfg.LNDTLSCertHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode TLS cert: %w", err)
 	}
@@ -52,7 +45,7 @@ func NewLNDClient(cfg LNDConfig) (*LNDClient, error) {
 	creds := credentials.NewTLS(tlsConfig)
 
 	// Decode hex macaroon
-	macaroonBytes, err := hex.DecodeString(cfg.MacaroonHex)
+	macaroonBytes, err := hex.DecodeString(cfg.LNDMacaroonHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode macaroon: %w", err)
 	}
@@ -62,7 +55,7 @@ func NewLNDClient(cfg LNDConfig) (*LNDClient, error) {
 
 	// Dial LND
 	conn, err := grpc.Dial(
-		cfg.Host,
+		cfg.LNDHost,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithPerRPCCredentials(mac),
 		grpc.WithBlock(),
@@ -222,30 +215,33 @@ func (c *LNDClient) Close() error {
 }
 
 func main() {
-	// Configuration - replace with your values or use environment variables
-	cfg := LNDConfig{
-		Host:        os.Getenv("LND_HOST"),         // e.g., "localhost:10009"
-		TLSCertHex:  os.Getenv("LND_TLS_CERT_HEX"), // hex-encoded TLS cert
-		MacaroonHex: os.Getenv("LND_MACAROON_HEX"), // hex-encoded macaroon
-		Network:     "mainnet",                     // or "testnet", "regtest"
-	}
+	// Load configuration
+	cfg := LoadConfig()
 
 	// Validate configuration
-	if cfg.Host == "" {
+	if cfg.LNDHost == "" {
 		log.Fatal("LND_HOST environment variable required")
 	}
-	if cfg.TLSCertHex == "" {
+	if cfg.LNDTLSCertHex == "" {
 		log.Fatal("LND_TLS_CERT_HEX environment variable required")
 	}
-	if cfg.MacaroonHex == "" {
+	if cfg.LNDMacaroonHex == "" {
 		log.Fatal("LND_MACAROON_HEX environment variable required")
 	}
 
 	// Log environment variables (masked for security)
 	fmt.Printf("\n=== Configuration ===\n")
-	fmt.Printf("LND_HOST: %s\n", cfg.Host)
-	fmt.Printf("LND_TLS_CERT_HEX: %s...\n", cfg.TLSCertHex[:min(20, len(cfg.TLSCertHex))])
-	fmt.Printf("LND_MACAROON_HEX: %s...\n", cfg.MacaroonHex[:min(20, len(cfg.MacaroonHex))])
+	fmt.Printf("LND_HOST: %s\n", cfg.LNDHost)
+	if len(cfg.LNDTLSCertHex) > 20 {
+		fmt.Printf("LND_TLS_CERT_HEX: %s...\n", cfg.LNDTLSCertHex[:20])
+	} else {
+		fmt.Printf("LND_TLS_CERT_HEX: %s\n", cfg.LNDTLSCertHex)
+	}
+	if len(cfg.LNDMacaroonHex) > 20 {
+		fmt.Printf("LND_MACAROON_HEX: %s...\n", cfg.LNDMacaroonHex[:20])
+	} else {
+		fmt.Printf("LND_MACAROON_HEX: %s\n", cfg.LNDMacaroonHex)
+	}
 	fmt.Printf("Network: %s\n", cfg.Network)
 
 	// Create client
