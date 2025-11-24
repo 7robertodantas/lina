@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"time"
@@ -19,16 +17,18 @@ import (
 // StreamHandler handles Redis stream operations for the consumption service
 type StreamHandler struct {
 	streamClient *library.StreamClient
-	svc          *Service
+	cfg          Config
+	repository   *ConsumptionRepository
 	consumerName string
 	groupName    string
 }
 
 // NewStreamHandler creates a new stream handler
-func NewStreamHandler(streamClient *library.StreamClient, svc *Service) *StreamHandler {
+func NewStreamHandler(streamClient *library.StreamClient, cfg Config, repository *ConsumptionRepository) *StreamHandler {
 	return &StreamHandler{
 		streamClient: streamClient,
-		svc:          svc,
+		cfg:          cfg,
+		repository:  repository,
 		consumerName: "consumption-service",
 		groupName:    "consumption-consumers",
 	}
@@ -144,54 +144,30 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 		return nil
 	}
 
-	tx, err := sh.svc.db.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := sh.repository.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	// Check idempotency: if report_id already exists, skip
-	var existingReportID string
-	err = tx.QueryRowContext(ctx, `
-		SELECT report_id FROM consumption_records WHERE report_id = ?`,
-		reportID,
-	).Scan(&existingReportID)
-
-	if err == nil {
+	exists, err := sh.repository.CheckReportExists(ctx, tx, reportID)
+	if err != nil {
+		return err
+	}
+	if exists {
 		// Report already processed, skip (idempotency)
 		log.Printf("Report %s already processed, skipping (idempotency)", reportID)
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit: %w", err)
 		}
 		return nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("failed to check idempotency: %w", err)
 	}
 
-	// Insert into consumption_records
-	now := time.Now()
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO consumption_records (
-			report_id, device_id, debit_msat,
-			measure, price_per_unit_msat, unit, timestamp, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		reportID, deviceID, debitMsat,
-		measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), now.Unix(),
-	)
+	// Insert into consumption_records and outbox
+	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, debitMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp())
 	if err != nil {
-		return fmt.Errorf("failed to insert consumption record: %w", err)
-	}
-
-	// Insert into outbox (for publishing to event.consumption)
-	// Minimal entry - we'll join with consumption_records when publishing
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO consumption_outbox (
-			report_id, published, created_at
-		) VALUES (?, 0, ?)`,
-		reportID, now.Unix(),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert into outbox: %w", err)
+		return err
 	}
 
 	// Commit transaction
@@ -229,38 +205,9 @@ func (sh *StreamHandler) StartOutboxPublisher(ctx context.Context) error {
 func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 	// Get unpublished events by joining outbox with consumption_records
 	// This avoids duplication - outbox is minimal, records is the source of truth
-	rows, err := sh.svc.db.QueryContext(ctx, `
-		SELECT o.report_id, r.device_id, r.debit_msat, r.timestamp
-		FROM consumption_outbox o
-		INNER JOIN consumption_records r ON o.report_id = r.report_id
-		WHERE o.published = 0
-		ORDER BY o.created_at ASC
-		LIMIT 10`,
-	)
+	events, err := sh.repository.GetUnpublishedOutboxEvents(ctx, 10)
 	if err != nil {
-		return fmt.Errorf("failed to query outbox: %w", err)
-	}
-	defer rows.Close()
-
-	var events []struct {
-		reportID  string
-		deviceID  string
-		debitMsat int64
-		timestamp string
-	}
-
-	for rows.Next() {
-		var e struct {
-			reportID  string
-			deviceID  string
-			debitMsat int64
-			timestamp string
-		}
-		if err := rows.Scan(&e.reportID, &e.deviceID, &e.debitMsat, &e.timestamp); err != nil {
-			log.Printf("Error scanning outbox row: %v", err)
-			continue
-		}
-		events = append(events, e)
+		return err
 	}
 
 	if len(events) == 0 {
@@ -269,20 +216,14 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 
 	// Publish each event
 	for _, e := range events {
-		if err := sh.publishConsumptionEvent(ctx, e.reportID, e.deviceID, e.debitMsat, e.timestamp); err != nil {
-			log.Printf("Failed to publish event for report %s: %v", e.reportID, err)
+		if err := sh.publishConsumptionEvent(ctx, e.ReportID, e.DeviceID, e.DebitMsat, e.Timestamp); err != nil {
+			log.Printf("Failed to publish event for report %s: %v", e.ReportID, err)
 			continue
 		}
 
 		// Mark as published
-		_, err := sh.svc.db.ExecContext(ctx, `
-			UPDATE consumption_outbox
-			SET published = 1, published_at = ?
-			WHERE report_id = ?`,
-			time.Now().Unix(), e.reportID,
-		)
-		if err != nil {
-			log.Printf("Failed to mark report %s as published: %v", e.reportID, err)
+		if err := sh.repository.MarkOutboxAsPublished(ctx, e.ReportID); err != nil {
+			log.Printf("Failed to mark report %s as published: %v", e.ReportID, err)
 			// Continue anyway, we'll retry on next run
 		}
 	}
@@ -366,22 +307,9 @@ func (sh *StreamHandler) StartOutboxCleanup(ctx context.Context) error {
 func (sh *StreamHandler) cleanupOutbox(ctx context.Context) error {
 	// Retention period: 7 days (configurable)
 	retentionDays := 7
-	retentionSeconds := int64(retentionDays * 24 * 60 * 60)
-	cutoffTime := time.Now().Unix() - retentionSeconds
-
-	// Delete published records older than retention period
-	result, err := sh.svc.db.ExecContext(ctx, `
-		DELETE FROM consumption_outbox
-		WHERE published = 1 AND published_at < ?`,
-		cutoffTime,
-	)
+	rowsAffected, err := sh.repository.CleanupOutbox(ctx, retentionDays)
 	if err != nil {
-		return fmt.Errorf("failed to cleanup outbox: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+		return err
 	}
 
 	if rowsAffected > 0 {

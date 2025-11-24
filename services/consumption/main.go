@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/robertodantas/lnpay/library"
-	_ "modernc.org/sqlite"
 )
 
 /*
@@ -56,70 +53,13 @@ func loadConfig() Config {
 	}
 }
 
-/*
-   =========================================
-   SQLite init (WAL + schema)
-   =========================================
-*/
-
-func initDB(cfg Config) *sql.DB {
-	// WAL + busy_timeout for concurrent writers on edge devices.
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", cfg.DBPath, cfg.BusyTimeoutMS)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		log.Fatalf("db open: %v", err)
-	}
-
-	stmts := []string{
-		// Consumption records table - stores processed usage records per device_id with idempotency
-		// This is the source of truth for business data
-		`CREATE TABLE IF NOT EXISTS consumption_records (
-			report_id TEXT PRIMARY KEY,
-			device_id TEXT NOT NULL,
-			debit_msat INTEGER NOT NULL,
-			measure REAL NOT NULL,
-			price_per_unit_msat INTEGER NOT NULL,
-			unit TEXT NOT NULL,
-			timestamp TEXT NOT NULL,
-			created_at INTEGER NOT NULL
-		)`,
-		// Outbox table - minimal table for transactional outbox pattern
-		// References consumption_records via report_id (acts as foreign key)
-		// Only stores what's needed for publishing: report_id and published status
-		`CREATE TABLE IF NOT EXISTS consumption_outbox (
-			report_id TEXT PRIMARY KEY,
-			published INTEGER NOT NULL DEFAULT 0,
-			published_at INTEGER,
-			created_at INTEGER NOT NULL
-		)`,
-		// Indexes for consumption_records
-		`CREATE INDEX IF NOT EXISTS idx_device_id ON consumption_records (device_id)`,
-		// Index for consumption_outbox
-		`CREATE INDEX IF NOT EXISTS idx_published_created ON consumption_outbox (published, created_at)`,
-	}
-	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
-			log.Fatalf("schema: %v", err)
-		}
-	}
-	return db
-}
-
-type Service struct {
-	cfg Config
-	db  *sql.DB
-}
-
-func NewService(cfg Config, db *sql.DB) *Service {
-	return &Service{cfg: cfg, db: db}
-}
-
 func main() {
 	cfg := loadConfig()
-	db := initDB(cfg)
-	defer db.Close()
-
-	svc := NewService(cfg, db)
+	repository, err := NewConsumptionRepository(cfg.DBPath, cfg.BusyTimeoutMS)
+	if err != nil {
+		log.Fatalf("Failed to create consumption repository: %v", err)
+	}
+	defer repository.Close()
 
 	// Connect to Redis stream
 	log.Println("Connecting to Redis...")
@@ -131,7 +71,7 @@ func main() {
 	log.Println("Redis stream client connected successfully")
 
 	// Create stream handler
-	streamHandler := NewStreamHandler(streamClient, svc)
+	streamHandler := NewStreamHandler(streamClient, cfg, repository)
 
 	// Create context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
