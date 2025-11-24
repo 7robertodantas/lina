@@ -116,8 +116,8 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 		return fmt.Errorf("missing device_consumption_recorded payload")
 	}
 
-	log.Printf("[CONSUMPTION] Device: %s, Authorization: %s, Debit: %d msat",
-		recorded.GetDeviceId(), recorded.GetAuthorizationId(), recorded.GetDebitMsat())
+	log.Printf("[CONSUMPTION] Device: %s, Debit: %d msat",
+		recorded.GetDeviceId(), recorded.GetDebitMsat())
 
 	// Process the consumption: debit from authorization
 	return sh.processConsumption(ctx, recorded)
@@ -125,10 +125,9 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 
 // processConsumption debits from an authorization and updates its status
 func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consumptionpb.DeviceConsumptionRecordedEvent) error {
-	authorizationID := recorded.GetAuthorizationId()
-	if authorizationID == "" {
-		log.Printf("No authorization_id in consumption event, skipping")
-		return nil
+	deviceID := recorded.GetDeviceId()
+	if deviceID == "" {
+		return fmt.Errorf("missing device_id in consumption event")
 	}
 
 	tx, err := sh.svc.db.BeginTx(ctx, &sql.TxOptions{})
@@ -137,25 +136,30 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// Get current authorization state
-	var deviceID string
+	// Find active authorization for the device
+	// Order by created_at DESC to get the most recent active authorization
+	var authorizationID string
 	var remainingMsat int64
 	var grantedMsat int64
 	var expiresAt string
 	var status string
 
+	now := time.Now().Format(time.RFC3339)
 	row := tx.QueryRowContext(ctx, `
-		SELECT device_id, remaining_msat, granted_msat, expires_at, status
+		SELECT authorization_id, remaining_msat, granted_msat, expires_at, status
 		FROM authorizations
-		WHERE authorization_id = ? AND status = 'active'`,
-		authorizationID,
+		WHERE device_id = ? AND status = 'active' AND expires_at > ?
+		ORDER BY created_at DESC
+		LIMIT 1`,
+		deviceID, now,
 	)
 
-	err = row.Scan(&deviceID, &remainingMsat, &grantedMsat, &expiresAt, &status)
+	err = row.Scan(&authorizationID, &remainingMsat, &grantedMsat, &expiresAt, &status)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			log.Printf("Authorization %s not found or not active, skipping", authorizationID)
-			return nil
+			// No active authorization found - return error to skip event (will be retried later)
+			log.Printf("No active authorization found for device %s, skipping event (will retry)", deviceID)
+			return fmt.Errorf("no active authorization found for device %s", deviceID)
 		}
 		return fmt.Errorf("failed to get authorization: %w", err)
 	}

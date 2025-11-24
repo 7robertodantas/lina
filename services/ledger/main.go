@@ -176,6 +176,7 @@ type EntryResponse struct {
 	EntryType     string `json:"entry_type"`
 	AmountMsat    int64  `json:"amount_msat"`
 	BalanceAfter  int64  `json:"balance_after"`
+	Reason        string `json:"reason,omitempty"`
 	CreatedAt     int64  `json:"created_at"`
 	CorrelationID string `json:"correlation_id,omitempty"`
 }
@@ -274,6 +275,7 @@ func (s *Service) applyCredit(ctx context.Context, tx *sql.Tx, in CreditRequest)
 		EntryType:     "credit",
 		AmountMsat:    in.AmountMsat,
 		BalanceAfter:  bal,
+		Reason:        in.Reason,
 		CreatedAt:     now(),
 		CorrelationID: in.CorrelationID,
 	}
@@ -320,6 +322,7 @@ func (s *Service) applyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (
 		EntryType:     "debit",
 		AmountMsat:    in.AmountMsat,
 		BalanceAfter:  bal,
+		Reason:        in.Reason,
 		CreatedAt:     now(),
 		CorrelationID: in.CorrelationID,
 	}
@@ -527,6 +530,9 @@ func (s *Service) listEntries(c *gin.Context) {
 			continue
 		}
 		e.DeviceID = deviceID
+		if reason.Valid {
+			e.Reason = reason.String
+		}
 		if corr.Valid {
 			e.CorrelationID = corr.String
 		}

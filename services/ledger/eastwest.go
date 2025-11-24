@@ -119,9 +119,9 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	}
 
 	// Create debit ledger entry for the authorization
-	reason := req.Reason
-	if reason == "" {
-		reason = "AUTHORIZATION_HOLD"
+	reason := "AUTHORIZATION_HOLD"
+	if req.Reason != "" {
+		reason = req.Reason + "|" + reason
 	}
 	debitReq := DebitRequest{
 		DeviceID:      req.DeviceId,

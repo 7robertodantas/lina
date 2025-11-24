@@ -70,13 +70,12 @@ func (ConsumptionEventType) EnumDescriptor() ([]byte, []int) {
 
 // event.consumption: emitted after pricing a usage record.
 type DeviceConsumptionRecordedEvent struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId        string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	AuthorizationId string                 `protobuf:"bytes,2,opt,name=authorization_id,json=authorizationId,proto3" json:"authorization_id,omitempty"` // active authorization, if any
-	DebitMsat       int64                  `protobuf:"varint,3,opt,name=debit_msat,json=debitMsat,proto3" json:"debit_msat,omitempty"`                  // amount to debit from the authorization
-	Timestamp       string                 `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                    // ISO-8601 timestamp
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DebitMsat     int64                  `protobuf:"varint,2,opt,name=debit_msat,json=debitMsat,proto3" json:"debit_msat,omitempty"` // amount to debit from the authorization
+	Timestamp     string                 `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                   // ISO-8601 timestamp
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *DeviceConsumptionRecordedEvent) Reset() {
@@ -112,13 +111,6 @@ func (*DeviceConsumptionRecordedEvent) Descriptor() ([]byte, []int) {
 func (x *DeviceConsumptionRecordedEvent) GetDeviceId() string {
 	if x != nil {
 		return x.DeviceId
-	}
-	return ""
-}
-
-func (x *DeviceConsumptionRecordedEvent) GetAuthorizationId() string {
-	if x != nil {
-		return x.AuthorizationId
 	}
 	return ""
 }
@@ -215,13 +207,12 @@ var File_model_model_consumption_service_proto protoreflect.FileDescriptor
 
 const file_model_model_consumption_service_proto_rawDesc = "" +
 	"\n" +
-	"%model/model-consumption-service.proto\x12$iot.payperuse.edge.model.consumption\"\xa5\x01\n" +
+	"%model/model-consumption-service.proto\x12$iot.payperuse.edge.model.consumption\"z\n" +
 	"\x1eDeviceConsumptionRecordedEvent\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12)\n" +
-	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12\x1d\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
-	"debit_msat\x18\x03 \x01(\x03R\tdebitMsat\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\"\xf6\x01\n" +
+	"debit_msat\x18\x02 \x01(\x03R\tdebitMsat\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\xf6\x01\n" +
 	"\x10ConsumptionEvent\x12N\n" +
 	"\x04type\x18\x01 \x01(\x0e2:.iot.payperuse.edge.model.consumption.ConsumptionEventTypeR\x04type\x12\x86\x01\n" +
 	"\x1bdevice_consumption_recorded\x18\x02 \x01(\v2D.iot.payperuse.edge.model.consumption.DeviceConsumptionRecordedEventH\x00R\x19deviceConsumptionRecordedB\t\n" +

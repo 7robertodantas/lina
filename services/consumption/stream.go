@@ -144,11 +144,6 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 		return nil
 	}
 
-	// Get active authorization for device (if any)
-	// TODO: This might need to be fetched from ledger service via gRPC
-	// For now, we'll leave it empty and let the ledger service handle it
-	authorizationID := ""
-
 	tx, err := sh.svc.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -177,10 +172,10 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	now := time.Now()
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO consumption_records (
-			report_id, device_id, authorization_id, debit_msat,
+			report_id, device_id, debit_msat,
 			measure, price_per_unit_msat, unit, timestamp, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		reportID, deviceID, authorizationID, debitMsat,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		reportID, deviceID, debitMsat,
 		measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), now.Unix(),
 	)
 	if err != nil {
@@ -235,7 +230,7 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 	// Get unpublished events by joining outbox with consumption_records
 	// This avoids duplication - outbox is minimal, records is the source of truth
 	rows, err := sh.svc.db.QueryContext(ctx, `
-		SELECT o.report_id, r.device_id, r.authorization_id, r.debit_msat, r.timestamp
+		SELECT o.report_id, r.device_id, r.debit_msat, r.timestamp
 		FROM consumption_outbox o
 		INNER JOIN consumption_records r ON o.report_id = r.report_id
 		WHERE o.published = 0
@@ -248,22 +243,20 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 	defer rows.Close()
 
 	var events []struct {
-		reportID        string
-		deviceID        string
-		authorizationID string
-		debitMsat       int64
-		timestamp       string
+		reportID  string
+		deviceID  string
+		debitMsat int64
+		timestamp string
 	}
 
 	for rows.Next() {
 		var e struct {
-			reportID        string
-			deviceID        string
-			authorizationID string
-			debitMsat       int64
-			timestamp       string
+			reportID  string
+			deviceID  string
+			debitMsat int64
+			timestamp string
 		}
-		if err := rows.Scan(&e.reportID, &e.deviceID, &e.authorizationID, &e.debitMsat, &e.timestamp); err != nil {
+		if err := rows.Scan(&e.reportID, &e.deviceID, &e.debitMsat, &e.timestamp); err != nil {
 			log.Printf("Error scanning outbox row: %v", err)
 			continue
 		}
@@ -276,7 +269,7 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 
 	// Publish each event
 	for _, e := range events {
-		if err := sh.publishConsumptionEvent(ctx, e.reportID, e.deviceID, e.authorizationID, e.debitMsat, e.timestamp); err != nil {
+		if err := sh.publishConsumptionEvent(ctx, e.reportID, e.deviceID, e.debitMsat, e.timestamp); err != nil {
 			log.Printf("Failed to publish event for report %s: %v", e.reportID, err)
 			continue
 		}
@@ -302,13 +295,12 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 }
 
 // publishConsumptionEvent publishes a DeviceConsumptionRecorded event to event.consumption stream
-func (sh *StreamHandler) publishConsumptionEvent(ctx context.Context, reportID, deviceID, authorizationID string, debitMsat int64, timestamp string) error {
+func (sh *StreamHandler) publishConsumptionEvent(ctx context.Context, reportID, deviceID string, debitMsat int64, timestamp string) error {
 	// Create DeviceConsumptionRecordedEvent
 	event := &consumptionpb.DeviceConsumptionRecordedEvent{
-		DeviceId:        deviceID,
-		AuthorizationId: authorizationID,
-		DebitMsat:       debitMsat,
-		Timestamp:       timestamp,
+		DeviceId:  deviceID,
+		DebitMsat: debitMsat,
+		Timestamp: timestamp,
 	}
 
 	// Wrap in ConsumptionEvent envelope

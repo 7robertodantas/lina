@@ -76,7 +76,6 @@ func initDB(cfg Config) *sql.DB {
 		`CREATE TABLE IF NOT EXISTS consumption_records (
 			report_id TEXT PRIMARY KEY,
 			device_id TEXT NOT NULL,
-			authorization_id TEXT,
 			debit_msat INTEGER NOT NULL,
 			measure REAL NOT NULL,
 			price_per_unit_msat INTEGER NOT NULL,
@@ -95,7 +94,6 @@ func initDB(cfg Config) *sql.DB {
 		)`,
 		// Indexes for consumption_records
 		`CREATE INDEX IF NOT EXISTS idx_device_id ON consumption_records (device_id)`,
-		`CREATE INDEX IF NOT EXISTS idx_authorization_id ON consumption_records (authorization_id)`,
 		// Index for consumption_outbox
 		`CREATE INDEX IF NOT EXISTS idx_published_created ON consumption_outbox (published, created_at)`,
 	}
