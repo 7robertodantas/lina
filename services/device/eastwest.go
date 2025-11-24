@@ -125,9 +125,10 @@ func (c *LedgerClient) Close() error {
 }
 
 // CreateOrGetAuthorization creates a new authorization or returns the active one for the device
-func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID string, requestMsat int64, reason string) (*ledgermodel.CreateAuthorizationResponse, error) {
+func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID string, requestID string, requestMsat int64, reason string) (*ledgermodel.CreateAuthorizationResponse, error) {
 	req := &ledgermodel.CreateAuthorizationRequest{
 		DeviceId:    deviceID,
+		RequestId:   requestID,
 		RequestMsat: requestMsat,
 		Reason:      reason,
 	}

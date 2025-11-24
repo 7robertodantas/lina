@@ -146,6 +146,7 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 	ledgerResp, err := sb.ledgerClient.CreateOrGetAuthorization(
 		ctx,
 		request.GetDeviceId(),
+		request.GetRequestId(),
 		request.GetRequestMsat(),
 		request.GetReason(),
 	)

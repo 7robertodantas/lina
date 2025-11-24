@@ -299,8 +299,9 @@ func (x *BalanceProjection) GetAsOf() string {
 type CreateAuthorizationRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	RequestMsat   int64                  `protobuf:"varint,2,opt,name=request_msat,json=requestMsat,proto3" json:"request_msat,omitempty"` // desired allowance
-	Reason        string                 `protobuf:"bytes,3,opt,name=reason,proto3" json:"reason,omitempty"`                               // e.g., "STARTUP"
+	RequestId     string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`        // unique request identifier for idempotency
+	RequestMsat   int64                  `protobuf:"varint,3,opt,name=request_msat,json=requestMsat,proto3" json:"request_msat,omitempty"` // desired allowance
+	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`                               // e.g., "STARTUP"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -342,6 +343,13 @@ func (x *CreateAuthorizationRequest) GetDeviceId() string {
 	return ""
 }
 
+func (x *CreateAuthorizationRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
 func (x *CreateAuthorizationRequest) GetRequestMsat() int64 {
 	if x != nil {
 		return x.RequestMsat
@@ -358,10 +366,12 @@ func (x *CreateAuthorizationRequest) GetReason() string {
 
 type CreateAuthorizationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Status        AuthorizationStatus    `protobuf:"varint,1,opt,name=status,proto3,enum=iot.payperuse.edge.model.ledger.AuthorizationStatus" json:"status,omitempty"`
-	Authorization *Authorization         `protobuf:"bytes,2,opt,name=authorization,proto3" json:"authorization,omitempty"`                       // present for GRANTED/ACTIVE
-	AvailableMsat int64                  `protobuf:"varint,3,opt,name=available_msat,json=availableMsat,proto3" json:"available_msat,omitempty"` // current available balance
-	Reason        string                 `protobuf:"bytes,4,opt,name=reason,proto3" json:"reason,omitempty"`                                     // explanation for REJECTED or ACTIVE
+	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	RequestId     string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // matches request identifier
+	Status        AuthorizationStatus    `protobuf:"varint,3,opt,name=status,proto3,enum=iot.payperuse.edge.model.ledger.AuthorizationStatus" json:"status,omitempty"`
+	Authorization *Authorization         `protobuf:"bytes,4,opt,name=authorization,proto3" json:"authorization,omitempty"`                       // present for GRANTED/ACTIVE
+	AvailableMsat int64                  `protobuf:"varint,5,opt,name=available_msat,json=availableMsat,proto3" json:"available_msat,omitempty"` // current available balance (for REJECTED)
+	Reason        string                 `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`                                     // explanation for REJECTED or ACTIVE
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -394,6 +404,20 @@ func (x *CreateAuthorizationResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use CreateAuthorizationResponse.ProtoReflect.Descriptor instead.
 func (*CreateAuthorizationResponse) Descriptor() ([]byte, []int) {
 	return file_model_model_ledger_service_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *CreateAuthorizationResponse) GetDeviceId() string {
+	if x != nil {
+		return x.DeviceId
+	}
+	return ""
+}
+
+func (x *CreateAuthorizationResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
 }
 
 func (x *CreateAuthorizationResponse) GetStatus() AuthorizationStatus {
@@ -978,16 +1002,21 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	"\rreserved_msat\x18\x03 \x01(\x03R\freservedMsat\x12\x1d\n" +
 	"\n" +
 	"total_msat\x18\x04 \x01(\x03R\ttotalMsat\x12\x13\n" +
-	"\x05as_of\x18\x05 \x01(\tR\x04asOf\"t\n" +
+	"\x05as_of\x18\x05 \x01(\tR\x04asOf\"\x93\x01\n" +
 	"\x1aCreateAuthorizationRequest\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12!\n" +
-	"\frequest_msat\x18\x02 \x01(\x03R\vrequestMsat\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"\x80\x02\n" +
-	"\x1bCreateAuthorizationResponse\x12L\n" +
-	"\x06status\x18\x01 \x01(\x0e24.iot.payperuse.edge.model.ledger.AuthorizationStatusR\x06status\x12T\n" +
-	"\rauthorization\x18\x02 \x01(\v2..iot.payperuse.edge.model.ledger.AuthorizationR\rauthorization\x12%\n" +
-	"\x0eavailable_msat\x18\x03 \x01(\x03R\ravailableMsat\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"0\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x12!\n" +
+	"\frequest_msat\x18\x03 \x01(\x03R\vrequestMsat\x12\x16\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xbc\x02\n" +
+	"\x1bCreateAuthorizationResponse\x12\x1b\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
+	"\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x12L\n" +
+	"\x06status\x18\x03 \x01(\x0e24.iot.payperuse.edge.model.ledger.AuthorizationStatusR\x06status\x12T\n" +
+	"\rauthorization\x18\x04 \x01(\v2..iot.payperuse.edge.model.ledger.AuthorizationR\rauthorization\x12%\n" +
+	"\x0eavailable_msat\x18\x05 \x01(\x03R\ravailableMsat\x12\x16\n" +
+	"\x06reason\x18\x06 \x01(\tR\x06reason\"0\n" +
 	"\x11GetBalanceRequest\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"b\n" +
 	"\x12GetBalanceResponse\x12L\n" +

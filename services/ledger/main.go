@@ -81,7 +81,7 @@ func initDB(cfg Config) *sql.DB {
 		// Accounts / balances
 		`CREATE TABLE IF NOT EXISTS balances(
 			device_id TEXT PRIMARY KEY,
-			balance_sats INTEGER NOT NULL DEFAULT 0,
+			balance_msat INTEGER NOT NULL DEFAULT 0,
 			updated_at INTEGER NOT NULL
 		);`,
 		// Ledger entries (append-only)
@@ -89,8 +89,8 @@ func initDB(cfg Config) *sql.DB {
 			id TEXT PRIMARY KEY,
 			device_id TEXT NOT NULL,
 			entry_type TEXT NOT NULL,        -- credit|debit
-			amount_sats INTEGER NOT NULL,    -- positive for credits & transfer_in; positive value also stored for debit, semantics defined by entry_type
-			balance_after INTEGER NOT NULL,  -- balance after applying this entry
+			amount_msat INTEGER NOT NULL,    -- positive for credits & transfer_in; positive value also stored for debit, semantics defined by entry_type
+			balance_after INTEGER NOT NULL,  -- balance after applying this entry (in msat)
 			reason TEXT,
 			correlation_id TEXT,             -- optional foreign corr id from caller
 			created_at INTEGER NOT NULL
@@ -110,6 +110,7 @@ func initDB(cfg Config) *sql.DB {
 		`CREATE TABLE IF NOT EXISTS authorizations(
 			authorization_id TEXT PRIMARY KEY,
 			device_id TEXT NOT NULL,
+			request_id TEXT NOT NULL,        -- unique request identifier for idempotency
 			granted_msat INTEGER NOT NULL,
 			remaining_msat INTEGER NOT NULL,
 			issued_at TEXT NOT NULL,          -- ISO-8601 timestamp
@@ -118,6 +119,7 @@ func initDB(cfg Config) *sql.DB {
 			created_at INTEGER NOT NULL
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_auth_device_status ON authorizations(device_id, status, expires_at);`,
+		`CREATE INDEX IF NOT EXISTS idx_auth_request_id ON authorizations(request_id);`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
@@ -150,7 +152,7 @@ func NewService(cfg Config, db *sql.DB) *Service {
 
 type CreditRequest struct {
 	DeviceID       string `json:"device_id" binding:"required"`
-	AmountSats     int64  `json:"amount_sats" binding:"required"` // must be > 0
+	AmountMsat     int64  `json:"amount_msat" binding:"required"` // must be > 0
 	Reason         string `json:"reason"`
 	CorrelationID  string `json:"correlation_id,omitempty"`
 	IdempotencyKey string `json:"idempotency_key" binding:"required"`
@@ -158,7 +160,7 @@ type CreditRequest struct {
 
 type DebitRequest struct {
 	DeviceID       string `json:"device_id" binding:"required"`
-	AmountSats     int64  `json:"amount_sats" binding:"required"` // must be > 0
+	AmountMsat     int64  `json:"amount_msat" binding:"required"` // must be > 0
 	Reason         string `json:"reason"`
 	AllowNegative  bool   `json:"allow_negative,omitempty"`
 	CorrelationID  string `json:"correlation_id,omitempty"`
@@ -169,7 +171,7 @@ type EntryResponse struct {
 	EntryID       string `json:"entry_id"`
 	DeviceID      string `json:"device_id"`
 	EntryType     string `json:"entry_type"`
-	AmountSats    int64  `json:"amount_sats"`
+	AmountMsat    int64  `json:"amount_msat"`
 	BalanceAfter  int64  `json:"balance_after"`
 	CreatedAt     int64  `json:"created_at"`
 	CorrelationID string `json:"correlation_id,omitempty"`
@@ -223,7 +225,7 @@ func (s *Service) authMiddleware() gin.HandlerFunc {
 
 func (s *Service) ensureBalanceRow(ctx context.Context, tx *sql.Tx, deviceID string) error {
 	_, err := tx.ExecContext(ctx,
-		`INSERT INTO balances(device_id, balance_sats, updated_at)
+		`INSERT INTO balances(device_id, balance_msat, updated_at)
 		 VALUES(?,?,?)
 		 ON CONFLICT(device_id) DO NOTHING`,
 		deviceID, 0, now(),
@@ -233,7 +235,7 @@ func (s *Service) ensureBalanceRow(ctx context.Context, tx *sql.Tx, deviceID str
 
 func (s *Service) getBalance(ctx context.Context, tx *sql.Tx, deviceID string) (int64, error) {
 	var bal int64
-	row := tx.QueryRowContext(ctx, `SELECT balance_sats FROM balances WHERE device_id=?`, deviceID)
+	row := tx.QueryRowContext(ctx, `SELECT balance_msat FROM balances WHERE device_id=?`, deviceID)
 	switch err := row.Scan(&bal); err {
 	case nil:
 		return bal, nil
@@ -245,7 +247,7 @@ func (s *Service) getBalance(ctx context.Context, tx *sql.Tx, deviceID string) (
 }
 
 func (s *Service) applyCredit(ctx context.Context, tx *sql.Tx, in CreditRequest) (EntryResponse, error) {
-	if in.AmountSats <= 0 {
+	if in.AmountMsat <= 0 {
 		return EntryResponse{}, errors.New("amount must be > 0")
 	}
 	if err := s.ensureBalanceRow(ctx, tx, in.DeviceID); err != nil {
@@ -253,8 +255,8 @@ func (s *Service) applyCredit(ctx context.Context, tx *sql.Tx, in CreditRequest)
 	}
 	// Add funds
 	_, err := tx.ExecContext(ctx, `
-		UPDATE balances SET balance_sats = balance_sats + ?, updated_at=?
-		 WHERE device_id=?`, in.AmountSats, now(), in.DeviceID)
+		UPDATE balances SET balance_msat = balance_msat + ?, updated_at=?
+		 WHERE device_id=?`, in.AmountMsat, now(), in.DeviceID)
 	if err != nil {
 		return EntryResponse{}, err
 	}
@@ -267,21 +269,21 @@ func (s *Service) applyCredit(ctx context.Context, tx *sql.Tx, in CreditRequest)
 		EntryID:       uuid.NewString(),
 		DeviceID:      in.DeviceID,
 		EntryType:     "credit",
-		AmountSats:    in.AmountSats,
+		AmountMsat:    in.AmountMsat,
 		BalanceAfter:  bal,
 		CreatedAt:     now(),
 		CorrelationID: in.CorrelationID,
 	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO ledger_entries(id, device_id, entry_type, amount_sats, balance_after, reason, correlation_id, created_at)
+		INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
 		VALUES(?,?,?,?,?,?,?,?)`,
-		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountSats, entry.BalanceAfter, in.Reason, in.CorrelationID, entry.CreatedAt,
+		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountMsat, entry.BalanceAfter, in.Reason, in.CorrelationID, entry.CreatedAt,
 	)
 	return entry, err
 }
 
 func (s *Service) applyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (EntryResponse, error) {
-	if in.AmountSats <= 0 {
+	if in.AmountMsat <= 0 {
 		return EntryResponse{}, errors.New("amount must be > 0")
 	}
 	if err := s.ensureBalanceRow(ctx, tx, in.DeviceID); err != nil {
@@ -293,14 +295,14 @@ func (s *Service) applyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (
 		if err != nil {
 			return EntryResponse{}, err
 		}
-		if bal < in.AmountSats {
-			return EntryResponse{}, fmt.Errorf("insufficient funds: have %d need %d", bal, in.AmountSats)
+		if bal < in.AmountMsat {
+			return EntryResponse{}, fmt.Errorf("insufficient funds: have %d need %d", bal, in.AmountMsat)
 		}
 	}
 	// Subtract
 	_, err := tx.ExecContext(ctx, `
-		UPDATE balances SET balance_sats = balance_sats - ?, updated_at=?
-		 WHERE device_id=?`, in.AmountSats, now(), in.DeviceID)
+		UPDATE balances SET balance_msat = balance_msat - ?, updated_at=?
+		 WHERE device_id=?`, in.AmountMsat, now(), in.DeviceID)
 	if err != nil {
 		return EntryResponse{}, err
 	}
@@ -313,15 +315,15 @@ func (s *Service) applyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (
 		EntryID:       uuid.NewString(),
 		DeviceID:      in.DeviceID,
 		EntryType:     "debit",
-		AmountSats:    in.AmountSats,
+		AmountMsat:    in.AmountMsat,
 		BalanceAfter:  bal,
 		CreatedAt:     now(),
 		CorrelationID: in.CorrelationID,
 	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO ledger_entries(id, device_id, entry_type, amount_sats, balance_after, reason, correlation_id, created_at)
+		INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
 		VALUES(?,?,?,?,?,?,?,?)`,
-		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountSats, entry.BalanceAfter, in.Reason, in.CorrelationID, entry.CreatedAt,
+		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountMsat, entry.BalanceAfter, in.Reason, in.CorrelationID, entry.CreatedAt,
 	)
 	return entry, err
 }
@@ -469,7 +471,7 @@ func (s *Service) getBalanceHandler(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "commit"})
 		return
 	}
-	c.JSON(200, gin.H{"device_id": deviceID, "balance_sats": bal})
+	c.JSON(200, gin.H{"device_id": deviceID, "balance_msat": bal})
 }
 
 func (s *Service) listEntries(c *gin.Context) {
@@ -498,7 +500,7 @@ func (s *Service) listEntries(c *gin.Context) {
 	}
 
 	rows, err := s.db.Query(`
-		SELECT id, entry_type, amount_sats, balance_after, reason, correlation_id, created_at
+		SELECT id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at
 		  FROM ledger_entries
 		 WHERE device_id = ?
 		   AND (created_at < ? OR (created_at = ? AND id < ?))
@@ -518,7 +520,7 @@ func (s *Service) listEntries(c *gin.Context) {
 	for rows.Next() {
 		var e EntryResponse
 		var reason, corr sql.NullString
-		if err := rows.Scan(&e.EntryID, &e.EntryType, &e.AmountSats, &e.BalanceAfter, &reason, &corr, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.EntryID, &e.EntryType, &e.AmountMsat, &e.BalanceAfter, &reason, &corr, &e.CreatedAt); err != nil {
 			continue
 		}
 		e.DeviceID = deviceID

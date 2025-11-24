@@ -34,15 +34,18 @@ message BalanceProjection {
 // Creates a new authorization hold or returns the active one for the device.
 message CreateAuthorizationRequest {
   string device_id    = 1;
-  int64  request_msat = 2;  // desired allowance
-  string reason       = 3;  // e.g., "STARTUP"
+  string request_id   = 2;  // unique request identifier for idempotency
+  int64  request_msat = 3;  // desired allowance
+  string reason       = 4;  // e.g., "STARTUP"
 }
 
 message CreateAuthorizationResponse {
-  AuthorizationStatus status        = 1;
-  Authorization       authorization = 2;  // present for GRANTED/ACTIVE
-  int64  available_msat             = 3;  // current available balance
-  string reason                     = 4;  // explanation for REJECTED or ACTIVE
+  string            device_id        = 1;
+  string            request_id       = 2;  // matches request identifier
+  AuthorizationStatus status        = 3;
+  Authorization     authorization    = 4;  // present for GRANTED/ACTIVE
+  int64             available_msat   = 5;  // current available balance (for REJECTED)
+  string            reason           = 6;  // explanation for REJECTED or ACTIVE
 }
 
 // Returns the current balance projection for the device.
