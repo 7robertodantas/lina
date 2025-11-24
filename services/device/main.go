@@ -150,6 +150,15 @@ func main() {
 	defer streamClient.Close()
 	log.Println("Redis stream client connected successfully")
 
+	// Connect to ledger service via gRPC
+	log.Println("Connecting to ledger service...")
+	ledgerClient, err := NewLedgerClient()
+	if err != nil {
+		log.Fatalf("Failed to create ledger gRPC client: %v", err)
+	}
+	defer ledgerClient.Close()
+	log.Println("Ledger gRPC client connected successfully")
+
 	// Initialize and start northbound REST API
 	log.Println("Initializing northbound REST API...")
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
@@ -164,7 +173,7 @@ func main() {
 
 	// Initialize and start southbound interface
 	log.Println("Initializing southbound interface...")
-	southbound := NewSouthboundInterface(mqttClient, streamClient)
+	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient)
 	if err := southbound.Start(); err != nil {
 		log.Fatalf("Failed to start southbound interface: %v", err)
 	}

@@ -87,7 +87,7 @@ services:
   ledger:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: ./services/Dockerfile
       args:
         SERVICE: ledger
     container_name: ledger

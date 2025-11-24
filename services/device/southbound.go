@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
 	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
 )
 
@@ -17,13 +19,15 @@ import (
 type SouthboundInterface struct {
 	mqttClient   *MQTTClient
 	streamClient *StreamClient
+	ledgerClient *LedgerClient
 }
 
 // NewSouthboundInterface creates a new southbound interface
-func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient) *SouthboundInterface {
+func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient, ledgerClient *LedgerClient) *SouthboundInterface {
 	return &SouthboundInterface{
 		mqttClient:   mqttClient,
 		streamClient: streamClient,
+		ledgerClient: ledgerClient,
 	}
 }
 
@@ -108,6 +112,12 @@ func (sb *SouthboundInterface) handleUsage(client mqtt.Client, msg mqtt.Message)
 	}
 }
 
+// mapLedgerStatusToMQTTStatus maps ledger AuthorizationStatus to MQTT AuthorizationStatus
+func mapLedgerStatusToMQTTStatus(status ledgermodel.AuthorizationStatus) mqttpb.AuthorizationStatus {
+	// Both enums have the same values, so we can convert directly
+	return mqttpb.AuthorizationStatus(status)
+}
+
 // handleAuthorizationRequest processes authorization requests from devices
 func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, msg mqtt.Message) {
 	topic := msg.Topic()
@@ -129,17 +139,54 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 		request.GetTimestamp(),
 	)
 
-	// Create a placeholder response
+	// Call ledger service via gRPC
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ledgerResp, err := sb.ledgerClient.CreateOrGetAuthorization(
+		ctx,
+		request.GetDeviceId(),
+		request.GetRequestMsat(),
+		request.GetReason(),
+	)
+	if err != nil {
+		log.Printf("Error calling ledger service for device %s: %v", deviceID, err)
+		// Send error response to device
+		response := &mqttpb.AuthorizationResponsePayload{
+			DeviceId:  request.GetDeviceId(),
+			RequestId: request.GetRequestId(),
+			Status:    mqttpb.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED,
+			Reason:    fmt.Sprintf("Failed to process authorization: %v", err),
+		}
+		responseJSON, _ := json.Marshal(response)
+		responseTopic := fmt.Sprintf("/devices/%s/response/authorize", deviceID)
+		if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
+			log.Printf("Error publishing error response to device %s: %v", deviceID, err)
+		}
+		return
+	}
+
+	// Map ledger response to MQTT response payload
 	response := &mqttpb.AuthorizationResponsePayload{
 		DeviceId:  request.GetDeviceId(),
 		RequestId: request.GetRequestId(),
-		Status:    mqttpb.AuthorizationStatus_AUTHORIZATION_STATUS_GRANTED,
-		// TODO: Set actual values when processing is implemented
-		AuthorizationId: "placeholder-auth-id",
-		GrantedMsat:     request.GetRequestMsat(),
-		RemainingMsat:   request.GetRequestMsat(),
-		IssuedAt:        time.Now().Format(time.RFC3339),
-		ExpiresAt:       time.Now().Add(1 * time.Hour).Format(time.RFC3339),
+		Status:    mapLedgerStatusToMQTTStatus(ledgerResp.GetStatus()),
+		Reason:    ledgerResp.GetReason(),
+	}
+
+	// If authorization was granted or is active, include authorization details
+	if ledgerResp.GetAuthorization() != nil {
+		auth := ledgerResp.GetAuthorization()
+		response.AuthorizationId = auth.GetAuthorizationId()
+		response.GrantedMsat = auth.GetGrantedMsat()
+		response.RemainingMsat = auth.GetRemainingMsat()
+		response.IssuedAt = auth.GetIssuedAt()
+		response.ExpiresAt = auth.GetExpiresAt()
+	}
+
+	// Include available balance if provided
+	if ledgerResp.GetAvailableMsat() > 0 {
+		response.AvailableMsat = ledgerResp.GetAvailableMsat()
 	}
 
 	// Serialize response to JSON with short enum names
@@ -156,7 +203,7 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 		return
 	}
 
-	log.Printf("[AUTHORIZATION RESPONSE] Published to %s", responseTopic)
+	log.Printf("[AUTHORIZATION RESPONSE] Published to %s, Status: %s", responseTopic, response.Status.String())
 }
 
 // handleInvoiceRequest processes invoice requests from devices
