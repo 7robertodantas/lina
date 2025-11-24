@@ -90,8 +90,9 @@ func (x *HeartbeatPayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	// Use protojson to unmarshal
-	return protojson.Unmarshal(transformed, x)
+	// Use protojson to unmarshal with UseProtoNames to preserve snake_case
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 func (x *UsagePayload) UnmarshalJSON(data []byte) error {
@@ -99,7 +100,8 @@ func (x *UsagePayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(transformed, x)
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 func (x *ConfigPayload) UnmarshalJSON(data []byte) error {
@@ -107,7 +109,8 @@ func (x *ConfigPayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(transformed, x)
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 func (x *ControlPayload) UnmarshalJSON(data []byte) error {
@@ -115,7 +118,8 @@ func (x *ControlPayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(transformed, x)
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 func (x *AuthorizationResponsePayload) UnmarshalJSON(data []byte) error {
@@ -123,7 +127,8 @@ func (x *AuthorizationResponsePayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(transformed, x)
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 func (x *InvoiceResponsePayload) UnmarshalJSON(data []byte) error {
@@ -131,7 +136,8 @@ func (x *InvoiceResponsePayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(transformed, x)
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 func (x *InvoiceEventPayload) UnmarshalJSON(data []byte) error {
@@ -139,7 +145,8 @@ func (x *InvoiceEventPayload) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return err
 	}
-	return protojson.Unmarshal(transformed, x)
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	return opts.Unmarshal(transformed, x)
 }
 
 // transformEnumInJSON adds the prefix to enum values in JSON if they don't already have it
@@ -167,8 +174,9 @@ func transformEnumInJSON(data []byte, prefix, fieldName string) ([]byte, error) 
 // Usage: json.Marshal(payload) or payload.MarshalJSON()
 
 func (x *HeartbeatPayload) MarshalJSON() ([]byte, error) {
-	// Marshal with protojson first
-	data, err := protojson.Marshal(x)
+	// Marshal with protojson first, using UseProtoNames to preserve snake_case
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +185,8 @@ func (x *HeartbeatPayload) MarshalJSON() ([]byte, error) {
 }
 
 func (x *UsagePayload) MarshalJSON() ([]byte, error) {
-	data, err := protojson.Marshal(x)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +194,8 @@ func (x *UsagePayload) MarshalJSON() ([]byte, error) {
 }
 
 func (x *ConfigPayload) MarshalJSON() ([]byte, error) {
-	data, err := protojson.Marshal(x)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +203,8 @@ func (x *ConfigPayload) MarshalJSON() ([]byte, error) {
 }
 
 func (x *ControlPayload) MarshalJSON() ([]byte, error) {
-	data, err := protojson.Marshal(x)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +212,8 @@ func (x *ControlPayload) MarshalJSON() ([]byte, error) {
 }
 
 func (x *AuthorizationResponsePayload) MarshalJSON() ([]byte, error) {
-	data, err := protojson.Marshal(x)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +221,8 @@ func (x *AuthorizationResponsePayload) MarshalJSON() ([]byte, error) {
 }
 
 func (x *InvoiceResponsePayload) MarshalJSON() ([]byte, error) {
-	data, err := protojson.Marshal(x)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +230,8 @@ func (x *InvoiceResponsePayload) MarshalJSON() ([]byte, error) {
 }
 
 func (x *InvoiceEventPayload) MarshalJSON() ([]byte, error) {
-	data, err := protojson.Marshal(x)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	data, err := opts.Marshal(x)
 	if err != nil {
 		return nil, err
 	}

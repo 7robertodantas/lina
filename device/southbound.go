@@ -107,7 +107,8 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 
 	var request mqttpb.AuthorizationRequestPayload
 	// AuthorizationRequestPayload doesn't have enums, so we can use protojson.Unmarshal directly
-	if err := protojson.Unmarshal(msg.Payload(), &request); err != nil {
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(msg.Payload(), &request); err != nil {
 		log.Printf("Error parsing authorization request payload from device %s: %v", deviceID, err)
 		return
 	}
@@ -157,7 +158,8 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 
 	var request mqttpb.InvoiceRequestPayload
 	// InvoiceRequestPayload doesn't have enums, so we can use protojson.Unmarshal directly
-	if err := protojson.Unmarshal(msg.Payload(), &request); err != nil {
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(msg.Payload(), &request); err != nil {
 		log.Printf("Error parsing invoice request payload from device %s: %v", deviceID, err)
 		return
 	}

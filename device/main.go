@@ -86,7 +86,8 @@ func EmitUsageRecord(deviceID, reportID, unit string, measure float64, strategy 
 	}
 
 	// Option 2: Serialize to JSON (useful for HTTP APIs, logging, etc.)
-	jsonBytes, err := protojson.Marshal(event)
+	opts := protojson.MarshalOptions{UseProtoNames: true}
+	jsonBytes, err := opts.Marshal(event)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal event to JSON: %w", err)
 	}
