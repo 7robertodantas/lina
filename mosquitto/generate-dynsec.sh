@@ -48,11 +48,18 @@ fi
 
 # Create the user
 echo "Creating user: $MQTT_USERNAME"
-# Note: createClient syntax is: createClient <username> <password>
-# The password is passed as a positional argument, not a flag
-mosquitto_ctrl $CTRL_OPTS dynsec createClient "$MQTT_USERNAME" "$MQTT_PASSWORD"
+# Create client first (without password to avoid -p flag conflict with port)
+mosquitto_ctrl $CTRL_OPTS dynsec createClient "$MQTT_USERNAME"
 if [ $? -ne 0 ]; then
     echo "Failed to create user"
+    exit 1
+fi
+
+# Set the password separately using setClientPassword
+echo "Setting password for user: $MQTT_USERNAME"
+mosquitto_ctrl $CTRL_OPTS dynsec setClientPassword "$MQTT_USERNAME" "$MQTT_PASSWORD"
+if [ $? -ne 0 ]; then
+    echo "Failed to set password for user"
     exit 1
 fi
 
