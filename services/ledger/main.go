@@ -83,7 +83,7 @@ func initDB(cfg Config) *sql.DB {
 		`CREATE TABLE IF NOT EXISTS ledger_entries(
 			id TEXT PRIMARY KEY,
 			device_id TEXT NOT NULL,
-			entry_type TEXT NOT NULL,        -- credit|debit|transfer_in|transfer_out
+			entry_type TEXT NOT NULL,        -- credit|debit
 			amount_sats INTEGER NOT NULL,    -- positive for credits & transfer_in; positive value also stored for debit, semantics defined by entry_type
 			balance_after INTEGER NOT NULL,  -- balance after applying this entry
 			reason TEXT,
@@ -95,7 +95,7 @@ func initDB(cfg Config) *sql.DB {
 		// Idempotency registry: one row per unique client request
 		`CREATE TABLE IF NOT EXISTS idempotency(
 			idempotency_key TEXT PRIMARY KEY,
-			kind TEXT NOT NULL,              -- credit|debit|transfer
+			kind TEXT NOT NULL,              -- credit|debit
 			request_hash TEXT NOT NULL,      -- lightweight dedupe guard (payload hash)
 			response_json TEXT NOT NULL,     -- cached successful response
 			created_at INTEGER NOT NULL
@@ -147,15 +147,6 @@ type DebitRequest struct {
 	IdempotencyKey string `json:"idempotency_key" binding:"required"`
 }
 
-type TransferRequest struct {
-	FromDeviceID   string `json:"from_device_id" binding:"required"`
-	ToDeviceID     string `json:"to_device_id" binding:"required"`
-	AmountSats     int64  `json:"amount_sats" binding:"required"`
-	Reason         string `json:"reason"`
-	CorrelationID  string `json:"correlation_id,omitempty"`
-	IdempotencyKey string `json:"idempotency_key" binding:"required"`
-}
-
 type EntryResponse struct {
 	EntryID       string `json:"entry_id"`
 	DeviceID      string `json:"device_id"`
@@ -164,11 +155,6 @@ type EntryResponse struct {
 	BalanceAfter  int64  `json:"balance_after"`
 	CreatedAt     int64  `json:"created_at"`
 	CorrelationID string `json:"correlation_id,omitempty"`
-}
-
-type TransferResponse struct {
-	Out EntryResponse `json:"debit_out"`
-	In  EntryResponse `json:"credit_in"`
 }
 
 func now() int64 { return time.Now().Unix() }
@@ -322,84 +308,6 @@ func (s *Service) applyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (
 	return entry, err
 }
 
-func (s *Service) applyTransfer(ctx context.Context, tx *sql.Tx, in TransferRequest) (TransferResponse, error) {
-	if in.AmountSats <= 0 {
-		return TransferResponse{}, errors.New("amount must be > 0")
-	}
-	if strings.EqualFold(in.FromDeviceID, in.ToDeviceID) {
-		return TransferResponse{}, errors.New("from and to must differ")
-	}
-	// Ensure both rows
-	if err := s.ensureBalanceRow(ctx, tx, in.FromDeviceID); err != nil {
-		return TransferResponse{}, err
-	}
-	if err := s.ensureBalanceRow(ctx, tx, in.ToDeviceID); err != nil {
-		return TransferResponse{}, err
-	}
-	// Funds check
-	fromBal, err := s.getBalance(ctx, tx, in.FromDeviceID)
-	if err != nil {
-		return TransferResponse{}, err
-	}
-	if fromBal < in.AmountSats {
-		return TransferResponse{}, fmt.Errorf("insufficient funds on source: have %d need %d", fromBal, in.AmountSats)
-	}
-
-	// Move amounts atomically
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE balances SET balance_sats = balance_sats - ?, updated_at=? WHERE device_id=?`,
-		in.AmountSats, now(), in.FromDeviceID); err != nil {
-		return TransferResponse{}, err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE balances SET balance_sats = balance_sats + ?, updated_at=? WHERE device_id=?`,
-		in.AmountSats, now(), in.ToDeviceID); err != nil {
-		return TransferResponse{}, err
-	}
-
-	// Read new balances
-	fromAfter, err := s.getBalance(ctx, tx, in.FromDeviceID)
-	if err != nil {
-		return TransferResponse{}, err
-	}
-	toAfter, err := s.getBalance(ctx, tx, in.ToDeviceID)
-	if err != nil {
-		return TransferResponse{}, err
-	}
-
-	out := EntryResponse{
-		EntryID:       uuid.NewString(),
-		DeviceID:      in.FromDeviceID,
-		EntryType:     "transfer_out",
-		AmountSats:    in.AmountSats,
-		BalanceAfter:  fromAfter,
-		CreatedAt:     now(),
-		CorrelationID: in.CorrelationID,
-	}
-	inE := EntryResponse{
-		EntryID:       uuid.NewString(),
-		DeviceID:      in.ToDeviceID,
-		EntryType:     "transfer_in",
-		AmountSats:    in.AmountSats,
-		BalanceAfter:  toAfter,
-		CreatedAt:     now(),
-		CorrelationID: in.CorrelationID,
-	}
-
-	// Append both entries
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO ledger_entries(id, device_id, entry_type, amount_sats, balance_after, reason, correlation_id, created_at)
-		VALUES(?,?,?,?,?,?,?,?),
-		      (?,?,?,?,?,?,?,?)`,
-		out.EntryID, out.DeviceID, out.EntryType, out.AmountSats, out.BalanceAfter, in.Reason, out.CorrelationID, out.CreatedAt,
-		inE.EntryID, inE.DeviceID, inE.EntryType, inE.AmountSats, inE.BalanceAfter, in.Reason, inE.CorrelationID, inE.CreatedAt,
-	); err != nil {
-		return TransferResponse{}, err
-	}
-
-	return TransferResponse{Out: out, In: inE}, nil
-}
-
 /*
    =========================================
    Idempotency helpers
@@ -521,46 +429,6 @@ func (s *Service) postDebit(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-func (s *Service) postTransfer(c *gin.Context) {
-	var in TransferRequest
-	if err := c.ShouldBindJSON(&in); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-		return
-	}
-	if kind, blob, ok, err := s.getCachedIdem(c, in.IdempotencyKey); err != nil {
-		c.JSON(500, gin.H{"error": err.Error()})
-		return
-	} else if ok && kind == "transfer" {
-		var out TransferResponse
-		_ = json.Unmarshal(blob, &out)
-		c.JSON(http.StatusOK, out)
-		return
-	}
-
-	ctx := c
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
-	if err != nil {
-		c.JSON(500, gin.H{"error": "begin"})
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	out, err := s.applyTransfer(ctx, tx, in)
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-	if err := s.saveIdem(ctx, tx, in.IdempotencyKey, "transfer", hashReq("transfer", in), out); err != nil {
-		c.JSON(409, gin.H{"error": "idempotency conflict"})
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		c.JSON(500, gin.H{"error": "commit"})
-		return
-	}
-	c.JSON(http.StatusOK, out)
-}
-
 func (s *Service) getBalanceHandler(c *gin.Context) {
 	deviceID := c.Query("device_id")
 	if deviceID == "" {
@@ -671,7 +539,6 @@ func main() {
 	auth := r.Group("/", svc.authMiddleware())
 	auth.POST("/credit", svc.postCredit)
 	auth.POST("/debit", svc.postDebit)
-	auth.POST("/transfer", svc.postTransfer)
 
 	// Read endpoints
 	r.GET("/balance", svc.getBalanceHandler)
