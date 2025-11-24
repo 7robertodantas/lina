@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -58,7 +59,7 @@ func NewDynSecService() (*DynSecService, error) {
 
 	service := &DynSecService{
 		client:     client,
-		responseCh: make(chan map[string]interface{}, 10),
+		responseCh: make(chan map[string]interface{}, 100), // Increased buffer to handle multiple concurrent commands
 		commandID:  1,
 	}
 
@@ -97,10 +98,40 @@ func (d *DynSecService) getNextCommandID() int {
 	return id
 }
 
+// isAlreadyExistsError checks if an error message indicates an "already exists" condition
+// These are non-fatal errors that we can safely ignore
+func isAlreadyExistsError(errMsg string) bool {
+	errLower := strings.ToLower(errMsg)
+	return strings.Contains(errLower, "already exists") ||
+		strings.Contains(errLower, "role already exists") ||
+		strings.Contains(errLower, "acl with this topic already exists") ||
+		strings.Contains(errLower, "client already exists")
+}
+
 // executeCommand sends a command to the dynamic security plugin and waits for response
 func (d *DynSecService) executeCommand(command map[string]interface{}) error {
 	commandID := d.getNextCommandID()
 	command["command"] = commandID
+
+	// Drain any old responses from the channel to ensure we get the response for this command
+	// This prevents matching responses from previous commands
+	drained := 0
+	for {
+		select {
+		case <-d.responseCh:
+			drained++
+			if drained == 1 {
+				log.Printf("Draining old responses before command %d", commandID)
+			}
+		default:
+			// No more old responses
+			if drained > 0 {
+				log.Printf("Drained %d old response(s) before command %d", drained, commandID)
+			}
+			goto sendCommand
+		}
+	}
+sendCommand:
 
 	commandJSON, err := json.Marshal(command)
 	if err != nil {
@@ -118,30 +149,53 @@ func (d *DynSecService) executeCommand(command map[string]interface{}) error {
 		return fmt.Errorf("failed to publish command: %w", token.Error())
 	}
 
-	// Wait for response with timeout - keep checking until we get our response
+	// Wait for response with timeout
+	// Note: Mosquitto Dynamic Security API doesn't echo back the command ID in responses,
+	// so we accept the first response that arrives after sending the command.
+	// This works because we process commands sequentially and we've drained old responses.
 	timeout := time.After(10 * time.Second)
-	for {
-		select {
-		case response := <-d.responseCh:
-			// Check if this response is for our command
-			if respID, ok := response["command"].(float64); ok && int(respID) == commandID {
-				// Check for errors in response
-				if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
-					if firstResp, ok := resp[0].(map[string]interface{}); ok {
-						if errMsg, hasErr := firstResp["error"]; hasErr {
-							return fmt.Errorf("command failed: %v", errMsg)
+
+	select {
+	case response := <-d.responseCh:
+		// Log the full response for debugging
+		responseJSON, _ := json.MarshalIndent(response, "", "  ")
+		log.Printf("Received response for command %d: %s", commandID, string(responseJSON))
+
+		// Check for errors in response (handle both single and batched commands)
+		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
+			// Check all responses in the batch for errors
+			var errors []string
+			var alreadyExistsCount int
+			for i, r := range resp {
+				if respMap, ok := r.(map[string]interface{}); ok {
+					if errMsg, hasErr := respMap["error"]; hasErr {
+						errStr := fmt.Sprintf("%v", errMsg)
+						// Check if this is an "already exists" error (non-fatal)
+						if isAlreadyExistsError(errStr) {
+							alreadyExistsCount++
+							log.Printf("Command %d, response %d: %s (skipping, already exists)", commandID, i, errStr)
+						} else {
+							errorJSON, _ := json.MarshalIndent(respMap, "", "  ")
+							log.Printf("Command %d, response %d failed with error: %s", commandID, i, string(errorJSON))
+							errors = append(errors, fmt.Sprintf("response %d: %v", i, errMsg))
 						}
 					}
 				}
-				log.Printf("Command %d executed successfully", commandID)
-				return nil
 			}
-			// Not our response, put it back and continue waiting
-			// (In a production system, you'd want a better queue mechanism)
-			log.Printf("Received response for command %v, waiting for %d", response["command"], commandID)
-		case <-timeout:
-			return fmt.Errorf("timeout waiting for response to command %d", commandID)
+			if len(errors) > 0 {
+				return fmt.Errorf("command failed with %d error(s): %v", len(errors), errors)
+			}
+			if alreadyExistsCount > 0 {
+				log.Printf("Command %d completed with %d 'already exists' warning(s) (%d total responses)", commandID, alreadyExistsCount, len(resp))
+			} else {
+				log.Printf("Command %d executed successfully (%d responses)", commandID, len(resp))
+			}
+		} else {
+			log.Printf("Command %d executed successfully (no response array)", commandID)
 		}
+		return nil
+	case <-timeout:
+		return fmt.Errorf("timeout waiting for response to command %d", commandID)
 	}
 }
 
@@ -170,7 +224,7 @@ func (d *DynSecService) ProvisionDevice(deviceID string) error {
 		log.Printf("Note: Role creation returned error (may already exist): %v", err)
 	}
 
-	// Step 2: Add publish ACLs for the role
+	// Step 2: Add publish ACLs for the role (batch all publish ACLs in one command)
 	publishTopics := []string{
 		fmt.Sprintf("/devices/%s/heartbeat", deviceID),
 		fmt.Sprintf("/devices/%s/usage", deviceID),
@@ -178,26 +232,29 @@ func (d *DynSecService) ProvisionDevice(deviceID string) error {
 		fmt.Sprintf("/devices/%s/request/invoice", deviceID),
 	}
 
+	log.Printf("Adding %d publish ACLs for role: %s", len(publishTopics), roleName)
+	publishACLCommands := make([]map[string]interface{}, 0, len(publishTopics))
 	for _, topic := range publishTopics {
-		log.Printf("Adding publish ACL for topic: %s", topic)
-		addACLCmd := map[string]interface{}{
-			"commands": []map[string]interface{}{
-				{
-					"command":  "addRoleACL",
-					"rolename": roleName,
-					"acltype":  "publishClientSend",
-					"topic":    topic,
-					"allow":    true,
-					"priority": 5,
-				},
-			},
-		}
-		if err := d.executeCommand(addACLCmd); err != nil {
-			return fmt.Errorf("failed to add publish ACL for %s: %w", topic, err)
-		}
+		log.Printf("  - Adding publish ACL for topic: %s", topic)
+		publishACLCommands = append(publishACLCommands, map[string]interface{}{
+			"command":  "addRoleACL",
+			"rolename": roleName,
+			"acltype":  "publishClientSend",
+			"topic":    topic,
+			"allow":    true,
+			"priority": 5,
+		})
 	}
 
-	// Step 3: Add subscribe ACLs for the role
+	addPublishACLCmd := map[string]interface{}{
+		"commands": publishACLCommands,
+	}
+	if err := d.executeCommand(addPublishACLCmd); err != nil {
+		log.Printf("ERROR: Failed to add publish ACLs: %v", err)
+		return fmt.Errorf("failed to add publish ACLs: %w", err)
+	}
+
+	// Step 3: Add subscribe ACLs for the role (batch all subscribe ACLs in one command)
 	subscribeTopics := []string{
 		fmt.Sprintf("/devices/%s/config", deviceID),
 		fmt.Sprintf("/devices/%s/control", deviceID),
@@ -207,23 +264,26 @@ func (d *DynSecService) ProvisionDevice(deviceID string) error {
 		fmt.Sprintf("/devices/%s/events/invoice", deviceID),
 	}
 
+	log.Printf("Adding %d subscribe ACLs for role: %s", len(subscribeTopics), roleName)
+	subscribeACLCommands := make([]map[string]interface{}, 0, len(subscribeTopics))
 	for _, topic := range subscribeTopics {
-		log.Printf("Adding subscribe ACL for topic: %s", topic)
-		addACLCmd := map[string]interface{}{
-			"commands": []map[string]interface{}{
-				{
-					"command":  "addRoleACL",
-					"rolename": roleName,
-					"acltype":  "subscribePattern",
-					"topic":    topic,
-					"allow":    true,
-					"priority": 5,
-				},
-			},
-		}
-		if err := d.executeCommand(addACLCmd); err != nil {
-			return fmt.Errorf("failed to add subscribe ACL for %s: %w", topic, err)
-		}
+		log.Printf("  - Adding subscribe ACL for topic: %s", topic)
+		subscribeACLCommands = append(subscribeACLCommands, map[string]interface{}{
+			"command":  "addRoleACL",
+			"rolename": roleName,
+			"acltype":  "subscribePattern",
+			"topic":    topic,
+			"allow":    true,
+			"priority": 5,
+		})
+	}
+
+	addSubscribeACLCmd := map[string]interface{}{
+		"commands": subscribeACLCommands,
+	}
+	if err := d.executeCommand(addSubscribeACLCmd); err != nil {
+		log.Printf("ERROR: Failed to add subscribe ACLs: %v", err)
+		return fmt.Errorf("failed to add subscribe ACLs: %w", err)
 	}
 
 	// Step 4: Create client with deviceID as username
