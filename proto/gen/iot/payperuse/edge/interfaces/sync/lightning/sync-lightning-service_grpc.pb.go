@@ -8,10 +8,10 @@ package lightning
 
 import (
 	context "context"
-	lightning "gen/iot/payperuse/edge/model/lightning"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	lightning "iot/payperuse/edge/model/lightning"
 )
 
 // This is a compile-time assertion to ensure that this generated file

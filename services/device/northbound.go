@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/gen/iot/payperuse/edge/model/mqtt"
+	mqttpb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/model/mqtt"
 )
 
 // CreateDeviceRequest represents the request body for creating a device

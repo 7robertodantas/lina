@@ -1253,7 +1253,7 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"\x1aINVOICE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16INVOICE_STATUS_CREATED\x10\x01\x12\x1a\n" +
 	"\x16INVOICE_STATUS_SETTLED\x10\x02\x12\x1a\n" +
-	"\x16INVOICE_STATUS_EXPIRED\x10\x03B#Z!gen/iot/payperuse/edge/model/mqttb\x06proto3"
+	"\x16INVOICE_STATUS_EXPIRED\x10\x03B\x1fZ\x1diot/payperuse/edge/model/mqttb\x06proto3"
 
 var (
 	file_model_model_mqtt_southbound_proto_rawDescOnce sync.Once

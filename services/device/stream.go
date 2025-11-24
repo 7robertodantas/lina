@@ -10,8 +10,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	devicepb "github.com/robertodantas/lnpay/proto/gen/gen/iot/payperuse/edge/model/device"
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/gen/iot/payperuse/edge/model/mqtt"
+	devicepb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/model/device"
+	mqttpb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/model/mqtt"
 )
 
 // StreamClient wraps the Redis client for stream operations

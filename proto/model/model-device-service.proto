@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package iot.payperuse.edge.model.device;
 
-option go_package = "gen/iot/payperuse/edge/model/device";
+option go_package = "iot/payperuse/edge/model/device";
 
 // Reporting strategy used when sending usage.
 enum UsageReportingStrategy {

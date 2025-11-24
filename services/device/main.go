@@ -16,7 +16,7 @@ import (
 
 	// Import the generated proto package
 	// Note: The path matches the go_package in the proto file + the gen/ output directory
-	devicepb "github.com/robertodantas/lnpay/proto/gen/gen/iot/payperuse/edge/model/device"
+	devicepb "github.com/robertodantas/lnpay/proto/gen/iot/payperuse/edge/model/device"
 )
 
 // EmitUsageRecord creates and serializes a DeviceUsageReportedEvent

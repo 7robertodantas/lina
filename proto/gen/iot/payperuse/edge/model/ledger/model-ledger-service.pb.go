@@ -1034,7 +1034,7 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	")LEDGER_EVENT_TYPE_AUTHORIZATION_COMPLETED\x10\x02\x12+\n" +
 	"'LEDGER_EVENT_TYPE_AUTHORIZATION_EXPIRED\x10\x03\x12%\n" +
 	"!LEDGER_EVENT_TYPE_DEVICE_CREDITED\x10\x04\x12$\n" +
-	" LEDGER_EVENT_TYPE_DEVICE_DEBITED\x10\x05B%Z#gen/iot/payperuse/edge/model/ledgerb\x06proto3"
+	" LEDGER_EVENT_TYPE_DEVICE_DEBITED\x10\x05B!Z\x1fiot/payperuse/edge/model/ledgerb\x06proto3"
 
 var (
 	file_model_model_ledger_service_proto_rawDescOnce sync.Once

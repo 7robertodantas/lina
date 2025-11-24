@@ -8,10 +8,10 @@ package ledger
 
 import (
 	context "context"
-	ledger "gen/iot/payperuse/edge/model/ledger"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
+	ledger "iot/payperuse/edge/model/ledger"
 )
 
 // This is a compile-time assertion to ensure that this generated file

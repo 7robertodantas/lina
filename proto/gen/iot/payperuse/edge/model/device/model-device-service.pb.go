@@ -350,7 +350,7 @@ const file_model_model_device_service_proto_rawDesc = "" +
 	"\x14USAGE_STRATEGY_TOTAL\x10\x03*Z\n" +
 	"\x0fDeviceEventType\x12!\n" +
 	"\x1dDEVICE_EVENT_TYPE_UNSPECIFIED\x10\x00\x12$\n" +
-	" DEVICE_EVENT_TYPE_USAGE_REPORTED\x10\x01B%Z#gen/iot/payperuse/edge/model/deviceb\x06proto3"
+	" DEVICE_EVENT_TYPE_USAGE_REPORTED\x10\x01B!Z\x1fiot/payperuse/edge/model/deviceb\x06proto3"
 
 var (
 	file_model_model_device_service_proto_rawDescOnce sync.Once
