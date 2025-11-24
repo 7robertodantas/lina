@@ -20,14 +20,16 @@ type SouthboundInterface struct {
 	mqttClient   *MQTTClient
 	streamClient *StreamClient
 	ledgerClient *LedgerClient
+	repo         *DeviceRepository
 }
 
 // NewSouthboundInterface creates a new southbound interface
-func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient, ledgerClient *LedgerClient) *SouthboundInterface {
+func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient, ledgerClient *LedgerClient, repo *DeviceRepository) *SouthboundInterface {
 	return &SouthboundInterface{
 		mqttClient:   mqttClient,
 		streamClient: streamClient,
 		ledgerClient: ledgerClient,
+		repo:         repo,
 	}
 }
 
@@ -105,8 +107,8 @@ func (sb *SouthboundInterface) handleUsage(client mqtt.Client, msg mqtt.Message)
 		payload.GetTimestamp(),
 	)
 
-	// Publish DeviceUsageReportedEvent to Redis stream
-	if err := sb.streamClient.PublishDeviceUsageReportedEvent(&payload); err != nil {
+	// Publish DeviceUsageReportedEvent to Redis stream (with price_per_unit from device config)
+	if err := sb.streamClient.PublishDeviceUsageReportedEvent(&payload, sb.repo); err != nil {
 		log.Printf("Error publishing usage event to Redis stream: %v", err)
 		return
 	}

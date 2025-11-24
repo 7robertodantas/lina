@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -45,15 +46,43 @@ func convertReportingStrategy(strategy mqttpb.ReportingStrategy) devicepb.UsageR
 }
 
 // PublishDeviceUsageReportedEvent publishes a DeviceEvent containing DeviceUsageReportedEvent to the Redis stream
-func (sc *StreamClient) PublishDeviceUsageReportedEvent(payload *mqttpb.UsagePayload) error {
+// It fetches device config from the repository to append price_per_unit_msat
+func (sc *StreamClient) PublishDeviceUsageReportedEvent(payload *mqttpb.UsagePayload, repo *DeviceRepository) error {
+	// Fetch device config to get price_per_unit
+	device, err := repo.GetDevice(payload.GetDeviceId())
+	if err != nil {
+		return fmt.Errorf("failed to get device config for %s: %w", payload.GetDeviceId(), err)
+	}
+
+	// Parse unit_price string to int64 (assuming it's already in msat if pricing_unit is "msat")
+	var pricePerUnitMsat int64
+	if device.PricingUnit == "msat" {
+		// Parse the unit_price string to int64
+		parsed, err := strconv.ParseInt(device.UnitPrice, 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse unit_price %s for device %s: %w", device.UnitPrice, payload.GetDeviceId(), err)
+		}
+		pricePerUnitMsat = parsed
+	} else {
+		// For other pricing units, we'd need conversion logic
+		// For now, assume msat or log a warning
+		log.Printf("Warning: device %s has pricing_unit %s, assuming msat", payload.GetDeviceId(), device.PricingUnit)
+		parsed, err := strconv.ParseInt(device.UnitPrice, 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse unit_price %s for device %s: %w", device.UnitPrice, payload.GetDeviceId(), err)
+		}
+		pricePerUnitMsat = parsed
+	}
+
 	// Convert MQTT UsagePayload to device UsageRecord
 	usageRecord := &devicepb.UsageRecord{
-		DeviceId:  payload.GetDeviceId(),
-		ReportId:  payload.GetReportId(),
-		Strategy:  convertReportingStrategy(payload.GetStrategy()),
-		Measure:   payload.GetMeasure(),
-		Unit:      payload.GetUnit(),
-		Timestamp: payload.GetTimestamp(),
+		DeviceId:          payload.GetDeviceId(),
+		ReportId:          payload.GetReportId(),
+		Strategy:          convertReportingStrategy(payload.GetStrategy()),
+		Measure:           payload.GetMeasure(),
+		Unit:              payload.GetUnit(),
+		Timestamp:         payload.GetTimestamp(),
+		PricePerUnitMsat:  pricePerUnitMsat,
 	}
 
 	// Create the DeviceUsageReportedEvent

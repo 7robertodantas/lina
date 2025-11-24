@@ -173,7 +173,7 @@ func main() {
 
 	// Initialize and start southbound interface
 	log.Println("Initializing southbound interface...")
-	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient)
+	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient, repo)
 	if err := southbound.Start(); err != nil {
 		log.Fatalf("Failed to start southbound interface: %v", err)
 	}

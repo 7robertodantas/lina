@@ -20,6 +20,7 @@ message UsageRecord {
   double measure               = 4;  // amount consumed in unit
   string unit                  = 5;  // e.g., "kWh"
   string timestamp             = 6;  // ISO-8601 timestamp
+  int64  price_per_unit_msat   = 7;  // price per unit in millisatoshis (added by device service)
 }
 
 // event.device: emitted when a device usage report is received.

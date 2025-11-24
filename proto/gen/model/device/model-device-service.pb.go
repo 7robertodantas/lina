@@ -123,15 +123,16 @@ func (DeviceEventType) EnumDescriptor() ([]byte, []int) {
 
 // Normalized usage record derived from a device report.
 type UsageRecord struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	ReportId      string                 `protobuf:"bytes,2,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"` // unique identifier for idempotency
-	Strategy      UsageReportingStrategy `protobuf:"varint,3,opt,name=strategy,proto3,enum=iot.payperuse.edge.model.device.UsageReportingStrategy" json:"strategy,omitempty"`
-	Measure       float64                `protobuf:"fixed64,4,opt,name=measure,proto3" json:"measure,omitempty"`   // amount consumed in unit
-	Unit          string                 `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`           // e.g., "kWh"
-	Timestamp     string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // ISO-8601 timestamp
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId         string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	ReportId         string                 `protobuf:"bytes,2,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"` // unique identifier for idempotency
+	Strategy         UsageReportingStrategy `protobuf:"varint,3,opt,name=strategy,proto3,enum=iot.payperuse.edge.model.device.UsageReportingStrategy" json:"strategy,omitempty"`
+	Measure          float64                `protobuf:"fixed64,4,opt,name=measure,proto3" json:"measure,omitempty"`                                              // amount consumed in unit
+	Unit             string                 `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`                                                      // e.g., "kWh"
+	Timestamp        string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                            // ISO-8601 timestamp
+	PricePerUnitMsat int64                  `protobuf:"varint,7,opt,name=price_per_unit_msat,json=pricePerUnitMsat,proto3" json:"price_per_unit_msat,omitempty"` // price per unit in millisatoshis (added by device service)
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UsageRecord) Reset() {
@@ -204,6 +205,13 @@ func (x *UsageRecord) GetTimestamp() string {
 		return x.Timestamp
 	}
 	return ""
+}
+
+func (x *UsageRecord) GetPricePerUnitMsat() int64 {
+	if x != nil {
+		return x.PricePerUnitMsat
+	}
+	return 0
 }
 
 // event.device: emitted when a device usage report is received.
@@ -329,14 +337,15 @@ var File_model_model_device_service_proto protoreflect.FileDescriptor
 
 const file_model_model_device_service_proto_rawDesc = "" +
 	"\n" +
-	" model/model-device-service.proto\x12\x1fiot.payperuse.edge.model.device\"\xe8\x01\n" +
+	" model/model-device-service.proto\x12\x1fiot.payperuse.edge.model.device\"\x97\x02\n" +
 	"\vUsageRecord\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\treport_id\x18\x02 \x01(\tR\breportId\x12S\n" +
 	"\bstrategy\x18\x03 \x01(\x0e27.iot.payperuse.edge.model.device.UsageReportingStrategyR\bstrategy\x12\x18\n" +
 	"\ameasure\x18\x04 \x01(\x01R\ameasure\x12\x12\n" +
 	"\x04unit\x18\x05 \x01(\tR\x04unit\x12\x1c\n" +
-	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\"^\n" +
+	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12-\n" +
+	"\x13price_per_unit_msat\x18\a \x01(\x03R\x10pricePerUnitMsat\"^\n" +
 	"\x18DeviceUsageReportedEvent\x12B\n" +
 	"\x05usage\x18\x01 \x01(\v2,.iot.payperuse.edge.model.device.UsageRecordR\x05usage\"\xc2\x01\n" +
 	"\vDeviceEvent\x12D\n" +
