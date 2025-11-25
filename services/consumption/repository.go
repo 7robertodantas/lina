@@ -39,6 +39,20 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 			timestamp TEXT NOT NULL,
 			created_at INTEGER NOT NULL
 		)`,
+		// Device accumulation ledger - append-only log of fractional msat accumulations per device
+		// Each entry represents either:
+		// - A new fractional amount added (type='add')
+		// - A consumption of accumulated amount when debited (type='consume')
+		// accumulated_balance_msat stores the running balance AFTER this entry for O(1) lookups
+		`CREATE TABLE IF NOT EXISTS device_accumulation_ledger (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			device_id TEXT NOT NULL,
+			report_id TEXT NOT NULL,
+			type TEXT NOT NULL CHECK(type IN ('add', 'consume')),
+			amount_msat REAL NOT NULL,
+			accumulated_balance_msat REAL NOT NULL,
+			created_at INTEGER NOT NULL
+		)`,
 		// Outbox table - minimal table for transactional outbox pattern
 		// References consumption_records via report_id (acts as foreign key)
 		// Only stores what's needed for publishing: report_id and published status
@@ -52,6 +66,8 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 		`CREATE INDEX IF NOT EXISTS idx_device_id ON consumption_records (device_id)`,
 		// Index for consumption_outbox
 		`CREATE INDEX IF NOT EXISTS idx_published_created ON consumption_outbox (published, created_at)`,
+		// Index for device_accumulation_ledger
+		`CREATE INDEX IF NOT EXISTS idx_device_ledger ON device_accumulation_ledger (device_id, created_at)`,
 	}
 
 	for _, s := range stmts {
@@ -88,6 +104,7 @@ func (r *ConsumptionRepository) CheckReportExists(ctx context.Context, tx *sql.T
 }
 
 // CreateConsumptionRecord creates a new consumption record and outbox entry in a transaction
+// Only creates outbox entry if debitMsat >= 1 (actual debit will occur)
 func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx *sql.Tx, reportID, deviceID string, debitMsat int64, measure float64, pricePerUnitMsat int64, unit, timestamp string) error {
 	now := time.Now().Unix()
 
@@ -104,16 +121,18 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 		return fmt.Errorf("failed to insert consumption record: %w", err)
 	}
 
-	// Insert into outbox (for publishing to event.consumption)
-	// Minimal entry - we'll join with consumption_records when publishing
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO consumption_outbox (
-			report_id, published, created_at
-		) VALUES (?, 0, ?)`,
-		reportID, now,
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert into outbox: %w", err)
+	// Only insert into outbox if there's an actual debit to publish (>= 1 msat)
+	// If debitMsat is 0, the fractional amount was accumulated but not debited yet
+	if debitMsat >= 1 {
+		_, err = tx.ExecContext(ctx, `
+			INSERT INTO consumption_outbox (
+				report_id, published, created_at
+			) VALUES (?, 0, ?)`,
+			reportID, now,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert into outbox: %w", err)
+		}
 	}
 
 	return nil
@@ -184,6 +203,64 @@ func (r *ConsumptionRepository) CleanupOutbox(ctx context.Context, retentionDays
 	return rowsAffected, nil
 }
 
+// GetDeviceAccumulatedAmount retrieves the current accumulated fractional msat for a device
+// by reading the most recent ledger entry's balance (O(1) lookup)
+func (r *ConsumptionRepository) GetDeviceAccumulatedAmount(ctx context.Context, tx *sql.Tx, deviceID string) (float64, error) {
+	var balance sql.NullFloat64
+	err := tx.QueryRowContext(ctx, `
+		SELECT accumulated_balance_msat
+		FROM device_accumulation_ledger
+		WHERE device_id = ?
+		ORDER BY id DESC
+		LIMIT 1`,
+		deviceID,
+	).Scan(&balance)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No entries yet for this device
+			return 0.0, nil
+		}
+		return 0.0, fmt.Errorf("failed to get device accumulated amount: %w", err)
+	}
+
+	if !balance.Valid {
+		return 0.0, nil
+	}
+
+	return balance.Float64, nil
+}
+
+// AppendAccumulationLedger appends an entry to the device accumulation ledger
+// type should be 'add' (adding fractional msat) or 'consume' (consuming accumulated amount)
+// newBalance is the running balance AFTER this entry (pre-calculated by caller)
+func (r *ConsumptionRepository) AppendAccumulationLedger(ctx context.Context, tx *sql.Tx, deviceID, reportID, entryType string, amountMsat, newBalance float64) error {
+	if entryType != "add" && entryType != "consume" {
+		return fmt.Errorf("invalid ledger entry type: %s (must be 'add' or 'consume')", entryType)
+	}
+
+	if amountMsat < 0 {
+		return fmt.Errorf("amount_msat cannot be negative: %f", amountMsat)
+	}
+
+	if newBalance < 0 {
+		return fmt.Errorf("accumulated_balance_msat cannot be negative: %f", newBalance)
+	}
+
+	now := time.Now().Unix()
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO device_accumulation_ledger (device_id, report_id, type, amount_msat, accumulated_balance_msat, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		deviceID, reportID, entryType, amountMsat, newBalance, now,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to append to accumulation ledger: %w", err)
+	}
+
+	return nil
+}
+
 // BeginTx starts a new transaction
 func (r *ConsumptionRepository) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
 	return r.db.BeginTx(ctx, opts)
@@ -193,4 +270,3 @@ func (r *ConsumptionRepository) BeginTx(ctx context.Context, opts *sql.TxOptions
 func (r *ConsumptionRepository) Close() error {
 	return r.db.Close()
 }
-

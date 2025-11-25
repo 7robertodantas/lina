@@ -28,7 +28,7 @@ func NewStreamHandler(streamClient *internal.StreamClient, cfg Config, repositor
 	return &StreamHandler{
 		streamClient: streamClient,
 		cfg:          cfg,
-		repository:  repository,
+		repository:   repository,
 		consumerName: "consumption-service",
 		groupName:    "consumption-consumers",
 	}
@@ -135,15 +135,6 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	measure := usage.GetMeasure()
 	pricePerUnitMsat := usage.GetPricePerUnitMsat()
 
-	// Calculate debit amount: price_per_unit * measure
-	// Convert measure (float64) to int64 msat
-	debitMsat := int64(float64(pricePerUnitMsat) * measure)
-
-	if debitMsat <= 0 {
-		log.Printf("Warning: calculated debit amount is 0 or negative for report %s, skipping", reportID)
-		return nil
-	}
-
 	tx, err := sh.repository.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -157,15 +148,55 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	}
 	if exists {
 		// Report already processed, skip (idempotency)
-		log.Printf("Report %s already processed, skipping (idempotency)", reportID)
+		log.Printf("[%s] Report %s already processed, skipping (idempotency)", deviceID, reportID)
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("failed to commit: %w", err)
 		}
 		return nil
 	}
 
-	// Insert into consumption_records and outbox
-	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, debitMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp())
+	// Get current accumulated fractional msat for this device from ledger
+	accumulated, err := sh.repository.GetDeviceAccumulatedAmount(ctx, tx, deviceID)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("[%s] Processing report %s: measure=%.6f %s, price=%d msat, accumulated=%.6f msat",
+		deviceID, reportID, measure, usage.GetUnit(), pricePerUnitMsat, accumulated)
+
+	// Calculate exact debit amount from this usage report
+	usageDebitMsat := float64(pricePerUnitMsat) * measure
+
+	// Calculate total including previously accumulated amount
+	totalMsat := accumulated + usageDebitMsat
+
+	// Extract integer part for actual debit (we can only debit whole msats >= 1)
+	actualDebitMsat := int64(totalMsat)
+
+	// Remaining fractional part stays in accumulator
+	remainingFractionalMsat := totalMsat - float64(actualDebitMsat)
+
+	// Append to accumulation ledger:
+	// 1. Add the new usage amount
+	balanceAfterAdd := accumulated + usageDebitMsat
+	if err := sh.repository.AppendAccumulationLedger(ctx, tx, deviceID, reportID, "add", usageDebitMsat, balanceAfterAdd); err != nil {
+		return err
+	}
+	log.Printf("[%s] Ledger: added %.6f msat, balance=%.6f msat", deviceID, usageDebitMsat, balanceAfterAdd)
+
+	// 2. If we can debit (actualDebitMsat >= 1), record consumption
+	if actualDebitMsat >= 1 {
+		// We're consuming the integer part, leaving the fractional remainder
+		consumedMsat := float64(actualDebitMsat)
+		balanceAfterConsume := balanceAfterAdd - consumedMsat
+		if err := sh.repository.AppendAccumulationLedger(ctx, tx, deviceID, reportID, "consume", consumedMsat, balanceAfterConsume); err != nil {
+			return err
+		}
+		log.Printf("[%s] Ledger: consumed %.6f msat, balance=%.6f msat", deviceID, consumedMsat, balanceAfterConsume)
+	}
+
+	// Insert into consumption_records and optionally outbox (only if actualDebitMsat >= 1)
+	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, actualDebitMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp())
 	if err != nil {
 		return err
 	}
@@ -175,8 +206,13 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	log.Printf("[CONSUMPTION RECORDED] Report: %s, Device: %s, Debit: %d msat",
-		reportID, deviceID, debitMsat)
+	if actualDebitMsat >= 1 {
+		log.Printf("[%s] ✓ CONSUMPTION RECORDED - Report: %s, Debit: %d msat, Remaining: %.6f msat",
+			deviceID, reportID, actualDebitMsat, remainingFractionalMsat)
+	} else {
+		log.Printf("[%s] ⋯ CONSUMPTION ACCUMULATED - Report: %s, Usage: %.6f msat (< 1 msat), Total Accumulated: %.6f msat",
+			deviceID, reportID, usageDebitMsat, totalMsat)
+	}
 
 	return nil
 }
