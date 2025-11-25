@@ -1,5 +1,21 @@
 version: '3.9'
 services:
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: caddy
+    ports:
+      - "8080:80"
+    depends_on:
+      device:
+        condition: service_started
+      ledger:
+        condition: service_started
+      consumption:
+        condition: service_started
+    restart: unless-stopped
+
   redis:
     build:
       context: ./redis
@@ -50,8 +66,8 @@ services:
       args:
         SERVICE: device
     container_name: device
-    ports:
-      - "9084:8080"
+    expose:
+      - "8080"
     environment:
       - MQTT_BROKER=${MQTT_BROKER:-mosquitto}
       - MQTT_PORT=${MQTT_PORT:-1883}
@@ -91,9 +107,8 @@ services:
       args:
         SERVICE: ledger
     container_name: ledger
-    ports:
-      - "9082:8080"  # HTTP port
-    #   - "${LEDGER_GRPC_PORT:-9090}:9090"  # gRPC port
+    expose:
+      - "8080"
     environment:
       - DB_PATH=${LEDGER_DB_PATH:-ledger.db}
       - SERVICE_TOKEN=${LEDGER_SERVICE_TOKEN:-dev-token}
@@ -115,8 +130,8 @@ services:
       args:
         SERVICE: consumption
     container_name: consumption
-    ports:
-      - "9081:8080"
+    expose:
+      - "8080"
     environment:
       - DB_PATH=${CONSUMPTION_DB_PATH:-consumption.db}
       - SERVICE_TOKEN=${CONSUMPTION_SERVICE_TOKEN:-dev-token}

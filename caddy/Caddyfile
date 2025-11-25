@@ -1,0 +1,65 @@
+{
+    admin 0.0.0.0:2019
+}
+
+:80 {
+    # Device service endpoints
+    route /devices* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy device:8080
+    }
+
+    # Ledger service endpoints - balance, entries, authorizations, invoices
+    route /devices/*/balance* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    route /devices/*/entries* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    route /devices/*/credit* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    route /devices/*/debit* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    route /devices/*/authorizations* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    route /devices/*/invoices* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    # Consumption service endpoints
+    route /devices/*/consumptions* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy consumption:8080
+    }
+
+    # Lightning service endpoints
+    route /lnd/info* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    route /lnd/wallet* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy ledger:8080
+    }
+
+    # Health check endpoint
+    respond /health 200
+
+    # Default 404 for unmatched routes
+    respond 404
+}
