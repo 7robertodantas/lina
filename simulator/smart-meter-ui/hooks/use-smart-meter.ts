@@ -42,7 +42,7 @@ interface SmartMeterState {
   totalConsumption: number
   instantPower: number
   invoice: InvoiceResponse | null
-  logs: Array<{ timestamp: string; message: string; type: "info" | "error" | "success" }>
+  logs: Array<{ id: string; timestamp: string; message: string; type: "info" | "error" | "success" }>
 }
 
 export function useSmartMeter() {
@@ -64,7 +64,7 @@ export function useSmartMeter() {
   const addLog = useCallback((message: string, type: "info" | "error" | "success" = "info") => {
     setState((prev) => ({
       ...prev,
-      logs: [{ timestamp: new Date().toISOString(), message, type }, ...prev.logs].slice(0, 50),
+      logs: [{ id: `${Date.now()}-${Math.random()}`, timestamp: new Date().toISOString(), message, type }, ...prev.logs].slice(0, 50),
     }))
   }, [])
 
