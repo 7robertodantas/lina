@@ -180,6 +180,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 
 	// Publish events based on new status
 	timestamp := time.Now().Format(time.RFC3339)
+
 	if newStatus == "completed" {
 		// Publish AuthorizationCompleted event
 		if err := sh.PublishAuthorizationCompleted(ctx, authorizationID, deviceID, timestamp); err != nil {
@@ -236,6 +237,45 @@ func (sh *StreamHandler) PublishAuthorizationExpired(ctx context.Context, author
 		Type: ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_AUTHORIZATION_EXPIRED,
 		Payload: &ledgermodel.LedgerEvent_AuthorizationExpired{
 			AuthorizationExpired: event,
+		},
+	}
+
+	return sh.publishLedgerEvent(ctx, ledgerEvent)
+}
+
+// PublishDeviceCredited publishes a DeviceCreditedEvent to event.ledger
+func (sh *StreamHandler) PublishDeviceCredited(ctx context.Context, deviceID string, amountMsat, newBalanceMsat int64, timestamp string) error {
+	event := &ledgermodel.DeviceCreditedEvent{
+		DeviceId:       deviceID,
+		AmountMsat:     amountMsat,
+		NewBalanceMsat: newBalanceMsat,
+		Timestamp:      timestamp,
+	}
+
+	ledgerEvent := &ledgermodel.LedgerEvent{
+		Type: ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_DEVICE_CREDITED,
+		Payload: &ledgermodel.LedgerEvent_DeviceCredited{
+			DeviceCredited: event,
+		},
+	}
+
+	return sh.publishLedgerEvent(ctx, ledgerEvent)
+}
+
+// PublishDeviceDebited publishes a DeviceDebitedEvent to event.ledger
+func (sh *StreamHandler) PublishDeviceDebited(ctx context.Context, deviceID, authorizationID string, amountMsat, remainingMsat int64, timestamp string) error {
+	event := &ledgermodel.DeviceDebitedEvent{
+		DeviceId:        deviceID,
+		AuthorizationId: authorizationID,
+		AmountMsat:      amountMsat,
+		RemainingMsat:   remainingMsat,
+		Timestamp:       timestamp,
+	}
+
+	ledgerEvent := &ledgermodel.LedgerEvent{
+		Type: ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_DEVICE_DEBITED,
+		Payload: &ledgermodel.LedgerEvent_DeviceDebited{
+			DeviceDebited: event,
 		},
 	}
 

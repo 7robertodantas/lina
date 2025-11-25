@@ -17,20 +17,22 @@ import (
 
 // NorthboundInterface handles REST API endpoints
 type NorthboundInterface struct {
-	router *gin.Engine
-	repo   *LedgerRepository
-	cfg    Config
-	server *http.Server
+	router        *gin.Engine
+	repo          *LedgerRepository
+	streamHandler *StreamHandler
+	cfg           Config
+	server        *http.Server
 }
 
 // NewNorthboundInterface creates a new northbound interface
-func NewNorthboundInterface(repo *LedgerRepository, cfg Config) *NorthboundInterface {
+func NewNorthboundInterface(repo *LedgerRepository, cfg Config, streamHandler *StreamHandler) *NorthboundInterface {
 	router := gin.Default()
 
 	nb := &NorthboundInterface{
-		router: router,
-		repo:   repo,
-		cfg:    cfg,
+		router:        router,
+		repo:          repo,
+		streamHandler: streamHandler,
+		cfg:           cfg,
 	}
 
 	// Register routes
@@ -265,6 +267,15 @@ func (nb *NorthboundInterface) postDeviceCredit(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "commit"})
 		return
 	}
+
+	// Emit DeviceCreditedEvent to event.ledger
+	if nb.streamHandler != nil {
+		timestamp := time.Unix(out.CreatedAt, 0).UTC().Format(time.RFC3339)
+		if err := nb.streamHandler.PublishDeviceCredited(c.Request.Context(), out.DeviceID, out.AmountMsat, out.BalanceAfter, timestamp); err != nil {
+			log.Printf("Failed to publish DeviceCreditedEvent: %v", err)
+		}
+	}
+
 	c.JSON(http.StatusOK, out)
 }
 
@@ -325,6 +336,22 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 		c.JSON(500, gin.H{"error": "commit"})
 		return
 	}
+
+	// Emit DeviceDebitedEvent to event.ledger
+	if nb.streamHandler != nil {
+		timestamp := time.Unix(out.CreatedAt, 0).UTC().Format(time.RFC3339)
+		if err := nb.streamHandler.PublishDeviceDebited(
+			c.Request.Context(),
+			out.DeviceID,
+			debitReq.CorrelationID,
+			out.AmountMsat,
+			out.BalanceAfter,
+			timestamp,
+		); err != nil {
+			log.Printf("Failed to publish DeviceDebitedEvent: %v", err)
+		}
+	}
+
 	c.JSON(http.StatusOK, out)
 }
 

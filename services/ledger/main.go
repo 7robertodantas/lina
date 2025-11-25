@@ -17,7 +17,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-
 /*
    =========================================
    Models & helpers
@@ -138,7 +137,7 @@ func main() {
 
 	// Initialize and start northbound REST API
 	log.Println("Initializing northbound REST API...")
-	northbound := NewNorthboundInterface(repo, cfg)
+	northbound := NewNorthboundInterface(repo, cfg, streamHandler)
 
 	// Start northbound server in a goroutine
 	go func() {

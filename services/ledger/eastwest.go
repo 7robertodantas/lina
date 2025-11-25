@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -122,7 +123,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		AllowNegative: false,  // We already checked balance above
 		CorrelationID: authID, // Use authorization_id as correlation_id
 	}
-	_, err = s.repo.ApplyDebit(ctx, tx, debitReq)
+	entry, err := s.repo.ApplyDebit(ctx, tx, debitReq)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create debit entry: %v", err)
 	}
@@ -130,6 +131,14 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
+	}
+
+	// Emit DeviceDebited event for the authorization hold
+	if s.streamHandler != nil {
+		timestamp := time.Unix(entry.CreatedAt, 0).UTC().Format(time.RFC3339)
+		if err := s.streamHandler.PublishDeviceDebited(ctx, req.DeviceId, authID, entry.AmountMsat, entry.BalanceAfter, timestamp); err != nil {
+			log.Printf("Failed to publish DeviceDebitedEvent for authorization %s: %v", authID, err)
+		}
 	}
 
 	// Build response
