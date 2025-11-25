@@ -1,0 +1,95 @@
+"use client"
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import type { InvoiceResponse } from "@/lib/types"
+import { QrCode, Copy, Check, X, Zap } from "lucide-react"
+import { useState } from "react"
+import QRCode from "react-qr-code"
+
+interface QRPaymentProps {
+  invoice: InvoiceResponse | null
+  onSimulatePayment: () => void
+  onClose: () => void
+}
+
+export function QRPayment({ invoice, onSimulatePayment, onClose }: QRPaymentProps) {
+  const [copied, setCopied] = useState(false)
+
+  if (!invoice) return null
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(invoice.bolt11)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const amountSats = Math.floor(invoice.amount_msat / 1000)
+
+  return (
+    <Card className="border-primary/50 bg-card">
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <QrCode className="h-4 w-4" />
+            Lightning Invoice
+          </CardTitle>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onClose}>
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-col items-center">
+          <div className="rounded-lg bg-foreground p-3">
+            <QRCode
+              value={invoice.bolt11}
+              size={160}
+              bgColor="hsl(var(--foreground))"
+              fgColor="hsl(var(--background))"
+            />
+          </div>
+          <div className="mt-3 flex items-baseline gap-1">
+            <Zap className="h-4 w-4 text-primary" />
+            <span className="font-mono text-xl font-bold text-foreground">{amountSats.toLocaleString()}</span>
+            <span className="text-sm text-muted-foreground">sats</span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full font-mono text-xs bg-transparent"
+            onClick={copyToClipboard}
+          >
+            {copied ? (
+              <>
+                <Check className="mr-2 h-3 w-3" />
+                Copied!
+              </>
+            ) : (
+              <>
+                <Copy className="mr-2 h-3 w-3" />
+                Copy Invoice
+              </>
+            )}
+          </Button>
+
+          <Button
+            size="sm"
+            className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+            onClick={onSimulatePayment}
+          >
+            <Zap className="mr-2 h-4 w-4" />
+            Simulate Payment
+          </Button>
+        </div>
+
+        <p className="text-center text-xs text-muted-foreground">
+          Invoice expires: {new Date(invoice.expires_at).toLocaleTimeString()}
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
