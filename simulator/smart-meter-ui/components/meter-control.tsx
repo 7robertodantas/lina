@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Power, Wifi, WifiOff, RefreshCw } from "lucide-react"
 import type { DeviceStatus, MQTTConnectionStatus, MQTTEvent } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useMemo } from "react"
 
 interface MeterControlProps {
   deviceStatus: DeviceStatus
@@ -27,7 +28,9 @@ export function MeterControl({ deviceStatus, mqttStatus, onStart, onStop, events
   const isOnline = deviceStatus === "ONLINE"
   const isStarting = deviceStatus === "STARTING"
 
-  const recentEvents = events.slice(-3).reverse()
+  const recentEvents = useMemo(() => {
+    return events.slice(0, 10).reverse()
+  }, [events])
 
   return (
     <Card className="border-border bg-card">
@@ -35,7 +38,7 @@ export function MeterControl({ deviceStatus, mqttStatus, onStart, onStop, events
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <Button
-              size="lg"
+              size="lg" 
               variant={isOnline ? "destructive" : "default"}
               className={cn(
                 "h-14 w-14 rounded-full p-0",

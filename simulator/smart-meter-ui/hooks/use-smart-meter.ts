@@ -106,6 +106,43 @@ export function useSmartMeter() {
       password: mqttPassword,
     })
 
+    // Subscribe to authorization responses
+    mqtt.subscribeToAuthorizeResponse((response) => {
+      if (response.status === "GRANTED") {
+        setState((prev) => ({
+          ...prev,
+          deviceStatus: "ONLINE",
+          balance: {
+            device_id: state.deviceId,
+            available_msat: response.granted_msat,
+            reserved_msat: 0,
+            total_msat: response.granted_msat,
+            timestamp: response.issued_at,
+          },
+        }))
+        addLog(`Authorization granted: ${response.granted_msat} msat`, "success")
+      } else if (response.status === "REJECTED") {
+        addLog(`Authorization rejected: ${response.request_id}`, "error")
+      }
+    })
+
+    // Subscribe to balance updates
+    mqtt.subscribeToBalance((balance) => {
+      setState((prev) => ({ ...prev, balance }))
+      addLog(`Balance updated: ${balance.available_msat} msat available`, "info")
+    })
+
+    // Subscribe to invoice responses
+    mqtt.subscribeToInvoiceResponse((response) => {
+      if (response.status === "CREATED") {
+        setState((prev) => ({ ...prev, invoice: response }))
+        addLog("Invoice created - scan QR to pay", "success")
+      } else if (response.status === "PAID") {
+        setState((prev) => ({ ...prev, invoice: null }))
+        addLog(`Payment received: ${response.amount_msat} msat`, "success")
+      }
+    })
+
     // Simulate startup sequence
     setTimeout(() => {
       // Publish heartbeat
@@ -127,23 +164,16 @@ export function useSmartMeter() {
       })
       addLog(`Authorization requested: ${requestId}`, "info")
 
-      // Simulate authorization response
+      // Fallback: If no authorization response after 5 seconds, set to ONLINE anyway
       setTimeout(() => {
-        const initialBalance = 500000 // 500 sats in msat
-        setState((prev) => ({
-          ...prev,
-          deviceStatus: "ONLINE",
-          balance: {
-            device_id: state.deviceId,
-            available_msat: initialBalance,
-            reserved_msat: 0,
-            total_msat: initialBalance,
-            timestamp: new Date().toISOString(),
-          },
-        }))
-        addLog("Authorization GRANTED", "success")
-        addLog(`Balance loaded: ${initialBalance} msat`, "info")
-      }, 500)
+        setState((prev) => {
+          if (prev.deviceStatus === "STARTING") {
+            addLog("No authorization response received, proceeding without balance", "error")
+            return { ...prev, deviceStatus: "ONLINE" }
+          }
+          return prev
+        })
+      }, 5000)
     }, 1000)
 
     // Start power update interval

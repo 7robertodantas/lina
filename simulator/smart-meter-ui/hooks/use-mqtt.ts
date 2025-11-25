@@ -99,23 +99,14 @@ export function useMQTT(): MQTTHookReturn {
           const deviceId = configRef.current.deviceId
           // Small delay to ensure connection is fully established
           setTimeout(() => {
-            console.log(`[MQTT] Subscribing to topics for device: ${deviceId}`)
-            // Try wildcard subscription first (should be allowed by ACL: /devices/{deviceId}/#)
-            // This is more efficient and should work if ACLs are properly configured
-            const wildcardTopic = `/devices/${deviceId}/#`
-            mqttClient.current.subscribe(wildcardTopic, 0, (error) => {
-              if (error) {
-                console.error(`[MQTT] Wildcard subscription failed, trying individual topics:`, error)
-                // Fallback to individual topic subscriptions
-                mqttClient.current.subscribe(`/devices/${deviceId}/config`)
-                mqttClient.current.subscribe(`/devices/${deviceId}/response/authorize`)
-                mqttClient.current.subscribe(`/devices/${deviceId}/balance`)
-                mqttClient.current.subscribe(`/devices/${deviceId}/response/invoice`)
-                mqttClient.current.subscribe(`/devices/${deviceId}/control`)
-              } else {
-                console.log(`[MQTT] Successfully subscribed to wildcard: ${wildcardTopic}`)
-              }
-            })
+            console.log(`[MQTT] Subscribing to individual topics for device: ${deviceId}`)
+            // Subscribe to individual topics
+            mqttClient.current.subscribe(`/devices/${deviceId}/config`)
+            mqttClient.current.subscribe(`/devices/${deviceId}/response/authorize`)
+            mqttClient.current.subscribe(`/devices/${deviceId}/balance`)
+            mqttClient.current.subscribe(`/devices/${deviceId}/response/invoice`)
+            mqttClient.current.subscribe(`/devices/${deviceId}/control`)
+            console.log(`[MQTT] Subscribed to all individual topics`)
           }, 100)
         }
       },
