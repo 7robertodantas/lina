@@ -22,7 +22,7 @@ const DEFAULT_APPLIANCES: Appliance[] = [
 ]
 
 const DEFAULT_CONFIG: DeviceConfig = {
-  device_id: "meter-001",
+  device_id: process.env.NEXT_PUBLIC_DEFAULT_DEVICE_ID || "smart-meter-001",
   unit: "kWh",
   unit_price: "10",
   pricing_unit: "msat",
@@ -48,7 +48,7 @@ interface SmartMeterState {
 export function useSmartMeter() {
   const mqtt = useMQTT()
   const [state, setState] = useState<SmartMeterState>({
-    deviceId: "meter-001",
+    deviceId: process.env.NEXT_PUBLIC_DEFAULT_DEVICE_ID || "smart-meter-001",
     deviceStatus: "OFFLINE",
     appliances: DEFAULT_APPLIANCES,
     balance: null,
@@ -94,11 +94,16 @@ export function useSmartMeter() {
     addLog("Starting meter system...", "info")
 
     // Connect to MQTT
+    // Username should match device ID for proper ACL permissions
+    // Password should match what was set during device provisioning
+    const mqttUsername = process.env.NEXT_PUBLIC_MQTT_USERNAME || state.deviceId
+    const mqttPassword = process.env.NEXT_PUBLIC_MQTT_PASSWORD || `${state.deviceId}_password`
+    
     mqtt.connect({
       brokerUrl: process.env.NEXT_PUBLIC_MQTT_BROKER_URL || "wss://mqtt.example.com",
       deviceId: state.deviceId,
-      username: process.env.NEXT_PUBLIC_MQTT_USERNAME,
-      password: process.env.NEXT_PUBLIC_MQTT_PASSWORD,
+      username: mqttUsername,
+      password: mqttPassword,
     })
 
     // Simulate startup sequence

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useCallback, useRef } from "react"
+import { useState, useCallback, useRef, useEffect } from "react"
+import { getMQTTClient } from "@/lib/mqtt"
 import type {
   MQTTConnectionStatus,
   DeviceConfig,
@@ -40,7 +41,7 @@ interface MQTTHookReturn {
 export function useMQTT(): MQTTHookReturn {
   const [connectionStatus, setConnectionStatus] = useState<MQTTConnectionStatus>("disconnected")
   const [lastError, setLastError] = useState<string | null>(null)
-  const clientRef = useRef<unknown>(null)
+  const mqttClient = useRef(getMQTTClient())
   const configRef = useRef<MQTTConfig | null>(null)
 
   const callbacksRef = useRef<{
@@ -51,33 +52,95 @@ export function useMQTT(): MQTTHookReturn {
     control?: (command: ControlCommand) => void
   }>({})
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mqttClient.current.disconnect()
+    }
+  }, [])
+
+  const handleMessage = useCallback((topic: string, message: Buffer) => {
+    try {
+      const payload = JSON.parse(message.toString())
+      console.log(`[MQTT] Message received on ${topic}:`, payload)
+
+      // Route messages to appropriate callbacks based on topic
+      if (topic.includes("/config")) {
+        callbacksRef.current.config?.(payload as DeviceConfig)
+      } else if (topic.includes("/response/authorize")) {
+        callbacksRef.current.authorizeResponse?.(payload as AuthorizeResponse)
+      } else if (topic.includes("/balance")) {
+        callbacksRef.current.balance?.(payload as BalanceMessage)
+      } else if (topic.includes("/response/invoice")) {
+        callbacksRef.current.invoiceResponse?.(payload as InvoiceResponse)
+      } else if (topic.includes("/control")) {
+        callbacksRef.current.control?.(payload as ControlCommand)
+      }
+    } catch (error) {
+      console.error("[MQTT] Error parsing message:", error)
+    }
+  }, [])
+
   const connect = useCallback((config: MQTTConfig) => {
     configRef.current = config
     setConnectionStatus("connecting")
     setLastError(null)
 
-    // Simulate MQTT connection - in production, use mqtt.js or similar
-    setTimeout(() => {
-      setConnectionStatus("connected")
-      console.log("[v0] MQTT Connected to", config.brokerUrl, config.username ? `(authenticated as ${config.username})` : "")
-    }, 1000)
-  }, [])
+    mqttClient.current.connect({
+      brokerUrl: config.brokerUrl,
+      username: config.username,
+      password: config.password,
+      clientId: `${config.deviceId}_${Date.now()}`,
+      onConnect: () => {
+        setConnectionStatus("connected")
+        
+        // Auto-subscribe to relevant topics after a brief delay to ensure connection is fully ready
+        if (configRef.current) {
+          const deviceId = configRef.current.deviceId
+          // Small delay to ensure connection is fully established
+          setTimeout(() => {
+            console.log(`[MQTT] Subscribing to topics for device: ${deviceId}`)
+            // Try wildcard subscription first (should be allowed by ACL: /devices/{deviceId}/#)
+            // This is more efficient and should work if ACLs are properly configured
+            const wildcardTopic = `/devices/${deviceId}/#`
+            mqttClient.current.subscribe(wildcardTopic, 0, (error) => {
+              if (error) {
+                console.error(`[MQTT] Wildcard subscription failed, trying individual topics:`, error)
+                // Fallback to individual topic subscriptions
+                mqttClient.current.subscribe(`/devices/${deviceId}/config`)
+                mqttClient.current.subscribe(`/devices/${deviceId}/response/authorize`)
+                mqttClient.current.subscribe(`/devices/${deviceId}/balance`)
+                mqttClient.current.subscribe(`/devices/${deviceId}/response/invoice`)
+                mqttClient.current.subscribe(`/devices/${deviceId}/control`)
+              } else {
+                console.log(`[MQTT] Successfully subscribed to wildcard: ${wildcardTopic}`)
+              }
+            })
+          }, 100)
+        }
+      },
+      onDisconnect: () => {
+        setConnectionStatus("disconnected")
+      },
+      onError: (error) => {
+        setLastError(error.message)
+        setConnectionStatus("error")
+      },
+      onMessage: handleMessage,
+    })
+  }, [handleMessage])
 
   const disconnect = useCallback(() => {
+    mqttClient.current.disconnect()
     setConnectionStatus("disconnected")
     configRef.current = null
-    console.log("[v0] MQTT Disconnected")
   }, [])
 
   const publish = useCallback(
     (topic: string, payload: unknown) => {
-      if (connectionStatus !== "connected") {
-        console.warn("[v0] Cannot publish - not connected")
-        return
-      }
-      console.log(`[v0] MQTT Publish: ${topic}`, payload)
+      mqttClient.current.publish(topic, payload as string | object)
     },
-    [connectionStatus],
+    [],
   )
 
   const publishHeartbeat = useCallback(

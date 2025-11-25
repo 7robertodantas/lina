@@ -1,6 +1,37 @@
 # Smart Meter UI
 
-A Next.js-based UI for smart meter simulation with MQTT connectivity.
+A Next.js-based UI for smart meter simulation with real-time MQTT connectivity.
+
+## Features
+
+- 🔌 Real-time MQTT connection via WebSocket (WSS)
+- 🔐 Username/password authentication support
+- 📊 Live meter data monitoring and control
+- 💰 Balance tracking and payment integration
+- 📱 Responsive UI with dark mode support
+
+## MQTT Integration
+
+This project uses the [mqtt.js](https://github.com/mqttjs/MQTT.js) library to establish real WebSocket connections to MQTT brokers. The implementation includes:
+
+- **`lib/mqtt.ts`**: Core MQTT client wrapper with connection management
+- **`hooks/use-mqtt.ts`**: React hook for MQTT operations with automatic topic subscriptions
+- Auto-reconnection on connection loss
+- Automatic topic subscription for device-specific channels
+
+### MQTT Topics
+
+The application subscribes and publishes to the following topics:
+
+- `/devices/{deviceId}/heartbeat` - Device status heartbeats
+- `/devices/{deviceId}/config` - Configuration updates
+- `/devices/{deviceId}/request/authorize` - Authorization requests
+- `/devices/{deviceId}/response/authorize` - Authorization responses
+- `/devices/{deviceId}/balance` - Balance updates
+- `/devices/{deviceId}/usage` - Usage reports
+- `/devices/{deviceId}/request/invoice` - Invoice requests
+- `/devices/{deviceId}/response/invoice` - Invoice responses
+- `/devices/{deviceId}/control` - Control commands
 
 ## Environment Variables
 

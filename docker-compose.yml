@@ -39,7 +39,8 @@ services:
     ports:
       - "${MQTT_PORT:-1883}:1883"   # Non-TLS port
       - "${MQTT_TLS_PORT:-8883}:8883" # TLS port
-      - "${MQTT_WSS_PORT:-9001}:9001" # WebSocket Secure port
+      - "${MQTT_WS_PORT:-9001}:9001" # WebSocket port (non-TLS for local dev)
+      - "${MQTT_WSS_PORT:-9002}:9002" # WebSocket Secure port (TLS)
     # volumes:
       # Only persist data directory (dynamic-security.json and mosquitto.db)
       # - ./mosquitto/data:/mosquitto/data
