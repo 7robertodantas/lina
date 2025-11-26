@@ -4,12 +4,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"math/rand"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -114,6 +116,9 @@ var (
 
 	protoMarshalOpts   = protojson.MarshalOptions{UseProtoNames: true}
 	protoUnmarshalOpts = protojson.UnmarshalOptions{DiscardUnknown: true}
+
+	errMQTTWaitTimeout = errors.New("mqtt wait timeout")
+	errMQTTWaitAborted = errors.New("mqtt wait aborted")
 )
 
 func NewSmartMeterBackend() *SmartMeterBackend {
@@ -370,9 +375,11 @@ func (b *SmartMeterBackend) startMeter() {
 func (b *SmartMeterBackend) completeStartupSequence() {
 	const timeout = 15 * time.Second
 
-	if !b.waitForMQTTConnection(timeout) {
-		b.addLog("MQTT connection timeout during startup - reverting to OFFLINE", "error")
-		b.stopMeter()
+	if err := b.waitForMQTTConnection(timeout); err != nil {
+		if errors.Is(err, errMQTTWaitTimeout) {
+			b.addLog("MQTT connection timeout during startup - reverting to OFFLINE", "error")
+			b.stopMeter()
+		}
 		return
 	}
 
@@ -387,7 +394,7 @@ func (b *SmartMeterBackend) completeStartupSequence() {
 	b.publishAuthorizeRequest("STARTUP")
 }
 
-func (b *SmartMeterBackend) waitForMQTTConnection(timeout time.Duration) bool {
+func (b *SmartMeterBackend) waitForMQTTConnection(timeout time.Duration) error {
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 
@@ -396,12 +403,19 @@ func (b *SmartMeterBackend) waitForMQTTConnection(timeout time.Duration) bool {
 
 	for {
 		if b.mqttClient != nil && b.mqttClient.IsConnected() {
-			return true
+			return nil
+		}
+
+		b.mu.RLock()
+		isStarting := b.state.DeviceStatus == "STARTING"
+		b.mu.RUnlock()
+		if !isStarting {
+			return errMQTTWaitAborted
 		}
 
 		select {
 		case <-timer.C:
-			return false
+			return errMQTTWaitTimeout
 		case <-ticker.C:
 		}
 	}
@@ -796,12 +810,23 @@ func (b *SmartMeterBackend) connectMQTT() {
 	b.broadcastState()
 
 	if token := b.mqttClient.Connect(); token.Wait() && token.Error() != nil {
+		err := token.Error()
+		errMsg := err.Error()
 		b.mu.Lock()
 		b.state.MQTTStatus = "error"
 		b.mu.Unlock()
-		b.addLog("MQTT connection failed: "+token.Error().Error(), "error")
+		b.addLog("MQTT connection failed: "+errMsg, "error")
+		if isMQTTAuthError(errMsg) {
+			b.addLog("MQTT credentials rejected - setting device OFFLINE", "error")
+			b.stopMeter()
+		}
 		b.broadcastState()
 	}
+}
+
+func isMQTTAuthError(errMsg string) bool {
+	msg := strings.ToLower(errMsg)
+	return strings.Contains(msg, "not authorized") || strings.Contains(msg, "not authorised")
 }
 
 func (b *SmartMeterBackend) subscribeToTopics() {
