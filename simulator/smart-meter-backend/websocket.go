@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -121,17 +120,7 @@ func (h *WebSocketHandler) handleCommand(cmd WSCommand) {
 			ApplianceID string `json:"applianceId"`
 		}
 		if err := json.Unmarshal(cmd.Data, &data); err == nil {
-			log.Printf("Toggling appliance: %s", data.ApplianceID)
-			needsAuth, reason := h.meter.ToggleAppliance(data.ApplianceID)
-
-			if needsAuth {
-				// Request authorization after a delay
-				go func() {
-					h.meter.AddLog("Initiating usage requesting authorization", "info")
-					time.Sleep(1 * time.Second)
-					h.southbound.PublishAuthorizeRequest(reason)
-				}()
-			}
+			h.meter.ToggleAppliance(data.ApplianceID)
 		} else {
 			log.Printf("Error unmarshaling toggle_appliance data: %v", err)
 		}

@@ -409,13 +409,13 @@ func (m *SmartMeter) HandleControlResume() {
 }
 
 // ToggleAppliance toggles an appliance on or off
-func (m *SmartMeter) ToggleAppliance(applianceID string) (needsAuth bool, reason string) {
+func (m *SmartMeter) ToggleAppliance(applianceID string) {
 	m.mu.Lock()
 
 	if m.state.DeviceStatus != "ONLINE" {
 		m.mu.Unlock()
 		m.AddLog("Cannot toggle appliance: offline", "error")
-		return false, ""
+		return
 	}
 
 	var appliance *Appliance
@@ -428,7 +428,7 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) (needsAuth bool, reason
 
 	if appliance == nil {
 		m.mu.Unlock()
-		return false, ""
+		return
 	}
 
 	// Check if this is the first appliance being turned on (all currently off)
@@ -450,7 +450,8 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) (needsAuth bool, reason
 		status = "ON"
 	}
 	name := appliance.Name
-	needsAuth = turningOn && allOff && !m.hasActiveAuthorization() && !m.pendingAuthorization
+	needsAuth := turningOn && allOff && !m.hasActiveAuthorization() && !m.pendingAuthorization
+	var reason string
 	if needsAuth {
 		m.pendingAuthorization = true
 		reason = "INITIATE_USAGE"
@@ -460,7 +461,13 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) (needsAuth bool, reason
 	m.AddLog(name+" turned "+status, "info")
 	m.notifyStateChange()
 
-	return needsAuth, reason
+	if needsAuth {
+		go func(r string) {
+			m.AddLog("Initiating usage requesting authorization", "info")
+			time.Sleep(1 * time.Second)
+			m.southbound.PublishAuthorizeRequest(r)
+		}(reason)
+	}
 }
 
 // HaltConsumption stops all appliances but keeps the device online
