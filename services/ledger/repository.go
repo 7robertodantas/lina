@@ -64,6 +64,7 @@ func NewLedgerRepository(dbPath string, busyTimeoutMS int) (*LedgerRepository, e
 			request_id TEXT NOT NULL,        -- unique request identifier for idempotency
 			granted_msat INTEGER NOT NULL,
 			remaining_msat INTEGER NOT NULL,
+			consumed_msat INTEGER NOT NULL DEFAULT 0,
 			issued_at TEXT NOT NULL,          -- ISO-8601 timestamp
 			expires_at TEXT NOT NULL,         -- ISO-8601 timestamp
 			status TEXT NOT NULL,            -- active|completed|expired
@@ -299,10 +300,10 @@ func (r *LedgerRepository) CreateAuthorization(ctx context.Context, tx *sql.Tx, 
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO authorizations(
 			authorization_id, device_id, request_id, granted_msat, remaining_msat,
-			issued_at, expires_at, status, created_at
-		) VALUES(?,?,?,?,?,?,?,?,?)`,
+			consumed_msat, issued_at, expires_at, status, created_at
+		) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 		authID, deviceID, requestID, grantedMsat, grantedMsat,
-		issuedAt, expiresAt, "active", time.Now().Unix(),
+		0, issuedAt, expiresAt, "active", time.Now().Unix(),
 	)
 	return err
 }
@@ -363,13 +364,13 @@ func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.T
 	return authorizationID, remainingMsat, grantedMsat, expiresAt, status, nil
 }
 
-// UpdateAuthorization updates an authorization's remaining amount and status
-func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, remainingMsat int64, status string) error {
+// UpdateAuthorization updates an authorization's remaining amount, consumed amount, and status
+func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, remainingMsat int64, consumedMsat int64, status string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE authorizations
-		SET remaining_msat = ?, status = ?
+		SET remaining_msat = ?, consumed_msat = ?, status = ?
 		WHERE authorization_id = ?`,
-		remainingMsat, status, authorizationID,
+		remainingMsat, consumedMsat, status, authorizationID,
 	)
 	return err
 }
@@ -406,11 +407,28 @@ func (r *LedgerRepository) GetExpiredAuthorizations(ctx context.Context, expires
 	return expired, nil
 }
 
+// GetActiveAuthorizationByID retrieves an active authorization's device ID and remaining amount
+func (r *LedgerRepository) GetActiveAuthorizationByID(ctx context.Context, tx *sql.Tx, authorizationID string) (deviceID string, remainingMsat int64, err error) {
+	row := tx.QueryRowContext(ctx, `
+		SELECT device_id, remaining_msat
+		FROM authorizations
+		WHERE authorization_id = ? AND status = 'active'`,
+		authorizationID,
+	)
+
+	if err := row.Scan(&deviceID, &remainingMsat); err != nil {
+		return "", 0, err
+	}
+
+	return deviceID, remainingMsat, nil
+}
+
 // MarkAuthorizationExpired marks an authorization as expired
 func (r *LedgerRepository) MarkAuthorizationExpired(ctx context.Context, tx *sql.Tx, authorizationID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE authorizations
-		SET status = 'expired'
+		SET status = 'expired',
+		    remaining_msat = 0
 		WHERE authorization_id = ?`,
 		authorizationID,
 	)
@@ -424,7 +442,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 
 	if statusFilter == "active" {
 		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat,
+			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat,
 			       issued_at, expires_at, status, created_at
 			FROM authorizations
 			WHERE device_id = ? AND status = 'active'
@@ -432,7 +450,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 		args = []interface{}{deviceID}
 	} else if statusFilter == "non-active" {
 		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat,
+			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat,
 			       issued_at, expires_at, status, created_at
 			FROM authorizations
 			WHERE device_id = ? AND status IN ('completed', 'expired')
@@ -441,7 +459,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 	} else {
 		// No filter - return all
 		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat,
+			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat,
 			       issued_at, expires_at, status, created_at
 			FROM authorizations
 			WHERE device_id = ?
@@ -464,6 +482,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 			&auth.RequestID,
 			&auth.GrantedMsat,
 			&auth.RemainingMsat,
+			&auth.ConsumedMsat,
 			&auth.IssuedAt,
 			&auth.ExpiresAt,
 			&auth.Status,

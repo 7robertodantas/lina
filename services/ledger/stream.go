@@ -16,6 +16,8 @@ import (
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
 )
 
+const authorizationExpiredReason = "AUTHORIZATION_EXPIRED"
+
 // StreamHandler handles Redis stream operations for the ledger service
 type StreamHandler struct {
 	streamClient *internal.StreamClient
@@ -139,7 +141,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	// Find active authorization for the device
 	// Order by created_at DESC to get the most recent active authorization
 	now := time.Now().Format(time.RFC3339)
-	authorizationID, remainingMsat, _, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
+	authorizationID, remainingMsat, grantedMsat, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// No active authorization found - return error to skip event (will be retried later)
@@ -169,7 +171,16 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		newStatus = "completed"
 	}
 
-	if err := sh.repo.UpdateAuthorization(ctx, tx, authorizationID, newRemaining, newStatus); err != nil {
+	currentConsumed := grantedMsat - remainingMsat
+	if currentConsumed < 0 {
+		currentConsumed = 0
+	}
+	newConsumed := currentConsumed + debitAmount
+	if newConsumed > grantedMsat {
+		newConsumed = grantedMsat
+	}
+
+	if err := sh.repo.UpdateAuthorization(ctx, tx, authorizationID, newRemaining, newConsumed, newStatus); err != nil {
 		return fmt.Errorf("failed to update authorization: %w", err)
 	}
 
@@ -342,6 +353,8 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 		return fmt.Errorf("failed to query expired authorizations: %w", err)
 	}
 
+	processed := 0
+
 	// Update expired authorizations and publish events
 	for _, auth := range expired {
 		tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{})
@@ -350,26 +363,62 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 			continue
 		}
 
+		deviceID, remainingMsat, err := sh.repo.GetActiveAuthorizationByID(ctx, tx, auth.AuthorizationID)
+		if err != nil {
+			_ = tx.Rollback()
+			if errors.Is(err, sql.ErrNoRows) {
+				log.Printf("Authorization %s already processed, skipping", auth.AuthorizationID)
+				continue
+			}
+			log.Printf("Failed to load authorization %s: %v", auth.AuthorizationID, err)
+			continue
+		}
+
+		var creditEntry *EntryResponse
+		if remainingMsat > 0 {
+			entry, err := sh.repo.ApplyCredit(ctx, tx, CreditRequest{
+				DeviceID:      deviceID,
+				AmountMsat:    remainingMsat,
+				Reason:        authorizationExpiredReason,
+				CorrelationID: auth.AuthorizationID,
+			})
+			if err != nil {
+				_ = tx.Rollback()
+				log.Printf("Failed to credit device %s for expired authorization %s: %v", deviceID, auth.AuthorizationID, err)
+				continue
+			}
+			creditEntry = &entry
+		}
+
 		if err := sh.repo.MarkAuthorizationExpired(ctx, tx, auth.AuthorizationID); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			log.Printf("Failed to update expired authorization %s: %v", auth.AuthorizationID, err)
 			continue
 		}
 
 		if err := tx.Commit(); err != nil {
-			log.Printf("Failed to commit expiration update: %v", err)
+			log.Printf("Failed to commit expiration update for %s: %v", auth.AuthorizationID, err)
 			continue
 		}
 
+		processed++
+
 		// Publish expiration event
 		timestamp := time.Now().Format(time.RFC3339)
-		if err := sh.PublishAuthorizationExpired(ctx, auth.AuthorizationID, auth.DeviceID, timestamp); err != nil {
+		if err := sh.PublishAuthorizationExpired(ctx, auth.AuthorizationID, deviceID, timestamp); err != nil {
 			log.Printf("Failed to publish AuthorizationExpired event: %v", err)
+		}
+
+		if creditEntry != nil {
+			creditTimestamp := time.Unix(creditEntry.CreatedAt, 0).UTC().Format(time.RFC3339)
+			if err := sh.PublishDeviceCredited(ctx, deviceID, creditEntry.AmountMsat, creditEntry.BalanceAfter, creditTimestamp); err != nil {
+				log.Printf("Failed to publish DeviceCreditedEvent for authorization %s: %v", auth.AuthorizationID, err)
+			}
 		}
 	}
 
-	if len(expired) > 0 {
-		log.Printf("Marked %d authorizations as expired", len(expired))
+	if processed > 0 {
+		log.Printf("Marked %d authorizations as expired", processed)
 	}
 
 	return nil

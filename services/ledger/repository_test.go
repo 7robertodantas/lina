@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -97,4 +98,95 @@ func TestApplyDebitReducesBalance(t *testing.T) {
 	balance, err := repo.GetBalance(ctx, checkTx, "device-debit-2")
 	require.NoError(t, err)
 	require.Equal(t, int64(3_500), balance)
+}
+
+func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
+	repo := newTestLedgerRepo(t)
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	authID := "auth-expire-1"
+	deviceID := "device-expire-1"
+	err = repo.CreateAuthorization(
+		ctx,
+		tx,
+		authID,
+		deviceID,
+		"req-expire-1",
+		2_000,
+		now.Format(time.RFC3339),
+		now.Add(time.Minute).Format(time.RFC3339),
+	)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	require.NoError(t, err)
+
+	gotDeviceID, remaining, err := repo.GetActiveAuthorizationByID(ctx, tx2, authID)
+	require.NoError(t, err)
+	require.Equal(t, deviceID, gotDeviceID)
+	require.Equal(t, int64(2_000), remaining)
+
+	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 500, 1_500, "active"))
+	require.NoError(t, tx2.Commit())
+
+	tx3, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	require.NoError(t, err)
+	require.NoError(t, repo.MarkAuthorizationExpired(ctx, tx3, authID))
+	require.NoError(t, tx3.Commit())
+
+	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer checkTx.Rollback()
+
+	var status string
+	var remainingAfter, consumedAfter int64
+	row := checkTx.QueryRowContext(ctx, `SELECT status, remaining_msat, consumed_msat FROM authorizations WHERE authorization_id = ?`, authID)
+	require.NoError(t, row.Scan(&status, &remainingAfter, &consumedAfter))
+	require.Equal(t, "expired", status)
+	require.Equal(t, int64(0), remainingAfter)
+	require.Equal(t, int64(1_500), consumedAfter)
+}
+
+func TestUpdateAuthorizationTracksConsumed(t *testing.T) {
+	repo := newTestLedgerRepo(t)
+	ctx := context.Background()
+
+	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	require.NoError(t, err)
+
+	now := time.Now().UTC()
+	authID := "auth-consumed-1"
+	deviceID := "device-consumed-1"
+	err = repo.CreateAuthorization(
+		ctx,
+		tx,
+		authID,
+		deviceID,
+		"req-consumed-1",
+		3_000,
+		now.Format(time.RFC3339),
+		now.Add(time.Minute).Format(time.RFC3339),
+	)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 1_000, 2_000, "active"))
+	require.NoError(t, tx2.Commit())
+
+	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	require.NoError(t, err)
+	defer checkTx.Rollback()
+
+	var remaining, consumed int64
+	row := checkTx.QueryRowContext(ctx, `SELECT remaining_msat, consumed_msat FROM authorizations WHERE authorization_id = ?`, authID)
+	require.NoError(t, row.Scan(&remaining, &consumed))
+	require.Equal(t, int64(1_000), remaining)
+	require.Equal(t, int64(2_000), consumed)
 }
