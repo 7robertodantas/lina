@@ -86,7 +86,7 @@ message DeviceDebitedEvent {
   string device_id        = 1;
   string authorization_id = 2;
   int64  amount_msat      = 3;
-  int64  remaining_msat   = 4;
+  int64  new_balance_msat = 4;
   string timestamp        = 5;
 }
 

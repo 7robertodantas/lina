@@ -612,10 +612,11 @@ func (b *SmartMeterBackend) toggleAppliance(applianceID string) {
 		return
 	}
 
-	if !appliance.IsOn && b.state.Balance != nil && b.state.Balance.AvailableMsat <= 0 {
+	hasActiveAuth := b.hasActiveAuthorization()
+	if !appliance.IsOn && b.state.Balance != nil && b.state.Balance.AvailableMsat <= 0 && !hasActiveAuth {
 		name := appliance.Name
 		b.mu.Unlock()
-		b.addLog("Cannot turn on "+name+" - out of funds", "error")
+		b.addLog("Cannot turn on "+name+" - out of funds and no active authorization", "error")
 		return
 	}
 
@@ -734,4 +735,13 @@ func maxInt64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+func (b *SmartMeterBackend) hasActiveAuthorization() bool {
+	for i := range b.state.Authorizations {
+		if b.state.Authorizations[i].Status == "ACTIVE" {
+			return true
+		}
+	}
+	return false
 }

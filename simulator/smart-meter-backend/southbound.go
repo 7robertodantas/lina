@@ -353,7 +353,7 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 		if reason == "" {
 			reason = "AUTHORIZATION_REQUIRED"
 		}
-		msg := fmt.Sprintf("Command AUTHORIZATION received: %s", reason)
+		msg := fmt.Sprintf("Command AUTHORIZATION received (reason %s)", reason)
 		if authID != "" {
 			msg += " (" + authID + ")"
 			// Mark the specified authorization as exhausted

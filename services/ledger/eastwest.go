@@ -112,14 +112,11 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	}
 
 	// Create debit ledger entry for the authorization
-	reason := "AUTHORIZATION_HOLD"
-	if req.Reason != "" {
-		reason = req.Reason + "|" + reason
-	}
+	log.Printf("Creating authorization hold debit for device %s: %d msat (auth_id: %s) reason %s", req.DeviceId, req.RequestMsat, authID, req.Reason)
 	debitReq := DebitRequest{
 		DeviceID:      req.DeviceId,
 		AmountMsat:    req.RequestMsat,
-		Reason:        reason,
+		Reason:        "AUTHORIZATION_HOLD",
 		AllowNegative: false,  // We already checked balance above
 		CorrelationID: authID, // Use authorization_id as correlation_id
 	}

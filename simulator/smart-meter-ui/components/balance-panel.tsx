@@ -13,7 +13,7 @@ interface BalancePanelProps {
 }
 
 export function BalancePanel({ balance, onRequestTopUp, isOnline }: BalancePanelProps) {
-  const availableSats = balance ? Math.floor(balance.available_msat / 1000) : 0
+  const availableSats = balance?.available_msat ? Math.floor(balance.available_msat / 1000) : 0
   const isLowBalance = balance && balance.available_msat < 100000
   const isOutOfFunds = balance && balance.available_msat <= 0
 
@@ -49,11 +49,11 @@ export function BalancePanel({ balance, onRequestTopUp, isOnline }: BalancePanel
             </div>
           )}
           <div className="flex items-baseline gap-1">
-            <span className="font-mono text-3xl font-bold text-foreground">{availableSats.toLocaleString()}</span>
+            <span className="font-mono text-3xl font-bold text-foreground">{(availableSats ?? 0).toLocaleString()}</span>
             <span className="text-sm text-muted-foreground">sats</span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {balance ? balance.available_msat.toLocaleString() : 0} msat available
+            {(balance?.available_msat ?? 0).toLocaleString()} msat available
           </p>
         </div>
 

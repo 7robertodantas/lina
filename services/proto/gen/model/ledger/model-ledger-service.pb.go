@@ -774,7 +774,7 @@ type DeviceDebitedEvent struct {
 	DeviceId        string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	AuthorizationId string                 `protobuf:"bytes,2,opt,name=authorization_id,json=authorizationId,proto3" json:"authorization_id,omitempty"`
 	AmountMsat      int64                  `protobuf:"varint,3,opt,name=amount_msat,json=amountMsat,proto3" json:"amount_msat,omitempty"`
-	RemainingMsat   int64                  `protobuf:"varint,4,opt,name=remaining_msat,json=remainingMsat,proto3" json:"remaining_msat,omitempty"`
+	NewBalanceMsat  int64                  `protobuf:"varint,4,opt,name=new_balance_msat,json=newBalanceMsat,proto3" json:"new_balance_msat,omitempty"`
 	Timestamp       string                 `protobuf:"bytes,5,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
@@ -831,9 +831,9 @@ func (x *DeviceDebitedEvent) GetAmountMsat() int64 {
 	return 0
 }
 
-func (x *DeviceDebitedEvent) GetRemainingMsat() int64 {
+func (x *DeviceDebitedEvent) GetNewBalanceMsat() int64 {
 	if x != nil {
-		return x.RemainingMsat
+		return x.NewBalanceMsat
 	}
 	return 0
 }
@@ -1036,13 +1036,13 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	"\vamount_msat\x18\x02 \x01(\x03R\n" +
 	"amountMsat\x12(\n" +
 	"\x10new_balance_msat\x18\x03 \x01(\x03R\x0enewBalanceMsat\x12\x1c\n" +
-	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\"\xc2\x01\n" +
+	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\"\xc5\x01\n" +
 	"\x12DeviceDebitedEvent\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12\x1f\n" +
 	"\vamount_msat\x18\x03 \x01(\x03R\n" +
-	"amountMsat\x12%\n" +
-	"\x0eremaining_msat\x18\x04 \x01(\x03R\rremainingMsat\x12\x1c\n" +
+	"amountMsat\x12(\n" +
+	"\x10new_balance_msat\x18\x04 \x01(\x03R\x0enewBalanceMsat\x12\x1c\n" +
 	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\xfc\x04\n" +
 	"\vLedgerEvent\x12D\n" +
 	"\x04type\x18\x01 \x01(\x0e20.iot.payperuse.edge.model.ledger.LedgerEventTypeR\x04type\x12q\n" +

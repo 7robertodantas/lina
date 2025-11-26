@@ -201,7 +201,12 @@ func (sc *StreamClient) handleLedgerMessage(ctx context.Context, mqttClient *MQT
 		if payload == nil {
 			return fmt.Errorf("ledger event missing DeviceDebited payload")
 		}
-		return sc.publishBalanceUpdate(ctx, mqttClient, payload.GetDeviceId(), payload.GetRemainingMsat(), payload.GetTimestamp())
+		log.Printf("[DEVICE_DEBITED] Device: %s, Authorization: %s, Amount: %d, New Balance: %d",
+			payload.GetDeviceId(),
+			payload.GetAuthorizationId(),
+			payload.GetAmountMsat(),
+			payload.GetNewBalanceMsat())
+		return sc.publishBalanceUpdate(ctx, mqttClient, payload.GetDeviceId(), payload.GetNewBalanceMsat(), payload.GetTimestamp())
 	case ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_AUTHORIZATION_COMPLETED:
 		payload := ledgerEvent.GetAuthorizationCompleted()
 		if payload == nil {

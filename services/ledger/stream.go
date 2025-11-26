@@ -190,6 +190,21 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		return fmt.Errorf("failed to update authorization: %w", err)
 	}
 
+	// Create debit entry for overflow if any
+	var overflowEntry *EntryResponse
+	if newOverflow > 0 {
+		entry, err := sh.repo.ApplyDebit(ctx, tx, DebitRequest{
+			DeviceID:      deviceID,
+			AmountMsat:    newOverflow,
+			Reason:        "AUTHORIZATION_OVERFLOW",
+			CorrelationID: authorizationID,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to apply overflow debit: %w", err)
+		}
+		overflowEntry = &entry
+	}
+
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
@@ -202,6 +217,14 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		// Publish AuthorizationCompleted event
 		if err := sh.PublishAuthorizationCompleted(ctx, authorizationID, deviceID, timestamp); err != nil {
 			log.Printf("Failed to publish AuthorizationCompleted event: %v", err)
+		}
+	}
+
+	// Publish DeviceDebited event for overflow if any
+	if overflowEntry != nil {
+		overflowTimestamp := time.Unix(overflowEntry.CreatedAt, 0).UTC().Format(time.RFC3339)
+		if err := sh.PublishDeviceDebited(ctx, deviceID, authorizationID, overflowEntry.AmountMsat, overflowEntry.BalanceAfter, overflowTimestamp); err != nil {
+			log.Printf("Failed to publish DeviceDebited event for overflow: %v", err)
 		}
 	}
 
@@ -280,12 +303,12 @@ func (sh *StreamHandler) PublishDeviceCredited(ctx context.Context, deviceID str
 }
 
 // PublishDeviceDebited publishes a DeviceDebitedEvent to event.ledger
-func (sh *StreamHandler) PublishDeviceDebited(ctx context.Context, deviceID, authorizationID string, amountMsat, remainingMsat int64, timestamp string) error {
+func (sh *StreamHandler) PublishDeviceDebited(ctx context.Context, deviceID, authorizationID string, amountMsat, newBalanceMsat int64, timestamp string) error {
 	event := &ledgermodel.DeviceDebitedEvent{
 		DeviceId:        deviceID,
 		AuthorizationId: authorizationID,
 		AmountMsat:      amountMsat,
-		RemainingMsat:   remainingMsat,
+		NewBalanceMsat:  newBalanceMsat,
 		Timestamp:       timestamp,
 	}
 
