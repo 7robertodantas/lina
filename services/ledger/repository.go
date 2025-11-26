@@ -65,6 +65,7 @@ func NewLedgerRepository(dbPath string, busyTimeoutMS int) (*LedgerRepository, e
 			granted_msat INTEGER NOT NULL,
 			remaining_msat INTEGER NOT NULL,
 			consumed_msat INTEGER NOT NULL DEFAULT 0,
+			overflow_msat INTEGER NOT NULL DEFAULT 0,
 			issued_at TEXT NOT NULL,          -- ISO-8601 timestamp
 			expires_at TEXT NOT NULL,         -- ISO-8601 timestamp
 			status TEXT NOT NULL,            -- active|completed|expired
@@ -300,10 +301,10 @@ func (r *LedgerRepository) CreateAuthorization(ctx context.Context, tx *sql.Tx, 
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO authorizations(
 			authorization_id, device_id, request_id, granted_msat, remaining_msat,
-			consumed_msat, issued_at, expires_at, status, created_at
-		) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			consumed_msat, overflow_msat, issued_at, expires_at, status, created_at
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		authID, deviceID, requestID, grantedMsat, grantedMsat,
-		0, issuedAt, expiresAt, "active", time.Now().Unix(),
+		0, 0, issuedAt, expiresAt, "active", time.Now().Unix(),
 	)
 	return err
 }
@@ -340,15 +341,16 @@ func (r *LedgerRepository) GetAuthorizationByRequestID(ctx context.Context, tx *
 }
 
 // GetActiveAuthorization retrieves the most recent active authorization for a device
-func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.Tx, deviceID string, expiresAfter string) (string, int64, int64, string, string, error) {
+func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.Tx, deviceID string, expiresAfter string) (string, int64, int64, int64, string, string, error) {
 	var authorizationID string
 	var remainingMsat int64
 	var grantedMsat int64
+	var overflowMsat int64
 	var expiresAt string
 	var status string
 
 	row := tx.QueryRowContext(ctx, `
-		SELECT authorization_id, remaining_msat, granted_msat, expires_at, status
+		SELECT authorization_id, remaining_msat, granted_msat, overflow_msat, expires_at, status
 		FROM authorizations
 		WHERE device_id = ? AND status = 'active' AND expires_at > ?
 		ORDER BY created_at DESC
@@ -356,21 +358,21 @@ func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.T
 		deviceID, expiresAfter,
 	)
 
-	err := row.Scan(&authorizationID, &remainingMsat, &grantedMsat, &expiresAt, &status)
+	err := row.Scan(&authorizationID, &remainingMsat, &grantedMsat, &overflowMsat, &expiresAt, &status)
 	if err != nil {
-		return "", 0, 0, "", "", err
+		return "", 0, 0, 0, "", "", err
 	}
 
-	return authorizationID, remainingMsat, grantedMsat, expiresAt, status, nil
+	return authorizationID, remainingMsat, grantedMsat, overflowMsat, expiresAt, status, nil
 }
 
-// UpdateAuthorization updates an authorization's remaining amount, consumed amount, and status
-func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, remainingMsat int64, consumedMsat int64, status string) error {
+// UpdateAuthorization updates an authorization's remaining amount, consumed amount, overflow amount, and status
+func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, remainingMsat int64, consumedMsat int64, overflowMsat int64, status string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE authorizations
-		SET remaining_msat = ?, consumed_msat = ?, status = ?
+		SET remaining_msat = ?, consumed_msat = ?, overflow_msat = ?, status = ?
 		WHERE authorization_id = ?`,
-		remainingMsat, consumedMsat, status, authorizationID,
+		remainingMsat, consumedMsat, overflowMsat, status, authorizationID,
 	)
 	return err
 }
@@ -442,7 +444,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 
 	if statusFilter == "active" {
 		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat,
+			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat, overflow_msat,
 			       issued_at, expires_at, status, created_at
 			FROM authorizations
 			WHERE device_id = ? AND status = 'active'
@@ -450,7 +452,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 		args = []interface{}{deviceID}
 	} else if statusFilter == "non-active" {
 		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat,
+			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat, overflow_msat,
 			       issued_at, expires_at, status, created_at
 			FROM authorizations
 			WHERE device_id = ? AND status IN ('completed', 'expired')
@@ -459,7 +461,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 	} else {
 		// No filter - return all
 		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat,
+			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat, overflow_msat,
 			       issued_at, expires_at, status, created_at
 			FROM authorizations
 			WHERE device_id = ?
@@ -483,6 +485,7 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 			&auth.GrantedMsat,
 			&auth.RemainingMsat,
 			&auth.ConsumedMsat,
+			&auth.OverflowMsat,
 			&auth.IssuedAt,
 			&auth.ExpiresAt,
 			&auth.Status,

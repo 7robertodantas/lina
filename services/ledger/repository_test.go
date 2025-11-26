@@ -131,7 +131,7 @@ func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
 	require.Equal(t, deviceID, gotDeviceID)
 	require.Equal(t, int64(2_000), remaining)
 
-	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 500, 1_500, "active"))
+	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 500, 1_500, 100, "active"))
 	require.NoError(t, tx2.Commit())
 
 	tx3, err := repo.BeginTx(ctx, &sql.TxOptions{})
@@ -144,12 +144,13 @@ func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
 	defer checkTx.Rollback()
 
 	var status string
-	var remainingAfter, consumedAfter int64
-	row := checkTx.QueryRowContext(ctx, `SELECT status, remaining_msat, consumed_msat FROM authorizations WHERE authorization_id = ?`, authID)
-	require.NoError(t, row.Scan(&status, &remainingAfter, &consumedAfter))
+	var remainingAfter, consumedAfter, overflowAfter int64
+	row := checkTx.QueryRowContext(ctx, `SELECT status, remaining_msat, consumed_msat, overflow_msat FROM authorizations WHERE authorization_id = ?`, authID)
+	require.NoError(t, row.Scan(&status, &remainingAfter, &consumedAfter, &overflowAfter))
 	require.Equal(t, "expired", status)
 	require.Equal(t, int64(0), remainingAfter)
 	require.Equal(t, int64(1_500), consumedAfter)
+	require.Equal(t, int64(100), overflowAfter)
 }
 
 func TestUpdateAuthorizationTracksConsumed(t *testing.T) {
@@ -177,16 +178,17 @@ func TestUpdateAuthorizationTracksConsumed(t *testing.T) {
 
 	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
 	require.NoError(t, err)
-	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 1_000, 2_000, "active"))
+	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 1_000, 2_000, 250, "active"))
 	require.NoError(t, tx2.Commit())
 
 	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
-	var remaining, consumed int64
-	row := checkTx.QueryRowContext(ctx, `SELECT remaining_msat, consumed_msat FROM authorizations WHERE authorization_id = ?`, authID)
-	require.NoError(t, row.Scan(&remaining, &consumed))
+	var remaining, consumed, overflow int64
+	row := checkTx.QueryRowContext(ctx, `SELECT remaining_msat, consumed_msat, overflow_msat FROM authorizations WHERE authorization_id = ?`, authID)
+	require.NoError(t, row.Scan(&remaining, &consumed, &overflow))
 	require.Equal(t, int64(1_000), remaining)
 	require.Equal(t, int64(2_000), consumed)
+	require.Equal(t, int64(250), overflow)
 }

@@ -141,7 +141,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	// Find active authorization for the device
 	// Order by created_at DESC to get the most recent active authorization
 	now := time.Now().Format(time.RFC3339)
-	authorizationID, remainingMsat, grantedMsat, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
+	authorizationID, remainingMsat, grantedMsat, overflowMsat, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// No active authorization found - return error to skip event (will be retried later)
@@ -180,7 +180,13 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		newConsumed = grantedMsat
 	}
 
-	if err := sh.repo.UpdateAuthorization(ctx, tx, authorizationID, newRemaining, newConsumed, newStatus); err != nil {
+	overflowDelta := recorded.GetDebitMsat() - debitAmount
+	if overflowDelta < 0 {
+		overflowDelta = 0
+	}
+	newOverflow := overflowMsat + overflowDelta
+
+	if err := sh.repo.UpdateAuthorization(ctx, tx, authorizationID, newRemaining, newConsumed, newOverflow, newStatus); err != nil {
 		return fmt.Errorf("failed to update authorization: %w", err)
 	}
 

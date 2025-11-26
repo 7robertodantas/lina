@@ -156,6 +156,7 @@ type AuthorizationResponse struct {
 	GrantedMsat     int64  `json:"granted_msat"`
 	RemainingMsat   int64  `json:"remaining_msat"`
 	ConsumedMsat    int64  `json:"consumed_msat"`
+	OverflowMsat    int64  `json:"overflow_msat"`
 	IssuedAt        string `json:"issued_at"`
 	ExpiresAt       string `json:"expires_at"`
 	Status          string `json:"status"`
