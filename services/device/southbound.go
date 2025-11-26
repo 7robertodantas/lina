@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -75,7 +74,8 @@ func (sb *SouthboundInterface) handleHeartbeat(client mqtt.Client, msg mqtt.Mess
 	deviceID := extractDeviceID(topic)
 
 	var payload mqttpb.HeartbeatPayload
-	if err := payload.UnmarshalJSON(msg.Payload()); err != nil {
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(msg.Payload(), &payload); err != nil {
 		log.Printf("Error parsing heartbeat payload from device %s: %v", deviceID, err)
 		return
 	}
@@ -93,7 +93,8 @@ func (sb *SouthboundInterface) handleUsage(client mqtt.Client, msg mqtt.Message)
 	deviceID := extractDeviceID(topic)
 
 	var payload mqttpb.UsagePayload
-	if err := payload.UnmarshalJSON(msg.Payload()); err != nil {
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(msg.Payload(), &payload); err != nil {
 		log.Printf("Error parsing usage payload from device %s: %v", deviceID, err)
 		return
 	}
@@ -161,7 +162,12 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 			Status:    mqttpb.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED,
 			Reason:    fmt.Sprintf("Failed to process authorization: %v", err),
 		}
-		responseJSON, _ := json.Marshal(response)
+		marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+		responseJSON, marshalErr := marshalOpts.Marshal(response)
+		if marshalErr != nil {
+			log.Printf("Error marshaling authorization error response: %v", marshalErr)
+			return
+		}
 		responseTopic := fmt.Sprintf("/devices/%s/response/authorize", deviceID)
 		if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
 			log.Printf("Error publishing error response to device %s: %v", deviceID, err)
@@ -193,7 +199,8 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 	}
 
 	// Serialize response to JSON with short enum names
-	responseJSON, err := json.Marshal(response)
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	responseJSON, err := marshalOpts.Marshal(response)
 	if err != nil {
 		log.Printf("Error marshaling authorization response: %v", err)
 		return
@@ -242,7 +249,8 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 	}
 
 	// Serialize response to JSON with short enum names
-	responseJSON, err := json.Marshal(response)
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	responseJSON, err := marshalOpts.Marshal(response)
 	if err != nil {
 		log.Printf("Error marshaling invoice response: %v", err)
 		return
