@@ -91,7 +91,7 @@ export interface Appliance {
 
 export type DeviceStatus = "OFFLINE" | "STARTING" | "ONLINE" | "PAUSED" | "ERROR"
 
-export type MQTTConnectionStatus = "disconnected" | "connecting" | "connected" | "error"
+export type MQTTConnectionStatus = "disconnected" | "connecting" | "connected" | "error" | "offline"
 
 export interface MQTTEvent {
   id: string

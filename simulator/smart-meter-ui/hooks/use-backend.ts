@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect, useRef } from "react"
-import type { DeviceState } from "@/lib/types"
+import type { DeviceConfig, DeviceState, LogEntry } from "@/lib/types"
 
 interface WSCommand {
   action: string
@@ -11,6 +11,47 @@ interface WSCommand {
 interface WSMessage {
   type: string
   payload: any
+}
+
+const createDefaultConfig = (timestamp: string): DeviceConfig => ({
+  device_id: "",
+  unit: "",
+  unit_price: "0",
+  pricing_unit: "",
+  reporting_strategy: "interval",
+  reporting_interval: 0,
+  heartbeat_interval: 0,
+  authorize_request_msat: 0,
+  timestamp,
+})
+
+const createDisconnectLog = (): LogEntry => ({
+  id: typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `log-${Date.now()}`,
+  timestamp: new Date().toISOString(),
+  message: "Device disconnected",
+  type: "error",
+})
+
+const buildOfflineState = (prev: DeviceState | null): DeviceState => {
+  const logEntry = createDisconnectLog()
+  const baseConfig = prev?.config ?? createDefaultConfig(logEntry.timestamp)
+
+  return {
+    deviceId: prev?.deviceId ?? "",
+    deviceStatus: "OFFLINE",
+    appliances: prev?.appliances ?? [],
+    balance: null,
+    config: {
+      ...baseConfig,
+      timestamp: baseConfig.timestamp || logEntry.timestamp,
+    },
+    totalConsumption: prev?.totalConsumption ?? 0,
+    instantPower: 0,
+    invoice: null,
+    authorizations: prev?.authorizations ?? [],
+    logs: [logEntry],
+    mqttStatus: "offline",
+  }
 }
 
 export function useBackend() {
@@ -54,6 +95,7 @@ export function useBackend() {
     ws.onclose = () => {
       console.log("[Backend] Disconnected")
       setConnectionStatus("disconnected")
+      setState((prev) => buildOfflineState(prev))
       
       // Auto-reconnect after 3 seconds
       reconnectTimeoutRef.current = setTimeout(() => {
