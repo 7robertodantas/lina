@@ -126,7 +126,7 @@ export interface DeviceState {
   totalConsumption: number
   instantPower: number
   invoice: InvoiceResponse | null
-  authorizations: Authorization[]
+  currentAuthorization: Authorization | null
   logs: LogEntry[]
   mqttStatus: MQTTConnectionStatus
 }

@@ -48,7 +48,7 @@ const buildOfflineState = (prev: DeviceState | null): DeviceState => {
     totalConsumption: prev?.totalConsumption ?? 0,
     instantPower: 0,
     invoice: null,
-    authorizations: prev?.authorizations ?? [],
+    currentAuthorization: prev?.currentAuthorization ?? null,
     logs: [logEntry],
     mqttStatus: "offline",
   }

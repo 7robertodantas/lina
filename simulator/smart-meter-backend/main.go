@@ -612,6 +612,18 @@ func (b *SmartMeterBackend) toggleAppliance(applianceID string) {
 		return
 	}
 
+	// Check if this is the first appliance being turned on (all currently off)
+	turningOn := !appliance.IsOn
+	allOff := true
+	if turningOn {
+		for i := range b.state.Appliances {
+			if b.state.Appliances[i].IsOn {
+				allOff = false
+				break
+			}
+		}
+	}
+
 	// Toggle appliance - backend will send STOP command if out of funds
 	appliance.IsOn = !appliance.IsOn
 	status := "OFF"
@@ -619,10 +631,23 @@ func (b *SmartMeterBackend) toggleAppliance(applianceID string) {
 		status = "ON"
 	}
 	name := appliance.Name
+	needsAuth := turningOn && allOff && !b.hasActiveAuthorization() && !b.pendingAuthorization
+	if needsAuth {
+		b.pendingAuthorization = true
+	}
 	b.mu.Unlock()
 
 	b.addLog(name+" turned "+status, "info")
 	b.broadcastState()
+
+	// Request authorization if first appliance turning on and no active auth
+	if needsAuth {
+		go func() {
+			b.addLog("Initiating usage requesting authorization", "info")
+			time.Sleep(1 * time.Second)
+			b.southbound.PublishAuthorizeRequest("INITIATE_USAGE")
+		}()
+	}
 }
 
 // Request invoice for top-up

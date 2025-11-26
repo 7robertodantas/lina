@@ -20,7 +20,7 @@ export function useSmartMeter() {
     totalConsumption: state?.totalConsumption || 0,
     instantPower: state?.instantPower || 0,
     invoice: state?.invoice || null,
-    authorizations: state?.authorizations || [],
+    currentAuthorization: state?.currentAuthorization || null,
     logs: state?.logs || [],
     mqttStatus: state?.mqttStatus || "disconnected",
     backendStatus: connectionStatus,

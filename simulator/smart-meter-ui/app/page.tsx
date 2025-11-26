@@ -17,7 +17,7 @@ export default function SmartMeterPage() {
     totalConsumption,
     instantPower,
     invoice,
-    authorizations,
+    currentAuthorization,
     logs,
     mqttStatus,
     startMeter,
@@ -31,8 +31,8 @@ export default function SmartMeterPage() {
 
   const isOnline = deviceStatus === "ONLINE"
   const isBackendConnected = backendStatus === "connected"
-  const hasActiveAuthorization = authorizations.some((auth) => auth.status === "ACTIVE")
-  const canToggleAppliances = isOnline && ((balance?.available_msat ?? 0) > 0 || hasActiveAuthorization)
+  const hasActiveAuthorization = currentAuthorization?.status === "ACTIVE"
+  const canToggleAppliances = true; //isOnline && ((balance?.available_msat ?? 0) > 0 || hasActiveAuthorization)
 
   return (
     <main className="min-h-screen bg-background p-4 md:p-6 lg:p-8">
