@@ -83,17 +83,18 @@ type WSCommand struct {
 
 // SmartMeterBackend manages the entire smart meter simulation
 type SmartMeterBackend struct {
-	mu                sync.RWMutex
-	state             DeviceState
-	mqttClient        mqtt.Client
-	southbound        *SouthboundInterface
-	wsClients         map[*websocket.Conn]*sync.Mutex
-	wsClientsMu       sync.RWMutex
-	broadcast         chan interface{}
-	stopChan          chan bool
-	powerUpdateTicker *time.Ticker
-	heartbeatTicker   *time.Ticker
-	usageTicker       *time.Ticker
+	mu                 sync.RWMutex
+	state              DeviceState
+	mqttClient         mqtt.Client
+	southbound         *SouthboundInterface
+	wsClients          map[*websocket.Conn]*sync.Mutex
+	wsClientsMu        sync.RWMutex
+	broadcast          chan interface{}
+	stopChan           chan bool
+	powerUpdateTicker  *time.Ticker
+	heartbeatTicker    *time.Ticker
+	usageTicker        *time.Ticker
+	subscriptionsReady chan bool
 }
 
 var (
@@ -148,9 +149,10 @@ func NewSmartMeterBackend() *SmartMeterBackend {
 			Authorizations:   []Authorization{},
 			MQTTStatus:       "disconnected",
 		},
-		wsClients: make(map[*websocket.Conn]*sync.Mutex),
-		broadcast: make(chan interface{}, 100),
-		stopChan:  make(chan bool),
+		wsClients:          make(map[*websocket.Conn]*sync.Mutex),
+		broadcast:          make(chan interface{}, 100),
+		stopChan:           make(chan bool),
+		subscriptionsReady: make(chan bool, 1),
 	}
 
 	// Initialize southbound interface
@@ -372,7 +374,7 @@ func (b *SmartMeterBackend) startMeter() {
 	go b.completeStartupSequence()
 }
 
-// completeStartupSequence waits for the MQTT connection before sending the startup
+// completeStartupSequence waits for the MQTT connection and subscriptions before sending the startup
 // heartbeat and authorization request. This prevents the simulator from staying in
 // STARTING state when the broker takes longer to accept the connection.
 func (b *SmartMeterBackend) completeStartupSequence() {
@@ -390,6 +392,16 @@ func (b *SmartMeterBackend) completeStartupSequence() {
 	isStillStarting := b.state.DeviceStatus == "STARTING"
 	b.mu.RUnlock()
 	if !isStillStarting {
+		return
+	}
+
+	// Wait for subscriptions to be fully established
+	select {
+	case <-b.subscriptionsReady:
+		log.Printf("Subscriptions ready, proceeding with startup sequence")
+	case <-time.After(10 * time.Second):
+		b.addLog("Timeout waiting for subscriptions - reverting to OFFLINE", "error")
+		b.stopMeter()
 		return
 	}
 

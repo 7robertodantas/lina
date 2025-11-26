@@ -138,20 +138,42 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 	b := sb.backend
 	deviceID := b.state.DeviceID
 
-	topics := map[string]mqtt.MessageHandler{
-		"/devices/" + deviceID + "/config":             sb.handleConfigMessage,
-		"/devices/" + deviceID + "/response/authorize": sb.handleAuthorizeResponse,
-		"/devices/" + deviceID + "/balance":            sb.handleBalanceMessage,
-		"/devices/" + deviceID + "/response/invoice":   sb.handleInvoiceResponse,
-		"/devices/" + deviceID + "/control":            sb.handleControlMessage,
+	// Define topics in a specific order - critical response topics first
+	criticalTopics := []struct {
+		topic   string
+		handler mqtt.MessageHandler
+	}{
+		{"/devices/" + deviceID + "/response/authorize", sb.handleAuthorizeResponse},
+		{"/devices/" + deviceID + "/response/invoice", sb.handleInvoiceResponse},
+		{"/devices/" + deviceID + "/balance", sb.handleBalanceMessage},
+		{"/devices/" + deviceID + "/config", sb.handleConfigMessage},
+		{"/devices/" + deviceID + "/control", sb.handleControlMessage},
 	}
 
-	for topic, handler := range topics {
-		if token := b.mqttClient.Subscribe(topic, 1, handler); token.Wait() && token.Error() != nil {
-			b.addLog("Failed to subscribe to "+topic+": "+token.Error().Error(), "error")
+	// Subscribe to each topic and wait for confirmation
+	for _, t := range criticalTopics {
+		token := b.mqttClient.Subscribe(t.topic, 1, t.handler)
+		if token.WaitTimeout(5 * time.Second) {
+			if token.Error() != nil {
+				b.addLog("Failed to subscribe to "+t.topic+": "+token.Error().Error(), "error")
+			} else {
+				log.Printf("Subscribed to %s", t.topic)
+			}
 		} else {
-			log.Printf("Subscribed to %s", topic)
+			b.addLog("Timeout subscribing to "+t.topic, "error")
 		}
+	}
+
+	// Additional delay to ensure broker has fully processed all subscriptions
+	// This prevents race conditions where responses arrive before subscriptions are ready
+	time.Sleep(500 * time.Millisecond)
+	log.Printf("All subscriptions established, ready to send messages")
+
+	// Signal that subscriptions are ready
+	select {
+	case b.subscriptionsReady <- true:
+	default:
+		// Channel already has a value or is closed, ignore
 	}
 }
 
@@ -208,7 +230,6 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 }
 
 func (sb *SouthboundInterface) handleBalanceMessage(client mqtt.Client, msg mqtt.Message) {
-	log.Printf("DEBUG: Raw balance payload: %s", string(msg.Payload()))
 	b := sb.backend
 
 	var balance BalanceMessage
