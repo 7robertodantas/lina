@@ -225,7 +225,7 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 		b.broadcastState()
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED:
 		b.addLog("Authorization rejected: "+response.RequestId, "error")
-		b.shutdownMeter()
+		b.haltConsumption(response.Reason)
 	}
 }
 

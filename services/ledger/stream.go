@@ -198,6 +198,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 			AmountMsat:    newOverflow,
 			Reason:        "AUTHORIZATION_OVERFLOW",
 			CorrelationID: authorizationID,
+			AllowNegative: true,
 		})
 		if err != nil {
 			return fmt.Errorf("failed to apply overflow debit: %w", err)
