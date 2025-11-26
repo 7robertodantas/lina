@@ -62,6 +62,7 @@ type Authorization struct {
 	IssuedAt        string `json:"issued_at"`
 	ExpiresAt       string `json:"expires_at"`
 	Status          string `json:"status"`
+	Reason          string `json:"reason"`
 }
 type LogEntry struct {
 	ID        string `json:"id"`
@@ -83,18 +84,20 @@ type WSCommand struct {
 
 // SmartMeterBackend manages the entire smart meter simulation
 type SmartMeterBackend struct {
-	mu                 sync.RWMutex
-	state              DeviceState
-	mqttClient         mqtt.Client
-	southbound         *SouthboundInterface
-	wsClients          map[*websocket.Conn]*sync.Mutex
-	wsClientsMu        sync.RWMutex
-	broadcast          chan interface{}
-	stopChan           chan bool
-	powerUpdateTicker  *time.Ticker
-	heartbeatTicker    *time.Ticker
-	usageTicker        *time.Ticker
-	subscriptionsReady chan bool
+	mu                   sync.RWMutex
+	state                DeviceState
+	mqttClient           mqtt.Client
+	southbound           *SouthboundInterface
+	wsClients            map[*websocket.Conn]*sync.Mutex
+	wsClientsMu          sync.RWMutex
+	broadcast            chan interface{}
+	stopChan             chan bool
+	powerUpdateTicker    *time.Ticker
+	heartbeatTicker      *time.Ticker
+	usageTicker          *time.Ticker
+	subscriptionsReady   chan bool
+	savedApplianceStates map[string]bool
+	pendingAuthorization bool
 }
 
 var (
@@ -149,10 +152,11 @@ func NewSmartMeterBackend() *SmartMeterBackend {
 			Authorizations:   []Authorization{},
 			MQTTStatus:       "disconnected",
 		},
-		wsClients:          make(map[*websocket.Conn]*sync.Mutex),
-		broadcast:          make(chan interface{}, 100),
-		stopChan:           make(chan bool),
-		subscriptionsReady: make(chan bool, 1),
+		wsClients:            make(map[*websocket.Conn]*sync.Mutex),
+		broadcast:            make(chan interface{}, 100),
+		stopChan:             make(chan bool),
+		subscriptionsReady:   make(chan bool, 1),
+		savedApplianceStates: make(map[string]bool),
 	}
 
 	// Initialize southbound interface
@@ -479,9 +483,11 @@ func (b *SmartMeterBackend) shutdownMeter() {
 // Halt consumption (stop all appliances but keep MQTT connection and device ONLINE)
 func (b *SmartMeterBackend) haltConsumption(reason string) {
 	b.mu.Lock()
-	if b.state.DeviceStatus != "ONLINE" {
-		b.mu.Unlock()
-		return
+	// Save current appliance states before turning them off (only if not already saved)
+	if len(b.savedApplianceStates) == 0 {
+		for i := range b.state.Appliances {
+			b.savedApplianceStates[b.state.Appliances[i].ID] = b.state.Appliances[i].IsOn
+		}
 	}
 
 	// Turn off all appliances but keep connection
@@ -713,4 +719,24 @@ func (b *SmartMeterBackend) hasActiveAuthorization() bool {
 		}
 	}
 	return false
+}
+
+// restoreApplianceStates turns appliances back on based on saved states then clears the saved map
+func (b *SmartMeterBackend) restoreApplianceStates() {
+	b.mu.Lock()
+	if len(b.savedApplianceStates) == 0 {
+		b.mu.Unlock()
+		return
+	}
+	for i := range b.state.Appliances {
+		prevOn, ok := b.savedApplianceStates[b.state.Appliances[i].ID]
+		if ok && prevOn {
+			b.state.Appliances[i].IsOn = true
+		}
+	}
+	// Clear saved states after restoring
+	b.savedApplianceStates = make(map[string]bool)
+	b.mu.Unlock()
+	b.addLog("Appliances resumed", "info")
+	b.broadcastState()
 }

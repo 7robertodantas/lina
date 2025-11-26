@@ -214,17 +214,40 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 			IssuedAt:        response.IssuedAt,
 			ExpiresAt:       response.ExpiresAt,
 			Status:          "ACTIVE",
+			Reason:          response.Reason,
 		}
 
 		b.mu.Lock()
 		b.state.Authorizations = append(b.state.Authorizations, auth)
 		b.state.DeviceStatus = "ONLINE"
+		b.pendingAuthorization = false
 		b.mu.Unlock()
 
 		b.addLog("Authorization granted: "+formatMsat(response.GrantedMsat)+" msat (reserved)", "success")
 		b.broadcastState()
+		// Restore previous appliance states if any were saved during halt
+		b.restoreApplianceStates()
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED:
 		b.addLog("Authorization rejected: "+response.RequestId, "error")
+		// Record rejected authorization for future retry logic
+		b.mu.Lock()
+		rejected := Authorization{
+			AuthorizationID: response.AuthorizationId,
+			RequestID:       response.RequestId,
+			GrantedMsat:     0,
+			RemainingMsat:   0,
+			IssuedAt:        response.IssuedAt,
+			ExpiresAt:       response.ExpiresAt,
+			Status:          "REJECTED",
+			Reason:          response.Reason,
+		}
+		b.state.Authorizations = append(b.state.Authorizations, rejected)
+		b.pendingAuthorization = false
+		// Move to ONLINE even on rejection so device isn't stuck in STARTING
+		if b.state.DeviceStatus == "STARTING" {
+			b.state.DeviceStatus = "ONLINE"
+		}
+		b.mu.Unlock()
 		b.haltConsumption(response.Reason)
 	}
 }
@@ -240,10 +263,24 @@ func (sb *SouthboundInterface) handleBalanceMessage(client mqtt.Client, msg mqtt
 
 	b.mu.Lock()
 	b.state.Balance = &balance
+	available := balance.AvailableMsat
+	lastStatus := ""
+	if len(b.state.Authorizations) > 0 {
+		lastStatus = b.state.Authorizations[len(b.state.Authorizations)-1].Status
+	}
+	shouldRetry := available > 0 && !b.pendingAuthorization && !b.hasActiveAuthorization() && lastStatus == "REJECTED"
+	if shouldRetry {
+		b.pendingAuthorization = true
+	}
 	b.mu.Unlock()
 
 	b.addLog("Balance updated: "+formatMsat(balance.AvailableMsat)+" msat available", "info")
 	b.broadcastState()
+
+	if shouldRetry {
+		b.addLog("New funds detected requesting authorization", "info")
+		sb.PublishAuthorizeRequest("FUNDS_AVAILABLE")
+	}
 }
 
 func (sb *SouthboundInterface) handleInvoiceResponse(client mqtt.Client, msg mqtt.Message) {
