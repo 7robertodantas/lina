@@ -206,7 +206,7 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 
 	switch response.Status {
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_GRANTED:
-		auth := Authorization{
+		auth := &Authorization{
 			AuthorizationID: response.AuthorizationId,
 			RequestID:       response.RequestId,
 			GrantedMsat:     response.GrantedMsat,
@@ -218,7 +218,7 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 		}
 
 		b.mu.Lock()
-		b.state.Authorizations = append(b.state.Authorizations, auth)
+		b.state.CurrentAuthorization = auth
 		b.state.DeviceStatus = "ONLINE"
 		b.pendingAuthorization = false
 		b.mu.Unlock()
@@ -231,7 +231,7 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 		b.addLog("Authorization rejected: "+response.RequestId, "error")
 		// Record rejected authorization for future retry logic
 		b.mu.Lock()
-		rejected := Authorization{
+		rejected := &Authorization{
 			AuthorizationID: response.AuthorizationId,
 			RequestID:       response.RequestId,
 			GrantedMsat:     0,
@@ -241,7 +241,7 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 			Status:          "REJECTED",
 			Reason:          response.Reason,
 		}
-		b.state.Authorizations = append(b.state.Authorizations, rejected)
+		b.state.CurrentAuthorization = rejected
 		b.pendingAuthorization = false
 		// Move to ONLINE even on rejection so device isn't stuck in STARTING
 		if b.state.DeviceStatus == "STARTING" {
@@ -265,8 +265,8 @@ func (sb *SouthboundInterface) handleBalanceMessage(client mqtt.Client, msg mqtt
 	b.state.Balance = &balance
 	available := balance.AvailableMsat
 	lastStatus := ""
-	if len(b.state.Authorizations) > 0 {
-		lastStatus = b.state.Authorizations[len(b.state.Authorizations)-1].Status
+	if b.state.CurrentAuthorization != nil {
+		lastStatus = b.state.CurrentAuthorization.Status
 	}
 	shouldRetry := available > 0 && !b.pendingAuthorization && !b.hasActiveAuthorization() && lastStatus == "REJECTED"
 	if shouldRetry {

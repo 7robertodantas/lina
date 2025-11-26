@@ -41,17 +41,17 @@ type Appliance struct {
 
 // DeviceState represents the complete state of the smart meter
 type DeviceState struct {
-	DeviceID         string           `json:"deviceId"`
-	DeviceStatus     string           `json:"deviceStatus"`
-	Appliances       []Appliance      `json:"appliances"`
-	Balance          *BalanceMessage  `json:"balance"`
-	Config           *Config          `json:"config"`
-	TotalConsumption float64          `json:"totalConsumption"`
-	InstantPower     int              `json:"instantPower"`
-	Invoice          *InvoiceResponse `json:"invoice"`
-	Authorizations   []Authorization  `json:"authorizations"`
-	Logs             []LogEntry       `json:"logs"`
-	MQTTStatus       string           `json:"mqttStatus"`
+	DeviceID             string           `json:"deviceId"`
+	DeviceStatus         string           `json:"deviceStatus"`
+	Appliances           []Appliance      `json:"appliances"`
+	Balance              *BalanceMessage  `json:"balance"`
+	Config               *Config          `json:"config"`
+	TotalConsumption     float64          `json:"totalConsumption"`
+	InstantPower         int              `json:"instantPower"`
+	Invoice              *InvoiceResponse `json:"invoice"`
+	CurrentAuthorization *Authorization   `json:"currentAuthorization"`
+	Logs                 []LogEntry       `json:"logs"`
+	MQTTStatus           string           `json:"mqttStatus"`
 }
 
 type Authorization struct {
@@ -146,11 +146,11 @@ func NewSmartMeterBackend() *SmartMeterBackend {
 				AuthorizeRequestMsat: 1000,
 				Timestamp:            time.Now().Format(time.RFC3339),
 			},
-			TotalConsumption: 0,
-			InstantPower:     0,
-			Logs:             []LogEntry{},
-			Authorizations:   []Authorization{},
-			MQTTStatus:       "disconnected",
+			TotalConsumption:     0,
+			InstantPower:         0,
+			Logs:                 []LogEntry{},
+			CurrentAuthorization: nil,
+			MQTTStatus:           "disconnected",
 		},
 		wsClients:            make(map[*websocket.Conn]*sync.Mutex),
 		broadcast:            make(chan interface{}, 100),
@@ -713,12 +713,7 @@ func maxInt64(a, b int64) int64 {
 }
 
 func (b *SmartMeterBackend) hasActiveAuthorization() bool {
-	for i := range b.state.Authorizations {
-		if b.state.Authorizations[i].Status == "ACTIVE" {
-			return true
-		}
-	}
-	return false
+	return b.state.CurrentAuthorization != nil && b.state.CurrentAuthorization.Status == "ACTIVE"
 }
 
 // restoreApplianceStates turns appliances back on based on saved states then clears the saved map
