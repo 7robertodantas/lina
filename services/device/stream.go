@@ -202,6 +202,18 @@ func (sc *StreamClient) handleLedgerMessage(ctx context.Context, mqttClient *MQT
 			return fmt.Errorf("ledger event missing DeviceDebited payload")
 		}
 		return sc.publishBalanceUpdate(ctx, mqttClient, payload.GetDeviceId(), payload.GetRemainingMsat(), payload.GetTimestamp())
+	case ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_AUTHORIZATION_COMPLETED:
+		payload := ledgerEvent.GetAuthorizationCompleted()
+		if payload == nil {
+			return fmt.Errorf("ledger event missing AuthorizationCompleted payload")
+		}
+		return sc.publishAuthorizationControl(ctx, mqttClient, payload.GetDeviceId(), payload.GetAuthorizationId(), "COMPLETED")
+	case ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_AUTHORIZATION_EXPIRED:
+		payload := ledgerEvent.GetAuthorizationExpired()
+		if payload == nil {
+			return fmt.Errorf("ledger event missing AuthorizationExpired payload")
+		}
+		return sc.publishAuthorizationControl(ctx, mqttClient, payload.GetDeviceId(), payload.GetAuthorizationId(), "EXPIRED")
 	default:
 		return nil
 	}
@@ -235,6 +247,33 @@ func (sc *StreamClient) publishBalanceUpdate(ctx context.Context, mqttClient *MQ
 	}
 
 	log.Printf("[BALANCE] Published updated balance for device %s (available=%d)", deviceID, availableMsat)
+	return nil
+}
+
+// publishAuthorizationControl publishes an AUTHORIZATION control command to the device
+func (sc *StreamClient) publishAuthorizationControl(ctx context.Context, mqttClient *MQTTClient, deviceID string, authorizationID string, reason string) error {
+	if deviceID == "" {
+		return fmt.Errorf("ledger event missing device_id")
+	}
+
+	payload := &mqttpb.ControlPayload{
+		Command:         mqttpb.ControlCommand_CONTROL_COMMAND_AUTHORIZATION,
+		Reason:          reason,
+		AuthorizationId: authorizationID,
+	}
+
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	msgBytes, err := marshalOpts.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal control payload: %w", err)
+	}
+
+	topic := fmt.Sprintf("/devices/%s/control", deviceID)
+	if err := mqttClient.Publish(topic, 1, false, msgBytes); err != nil {
+		return fmt.Errorf("failed to publish control command to MQTT: %w", err)
+	}
+
+	log.Printf("[CONTROL] Published AUTHORIZATION control to device %s (authorization_id=%s, reason=%s)", deviceID, authorizationID, reason)
 	return nil
 }
 

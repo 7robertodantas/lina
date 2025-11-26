@@ -266,7 +266,7 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 		if reason == "" {
 			reason = "REMOTE_COMMAND"
 		}
-		b.addLog("STOP command received: "+reason, "info")
+		b.addLog("Command STOPreceived: "+reason, "info")
 		b.stopMeter()
 
 	case mqttmodel.ControlCommand_CONTROL_COMMAND_PAUSE:
@@ -274,7 +274,7 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 		if reason == "" {
 			reason = "REMOTE_COMMAND"
 		}
-		b.addLog("PAUSE command received: "+reason, "info")
+		b.addLog("Command PAUSE received: "+reason, "info")
 		b.mu.Lock()
 		if b.state.DeviceStatus == "ONLINE" {
 			b.state.DeviceStatus = "PAUSED"
@@ -291,7 +291,7 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 		b.broadcastState()
 
 	case mqttmodel.ControlCommand_CONTROL_COMMAND_RESUME:
-		b.addLog("RESUME command received", "info")
+		b.addLog("Command RESUME received", "info")
 		b.mu.Lock()
 		if b.state.DeviceStatus == "PAUSED" || b.state.DeviceStatus == "OFFLINE" {
 			b.state.DeviceStatus = "ONLINE"
@@ -301,7 +301,7 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 		b.broadcastState()
 
 	case mqttmodel.ControlCommand_CONTROL_COMMAND_REBOOT:
-		b.addLog("REBOOT command received - restarting device", "info")
+		b.addLog("Command REBOOT received - restarting device", "info")
 		go func() {
 			// Stop current operations
 			b.stopMeter()
@@ -314,14 +314,14 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 	case mqttmodel.ControlCommand_CONTROL_COMMAND_PING:
 		pingID := control.Id
 		if pingID != "" {
-			b.addLog("PING command received ("+pingID+")", "info")
+			b.addLog("Command PING received ("+pingID+")", "info")
 		} else {
-			b.addLog("PING command received", "info")
+			b.addLog("Command PING received", "info")
 		}
 		sb.PublishHeartbeat(mqttmodel.DeviceStatus_DEVICE_STATUS_ONLINE)
 
 	case mqttmodel.ControlCommand_CONTROL_COMMAND_UPDATE_CONFIG:
-		b.addLog("UPDATE_CONFIG command received - configuration will be updated via retained message", "info")
+		b.addLog("Command UPDATE_CONFIG received", "info")
 		// Configuration is automatically updated via the retained config topic subscription
 		// No additional action needed here - the device will receive the updated config
 		// through the handleConfigMessage handler
@@ -332,9 +332,9 @@ func (sb *SouthboundInterface) handleControlMessage(client mqtt.Client, msg mqtt
 		if reason == "" {
 			reason = "AUTHORIZATION_REQUIRED"
 		}
-		msg := fmt.Sprintf("AUTHORIZATION command received: %s", reason)
+		msg := fmt.Sprintf("Command AUTHORIZATION received: %s", reason)
 		if authID != "" {
-			msg += " (auth_id: " + authID + ")"
+			msg += " (" + authID + ")"
 			// Mark the specified authorization as exhausted
 			b.mu.Lock()
 			for i := range b.state.Authorizations {
