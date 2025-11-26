@@ -1,0 +1,3 @@
+.env
+smart-meter-backend
+*.log

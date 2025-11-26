@@ -148,6 +148,32 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  smart-meter-backend:
+    build:
+      context: .
+      dockerfile: ./simulator/smart-meter-backend/Dockerfile
+    container_name: smart-meter-backend
+    ports:
+      - "8081:8080"  # Expose WebSocket on host port 8081
+    environment:
+      - PORT=8080
+      - DEVICE_ID=${SMART_METER_DEVICE_ID:-smart-meter-001}
+      - MQTT_BROKER=${MQTT_BROKER:-mosquitto}
+      - MQTT_PORT=${MQTT_PORT:-1883}
+      - MQTT_TLS_PORT=${MQTT_TLS_PORT:-8883}
+      - MQTT_USE_TLS=${MQTT_USE_TLS:-true}
+      - MQTT_TLS_SKIP_VERIFY=${MQTT_TLS_SKIP_VERIFY:-false}
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      - MQTT_TLS_CA_CERT=${MQTT_TLS_CA_CERT:-/certs/ca.crt}
+      - MQTT_USERNAME=${SMART_METER_MQTT_USERNAME:-smart-meter-001}
+      - MQTT_PASSWORD=${SMART_METER_MQTT_PASSWORD:-smart-meter-001_password}
+    volumes:
+      - ./mosquitto/certs:/certs:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+
   # lightning:
   #   build:
   #     context: .

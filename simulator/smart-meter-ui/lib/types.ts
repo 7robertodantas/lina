@@ -109,3 +109,24 @@ export interface Authorization {
   expires_at: string
   status: "ACTIVE" | "EXPIRED" | "CONSUMED"
 }
+
+export interface LogEntry {
+  id: string
+  timestamp: string
+  message: string
+  type: "info" | "error" | "success"
+}
+
+export interface DeviceState {
+  deviceId: string
+  deviceStatus: DeviceStatus
+  appliances: Appliance[]
+  balance: BalanceMessage | null
+  config: DeviceConfig
+  totalConsumption: number
+  instantPower: number
+  invoice: InvoiceResponse | null
+  authorizations: Authorization[]
+  logs: LogEntry[]
+  mqttStatus: MQTTConnectionStatus
+}
