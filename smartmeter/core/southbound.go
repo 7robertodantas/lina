@@ -220,11 +220,16 @@ func (sb *SouthboundInterface) handleInvoiceResponse(client mqtt.Client, msg mqt
 	switch response.Status {
 	case mqttmodel.InvoiceStatus_INVOICE_STATUS_CREATED:
 		sb.meter.SetInvoice(&response)
-		sb.meter.AddLog("Invoice created - scan QR to pay", "success")
-
+		sb.meter.AddLog("Invoice created: "+response.InvoiceId, "success")
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_EXPIRED:
+		sb.meter.AddLog("Invoice expired: "+response.InvoiceId, "error")
+		sb.meter.ClearInvoice()
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_FAILED:
+		sb.meter.AddLog("Invoice failed: "+response.InvoiceId, "error")
+		sb.meter.ClearInvoice()
 	case mqttmodel.InvoiceStatus_INVOICE_STATUS_SETTLED:
 		sb.meter.ClearInvoice()
-		sb.meter.AddLog("Payment received: "+formatMsat(response.AmountMsat)+" msat", "success")
+		sb.meter.AddLog("Payment received: "+formatMsat(response.AmountMsat)+" msa for invoice "+response.InvoiceId, "success")
 	}
 }
 

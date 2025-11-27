@@ -166,6 +166,15 @@ func main() {
 	defer ledgerClient.Close()
 	log.Println("Ledger gRPC client connected successfully")
 
+	// Connect to lightning service via gRPC
+	log.Println("Connecting to lightning service...")
+	lightningClient, err := NewLightningClient(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create lightning gRPC client: %v", err)
+	}
+	defer lightningClient.Close()
+	log.Println("Lightning gRPC client connected successfully")
+
 	// Initialize and start northbound REST API
 	log.Println("Initializing northbound REST API...")
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
@@ -179,7 +188,8 @@ func main() {
 
 	// Initialize and start southbound interface
 	log.Println("Initializing southbound interface...")
-	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient, repo)
+	invoiceTimeout := time.Duration(cfg.LightningRPCTimeoutSeconds) * time.Second
+	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient, lightningClient, repo, invoiceTimeout)
 	if err := southbound.Start(); err != nil {
 		log.Fatalf("Failed to start southbound interface: %v", err)
 	}

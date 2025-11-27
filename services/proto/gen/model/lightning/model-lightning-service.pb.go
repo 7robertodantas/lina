@@ -29,6 +29,7 @@ const (
 	InvoiceStatus_INVOICE_STATUS_CREATED     InvoiceStatus = 1
 	InvoiceStatus_INVOICE_STATUS_SETTLED     InvoiceStatus = 2
 	InvoiceStatus_INVOICE_STATUS_EXPIRED     InvoiceStatus = 3
+	InvoiceStatus_INVOICE_STATUS_FAILED      InvoiceStatus = 4
 )
 
 // Enum value maps for InvoiceStatus.
@@ -38,12 +39,14 @@ var (
 		1: "INVOICE_STATUS_CREATED",
 		2: "INVOICE_STATUS_SETTLED",
 		3: "INVOICE_STATUS_EXPIRED",
+		4: "INVOICE_STATUS_FAILED",
 	}
 	InvoiceStatus_value = map[string]int32{
 		"INVOICE_STATUS_UNSPECIFIED": 0,
 		"INVOICE_STATUS_CREATED":     1,
 		"INVOICE_STATUS_SETTLED":     2,
 		"INVOICE_STATUS_EXPIRED":     3,
+		"INVOICE_STATUS_FAILED":      4,
 	}
 )
 
@@ -644,12 +647,13 @@ const file_model_model_lightning_service_proto_rawDesc = "" +
 	"\x0finvoice_created\x18\x02 \x01(\v27.iot.payperuse.edge.model.lightning.InvoiceCreatedEventH\x00R\x0einvoiceCreated\x12b\n" +
 	"\x0finvoice_settled\x18\x03 \x01(\v27.iot.payperuse.edge.model.lightning.InvoiceSettledEventH\x00R\x0einvoiceSettled\x12b\n" +
 	"\x0finvoice_expired\x18\x04 \x01(\v27.iot.payperuse.edge.model.lightning.InvoiceExpiredEventH\x00R\x0einvoiceExpiredB\t\n" +
-	"\apayload*\x83\x01\n" +
+	"\apayload*\x9e\x01\n" +
 	"\rInvoiceStatus\x12\x1e\n" +
 	"\x1aINVOICE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16INVOICE_STATUS_CREATED\x10\x01\x12\x1a\n" +
 	"\x16INVOICE_STATUS_SETTLED\x10\x02\x12\x1a\n" +
-	"\x16INVOICE_STATUS_EXPIRED\x10\x03*\xb8\x01\n" +
+	"\x16INVOICE_STATUS_EXPIRED\x10\x03\x12\x19\n" +
+	"\x15INVOICE_STATUS_FAILED\x10\x04*\xb8\x01\n" +
 	"\x12LightningEventType\x12$\n" +
 	" LIGHTNING_EVENT_TYPE_UNSPECIFIED\x10\x00\x12(\n" +
 	"$LIGHTNING_EVENT_TYPE_INVOICE_CREATED\x10\x01\x12(\n" +

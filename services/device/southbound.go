@@ -11,24 +11,33 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
 	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
 )
 
 // SouthboundInterface handles MQTT subscriptions for device messages
 type SouthboundInterface struct {
-	mqttClient   *MQTTClient
-	streamClient *StreamClient
-	ledgerClient *LedgerClient
-	repo         *DeviceRepository
+	mqttClient      *MQTTClient
+	streamClient    *StreamClient
+	ledgerClient    *LedgerClient
+	lightningClient *LightningClient
+	repo            *DeviceRepository
+	invoiceTimeout  time.Duration
 }
 
 // NewSouthboundInterface creates a new southbound interface
-func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient, ledgerClient *LedgerClient, repo *DeviceRepository) *SouthboundInterface {
+func NewSouthboundInterface(mqttClient *MQTTClient, streamClient *StreamClient, ledgerClient *LedgerClient, lightningClient *LightningClient, repo *DeviceRepository, invoiceTimeout time.Duration) *SouthboundInterface {
+	if invoiceTimeout <= 0 {
+		invoiceTimeout = 30 * time.Second
+	}
+
 	return &SouthboundInterface{
-		mqttClient:   mqttClient,
-		streamClient: streamClient,
-		ledgerClient: ledgerClient,
-		repo:         repo,
+		mqttClient:      mqttClient,
+		streamClient:    streamClient,
+		ledgerClient:    ledgerClient,
+		lightningClient: lightningClient,
+		repo:            repo,
+		invoiceTimeout:  invoiceTimeout,
 	}
 }
 
@@ -121,6 +130,11 @@ func mapLedgerStatusToMQTTStatus(status ledgermodel.AuthorizationStatus) mqttpb.
 	return mqttpb.AuthorizationStatus(status)
 }
 
+// mapLightningStatusToMQTTStatus maps lightning InvoiceStatus to MQTT InvoiceStatus
+func mapLightningStatusToMQTTStatus(status lightningmodel.InvoiceStatus) mqttpb.InvoiceStatus {
+	return mqttpb.InvoiceStatus(status)
+}
+
 // handleAuthorizationRequest processes authorization requests from devices
 func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, msg mqtt.Message) {
 	topic := msg.Topic()
@@ -143,7 +157,7 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 	)
 
 	// Call ledger service via gRPC
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), sb.invoiceTimeout)
 	defer cancel()
 
 	ledgerResp, err := sb.ledgerClient.CreateOrGetAuthorization(
@@ -237,15 +251,55 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 		request.GetTimestamp(),
 	)
 
-	// Create a placeholder response
+	if sb.lightningClient == nil {
+		log.Printf("Lightning client not initialized; cannot process invoice request for device %s", deviceID)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), sb.invoiceTimeout)
+	defer cancel()
+
+	lightningResp, err := sb.lightningClient.CreateInvoice(
+		ctx,
+		request.GetDeviceId(),
+		request.GetAmountMsat(),
+		request.GetReason(),
+	)
+	if err != nil {
+		log.Printf("Error calling lightning service for device %s: %v", deviceID, err)
+		// Response lacks reason field, so we only signal failure via status.
+		response := &mqttpb.InvoiceResponsePayload{
+			DeviceId:  request.GetDeviceId(),
+			RequestId: request.GetRequestId(),
+			Status:    mqttpb.InvoiceStatus_INVOICE_STATUS_FAILED,
+		}
+		marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+		responseJSON, marshalErr := marshalOpts.Marshal(response)
+		if marshalErr != nil {
+			log.Printf("Error marshaling invoice error response: %v", marshalErr)
+			return
+		}
+		responseTopic := fmt.Sprintf("/devices/%s/response/invoice", deviceID)
+		if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
+			log.Printf("Error publishing invoice error response to device %s: %v", deviceID, err)
+		}
+		return
+	}
+
+	invoice := lightningResp.GetInvoice()
+	if invoice == nil {
+		log.Printf("Lightning service returned empty invoice for device %s", deviceID)
+		return
+	}
+
 	response := &mqttpb.InvoiceResponsePayload{
 		DeviceId:   request.GetDeviceId(),
 		RequestId:  request.GetRequestId(),
-		Status:     mqttpb.InvoiceStatus_INVOICE_STATUS_CREATED,
-		InvoiceId:  "placeholder-invoice-id",
-		Bolt11:     "placeholder-bolt11-invoice",
-		AmountMsat: request.GetAmountMsat(),
-		ExpiresAt:  time.Now().Add(1 * time.Hour).Format(time.RFC3339),
+		Status:     mapLightningStatusToMQTTStatus(invoice.GetStatus()),
+		InvoiceId:  invoice.GetInvoiceId(),
+		Bolt11:     invoice.GetBolt11(),
+		AmountMsat: invoice.GetAmountMsat(),
+		ExpiresAt:  invoice.GetExpiresAt(),
 	}
 
 	// Serialize response to JSON with short enum names

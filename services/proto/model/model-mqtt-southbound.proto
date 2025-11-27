@@ -154,6 +154,7 @@ enum InvoiceStatus {
   INVOICE_STATUS_CREATED     = 1;
   INVOICE_STATUS_SETTLED     = 2;
   INVOICE_STATUS_EXPIRED     = 3;
+  INVOICE_STATUS_FAILED      = 4;
 }
 
 message InvoiceResponsePayload {

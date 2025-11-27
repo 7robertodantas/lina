@@ -247,6 +247,7 @@ const (
 	InvoiceStatus_INVOICE_STATUS_CREATED     InvoiceStatus = 1
 	InvoiceStatus_INVOICE_STATUS_SETTLED     InvoiceStatus = 2
 	InvoiceStatus_INVOICE_STATUS_EXPIRED     InvoiceStatus = 3
+	InvoiceStatus_INVOICE_STATUS_FAILED      InvoiceStatus = 4
 )
 
 // Enum value maps for InvoiceStatus.
@@ -256,12 +257,14 @@ var (
 		1: "INVOICE_STATUS_CREATED",
 		2: "INVOICE_STATUS_SETTLED",
 		3: "INVOICE_STATUS_EXPIRED",
+		4: "INVOICE_STATUS_FAILED",
 	}
 	InvoiceStatus_value = map[string]int32{
 		"INVOICE_STATUS_UNSPECIFIED": 0,
 		"INVOICE_STATUS_CREATED":     1,
 		"INVOICE_STATUS_SETTLED":     2,
 		"INVOICE_STATUS_EXPIRED":     3,
+		"INVOICE_STATUS_FAILED":      4,
 	}
 )
 
@@ -1248,12 +1251,13 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	" AUTHORIZATION_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cAUTHORIZATION_STATUS_GRANTED\x10\x01\x12\x1f\n" +
 	"\x1bAUTHORIZATION_STATUS_ACTIVE\x10\x02\x12!\n" +
-	"\x1dAUTHORIZATION_STATUS_REJECTED\x10\x03*\x83\x01\n" +
+	"\x1dAUTHORIZATION_STATUS_REJECTED\x10\x03*\x9e\x01\n" +
 	"\rInvoiceStatus\x12\x1e\n" +
 	"\x1aINVOICE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16INVOICE_STATUS_CREATED\x10\x01\x12\x1a\n" +
 	"\x16INVOICE_STATUS_SETTLED\x10\x02\x12\x1a\n" +
-	"\x16INVOICE_STATUS_EXPIRED\x10\x03B5Z3github.com/robertodantas/lnpay/proto/gen/model/mqttb\x06proto3"
+	"\x16INVOICE_STATUS_EXPIRED\x10\x03\x12\x19\n" +
+	"\x15INVOICE_STATUS_FAILED\x10\x04B5Z3github.com/robertodantas/lnpay/proto/gen/model/mqttb\x06proto3"
 
 var (
 	file_model_model_mqtt_southbound_proto_rawDescOnce sync.Once

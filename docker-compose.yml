@@ -94,6 +94,7 @@ services:
       - LEDGER_GRPC_PORT=${LEDGER_GRPC_PORT:-9090}
       - LIGHTNING_GRPC_HOST=${LIGHTNING_GRPC_HOST:-lightning}
       - LIGHTNING_GRPC_PORT=${LIGHTNING_GRPC_PORT:-9090}
+      - LIGHTNING_RPC_TIMEOUT_SECONDS=${LIGHTNING_RPC_TIMEOUT_SECONDS:-30}
       - GIN_MODE=release
     volumes:
       - ./mosquitto/certs:/certs:ro

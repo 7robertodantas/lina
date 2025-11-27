@@ -108,17 +108,8 @@ func (c *LNDClient) CreateInvoice(ctx context.Context, amountMsat int64, memo st
 		return nil, fmt.Errorf("amount must be positive")
 	}
 
-	amountSats := amountMsat / 1000
-	if amountMsat%1000 != 0 {
-		amountSats++
-	}
-	if amountSats == 0 {
-		amountSats = 1
-	}
-
 	invoice := &lnrpc.Invoice{
 		Memo:      memo,
-		Value:     amountSats,
 		ValueMsat: amountMsat,
 		Expiry:    expirySeconds,
 	}

@@ -13,12 +13,20 @@ import (
 	"google.golang.org/grpc/status"
 
 	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
+	lightningpb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
 )
 
 // LedgerClient wraps the gRPC client for the ledger service
 type LedgerClient struct {
 	client ledgerpb.LedgerServiceClient
+	conn   *grpc.ClientConn
+}
+
+// LightningClient wraps the gRPC client for the lightning service
+type LightningClient struct {
+	client lightningpb.LightningServiceClient
 	conn   *grpc.ClientConn
 }
 
@@ -124,6 +132,14 @@ func (c *LedgerClient) Close() error {
 	return nil
 }
 
+// Close closes the gRPC connection
+func (c *LightningClient) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
+
 // CreateOrGetAuthorization creates a new authorization or returns the active one for the device
 func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID string, requestID string, requestMsat int64, reason string) (*ledgermodel.CreateAuthorizationResponse, error) {
 	req := &ledgermodel.CreateAuthorizationRequest{
@@ -136,6 +152,56 @@ func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID st
 	resp, err := c.client.CreateOrGetAuthorization(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create or get authorization: %w", err)
+	}
+
+	return resp, nil
+}
+
+// NewLightningClient creates a new gRPC client connection to the lightning service
+func NewLightningClient(cfg Config) (*LightningClient, error) {
+	host := cfg.LightningGRPCHost
+	port := cfg.LightningGRPCPort
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+	log.Printf("Connecting to lightning gRPC service at %s...", addr)
+
+	keepaliveParams := keepalive.ClientParameters{
+		Time:                30 * time.Second,
+		Timeout:             10 * time.Second,
+		PermitWithoutStream: true,
+	}
+
+	conn, err := grpc.NewClient(
+		addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithKeepaliveParams(keepaliveParams),
+		grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create lightning gRPC client: %w", err)
+	}
+
+	client := lightningpb.NewLightningServiceClient(conn)
+
+	log.Printf("Connected to lightning gRPC service at %s", addr)
+
+	return &LightningClient{
+		client: client,
+		conn:   conn,
+	}, nil
+}
+
+// CreateInvoice requests a new invoice from the lightning service
+func (c *LightningClient) CreateInvoice(ctx context.Context, deviceID string, amountMsat int64, reason string) (*lightningmodel.CreateInvoiceResponse, error) {
+	req := &lightningmodel.CreateInvoiceRequest{
+		DeviceId:   deviceID,
+		AmountMsat: amountMsat,
+		Reason:     reason,
+	}
+
+	resp, err := c.client.CreateInvoice(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create invoice: %w", err)
 	}
 
 	return resp, nil

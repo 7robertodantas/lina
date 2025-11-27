@@ -34,6 +34,13 @@ type Config struct {
 	// Ledger gRPC
 	LedgerGRPCHost string
 	LedgerGRPCPort int
+
+	// Lightning gRPC
+	LightningGRPCHost string
+	LightningGRPCPort int
+
+	// Lightning request timeout (seconds)
+	LightningRPCTimeoutSeconds int
 }
 
 func LoadConfig() Config {
@@ -67,5 +74,12 @@ func LoadConfig() Config {
 		// Ledger gRPC
 		LedgerGRPCHost: internal.GetEnv("LEDGER_GRPC_HOST", "ledger"),
 		LedgerGRPCPort: internal.IntEnv("LEDGER_GRPC_PORT", 9090),
+
+		// Lightning gRPC (defaults to lightning:9090 to match service)
+		LightningGRPCHost: internal.GetEnv("LIGHTNING_GRPC_HOST", "lightning"),
+		LightningGRPCPort: internal.IntEnv("LIGHTNING_GRPC_PORT", 9090),
+
+		// Lightning RPC timeout
+		LightningRPCTimeoutSeconds: internal.IntEnv("LIGHTNING_RPC_TIMEOUT_SECONDS", 30),
 	}
 }
