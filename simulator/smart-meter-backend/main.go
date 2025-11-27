@@ -4,21 +4,13 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"os"
 )
 
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
-
 func main() {
-	deviceID := getEnv("DEVICE_ID", "smart-meter-001")
+	cfg := LoadConfig()
 
 	// Create the smart meter
-	meter := NewSmartMeter(deviceID)
+	meter := NewSmartMeter(cfg)
 
 	// Create WebSocket handler (uses meter internals)
 	wsHandler := NewWebSocketHandler(meter, meter.southbound)
@@ -30,7 +22,6 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	})
 
-	port := getEnv("PORT", "8080")
-	log.Printf("Smart Meter Backend starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Printf("Smart Meter Backend starting on port %s", cfg.HTTPPort)
+	log.Fatal(http.ListenAndServe(":"+cfg.HTTPPort, nil))
 }

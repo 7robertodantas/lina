@@ -33,27 +33,31 @@ type SmartMeter struct {
 }
 
 // NewSmartMeter creates a new smart meter instance
-func NewSmartMeter(deviceID string) *SmartMeter {
+func NewSmartMeter(cfg *Config) *SmartMeter {
+	deviceID := cfg.DeviceID
 	// Make a copy of default appliances
 	appliances := make([]Appliance, len(defaultAppliances))
 	copy(appliances, defaultAppliances)
 
+	// Default DeviceConfig values (will be overwritten by retained MQTT config)
+	defaultDeviceConfig := &DeviceConfig{
+		DeviceId:             deviceID,
+		Unit:                 "kWh",
+		UnitPrice:            "10",
+		PricingUnit:          "msat",
+		ReportingStrategy:    mqttmodel.ReportingStrategy_REPORTING_STRATEGY_INTERVAL,
+		ReportingInterval:    30,
+		HeartbeatInterval:    10,
+		AuthorizeRequestMsat: 1000,
+		Timestamp:            time.Now().Format(time.RFC3339),
+	}
+
 	m := &SmartMeter{
 		state: DeviceState{
-			DeviceID:     deviceID,
-			DeviceStatus: "OFFLINE",
-			Appliances:   appliances,
-			Config: &Config{
-				DeviceId:             deviceID,
-				Unit:                 "kWh",
-				UnitPrice:            "10",
-				PricingUnit:          "msat",
-				ReportingStrategy:    mqttmodel.ReportingStrategy_REPORTING_STRATEGY_INTERVAL,
-				ReportingInterval:    30,
-				HeartbeatInterval:    10,
-				AuthorizeRequestMsat: 1000,
-				Timestamp:            time.Now().Format(time.RFC3339),
-			},
+			DeviceID:             deviceID,
+			DeviceStatus:         "OFFLINE",
+			Appliances:           appliances,
+			Config:               defaultDeviceConfig,
 			TotalConsumption:     0,
 			InstantPower:         0,
 			Logs:                 []LogEntry{},
@@ -63,7 +67,7 @@ func NewSmartMeter(deviceID string) *SmartMeter {
 		savedApplianceStates: make(map[string]bool),
 	}
 	// attach southbound interface
-	m.southbound = NewSouthboundInterface(m)
+	m.southbound = NewSouthboundInterface(m, cfg)
 	return m
 }
 
@@ -230,14 +234,14 @@ func (m *SmartMeter) GetDeviceID() string {
 }
 
 // GetConfig returns the current configuration
-func (m *SmartMeter) GetConfig() *Config {
+func (m *SmartMeter) GetDeviceConfig() *DeviceConfig {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.state.Config
 }
 
 // UpdateConfig updates the device configuration
-func (m *SmartMeter) UpdateConfig(config *Config) {
+func (m *SmartMeter) UpdateDeviceConfig(config *DeviceConfig) {
 	m.mu.Lock()
 	m.state.Config = config
 	m.mu.Unlock()

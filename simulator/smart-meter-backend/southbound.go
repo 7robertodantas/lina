@@ -18,21 +18,23 @@ type SouthboundInterface struct {
 	meter              *SmartMeter
 	mqttClient         mqtt.Client
 	subscriptionsReady chan bool
+	cfg                *Config
 }
 
 // NewSouthboundInterface creates a new southbound interface
-func NewSouthboundInterface(meter *SmartMeter) *SouthboundInterface {
+func NewSouthboundInterface(meter *SmartMeter, cfg *Config) *SouthboundInterface {
 	return &SouthboundInterface{
 		meter:              meter,
 		subscriptionsReady: make(chan bool, 1),
+		cfg:                cfg,
 	}
 }
 
 // createTLSConfig creates TLS configuration for MQTT connection
 func (sb *SouthboundInterface) createTLSConfig() (*tls.Config, error) {
-	caFile := getEnv("MQTT_TLS_CA_CERT", "/certs/ca.crt")
-	skipVerify := getEnv("MQTT_TLS_SKIP_VERIFY", "false") == "true"
-	serverName := getEnv("MQTT_TLS_SERVER_NAME", "mosquitto")
+	caFile := sb.cfg.MQTTTLSCACert
+	skipVerify := sb.cfg.MQTTTLSSkipVerify
+	serverName := sb.cfg.MQTTTLSServerName
 
 	// Load CA cert
 	caCert, err := os.ReadFile(caFile)
@@ -56,22 +58,19 @@ func (sb *SouthboundInterface) createTLSConfig() (*tls.Config, error) {
 
 // Connect establishes MQTT connection
 func (sb *SouthboundInterface) Connect() {
-	// Determine broker URL based on TLS configuration
-	useTLS := getEnv("MQTT_USE_TLS", "true") == "true"
-	broker := getEnv("MQTT_BROKER", "mosquitto")
+	useTLS := sb.cfg.MQTTUseTLS
+	broker := sb.cfg.MQTTBroker
 	var brokerURL string
 
 	if useTLS {
-		port := getEnv("MQTT_TLS_PORT", "8883")
-		brokerURL = "ssl://" + broker + ":" + port
+		brokerURL = fmt.Sprintf("ssl://%s:%d", broker, sb.cfg.MQTTTLSPort)
 	} else {
-		port := getEnv("MQTT_PORT", "1883")
-		brokerURL = "tcp://" + broker + ":" + port
+		brokerURL = fmt.Sprintf("tcp://%s:%d", broker, sb.cfg.MQTTPort)
 	}
 
 	deviceID := sb.meter.GetDeviceID()
-	username := getEnv("MQTT_USERNAME", deviceID)
-	password := getEnv("MQTT_PASSWORD", deviceID+"_password")
+	username := sb.cfg.MQTTUsername
+	password := sb.cfg.MQTTPassword
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(brokerURL)
@@ -169,13 +168,13 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 func (sb *SouthboundInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Message) {
 	log.Printf("DEBUG: Raw config payload: %s", string(msg.Payload()))
 
-	var config Config
+	var config DeviceConfig
 	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &config); err != nil {
 		sb.meter.AddLog("Failed to parse config message: "+err.Error(), "error")
 		return
 	}
 
-	sb.meter.UpdateConfig(&config)
+	sb.meter.UpdateDeviceConfig(&config)
 }
 
 func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.Message) {
@@ -314,11 +313,11 @@ func (sb *SouthboundInterface) PublishAuthorizeRequest(reason string) {
 		return
 	}
 
-	config := sb.meter.GetConfig()
+	devCfg := sb.meter.GetDeviceConfig()
 	request := AuthorizeRequest{
 		DeviceId:    sb.meter.GetDeviceID(),
 		RequestId:   generateID(),
-		RequestMsat: config.AuthorizeRequestMsat,
+		RequestMsat: devCfg.AuthorizeRequestMsat,
 		Reason:      reason,
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
@@ -348,17 +347,17 @@ func (sb *SouthboundInterface) PublishUsageReport(reportID string, kWhConsumed f
 		return
 	}
 
-	config := sb.meter.GetConfig()
-	if config == nil {
+	devCfg := sb.meter.GetDeviceConfig()
+	if devCfg == nil {
 		return
 	}
 
 	report := UsageReport{
 		DeviceId:  sb.meter.GetDeviceID(),
 		ReportId:  reportID,
-		Strategy:  config.ReportingStrategy,
+		Strategy:  devCfg.ReportingStrategy,
 		Measure:   kWhConsumed,
-		Unit:      config.Unit,
+		Unit:      devCfg.Unit,
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 

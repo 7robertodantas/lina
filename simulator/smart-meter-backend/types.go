@@ -6,7 +6,8 @@ import (
 )
 
 // Proto type aliases (single source of truth)
-type Config = mqttmodel.ConfigPayload
+// DeviceConfig represents the device configuration payload received via MQTT
+type DeviceConfig = mqttmodel.ConfigPayload
 type BalanceMessage = mqttmodel.BalancePayload
 type AuthorizeResponse = mqttmodel.AuthorizationResponsePayload
 type InvoiceResponse = mqttmodel.InvoiceResponsePayload
@@ -31,7 +32,7 @@ type DeviceState struct {
 	DeviceStatus         string           `json:"deviceStatus"`
 	Appliances           []Appliance      `json:"appliances"`
 	Balance              *BalanceMessage  `json:"balance"`
-	Config               *Config          `json:"config"`
+	Config               *DeviceConfig    `json:"config"`
 	TotalConsumption     float64          `json:"totalConsumption"`
 	InstantPower         int              `json:"instantPower"`
 	Invoice              *InvoiceResponse `json:"invoice"`
