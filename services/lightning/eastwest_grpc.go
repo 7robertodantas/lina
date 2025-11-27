@@ -51,6 +51,12 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 	invoiceID := fmt.Sprintf("%x", invoiceResp.RHash)
 	expiresAt := time.Now().UTC().Add(time.Duration(defaultInvoiceExpirySeconds) * time.Second).Format(time.RFC3339)
 
+	log.Printf("Invoice response: %+v", invoiceResp)
+	log.Printf("Invoice response payment request: %s", invoiceResp.PaymentRequest)
+	log.Printf("Invoice response payment hash: %x", invoiceResp.RHash)
+	log.Printf("Invoice response payment request: %s", invoiceResp.PaymentRequest)
+	log.Printf("Invoice response payment hash: %x", invoiceResp.RHash)
+
 	invoice := &lightningmodel.Invoice{
 		InvoiceId:  invoiceID,
 		DeviceId:   req.DeviceId,

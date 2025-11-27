@@ -11,7 +11,9 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/invoicesrpc"
+	internalpkg "github.com/robertodantas/lnpay/internal"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 )
 
@@ -52,16 +54,32 @@ func NewLNDClient(cfg Config) (*LNDClient, error) {
 
 	// Dial LND
 	log.Printf("Dialing LND host %s", cfg.LNDHost)
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		cfg.LNDHost,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithPerRPCCredentials(mac),
-		grpc.WithBlock(),
-		grpc.WithTimeout(10*time.Second),
+		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor),
 	)
 	if err != nil {
 		log.Printf("Failed to dial LND host %s: %v", cfg.LNDHost, err)
 		return nil, fmt.Errorf("failed to dial LND: %w", err)
+	}
+
+	// Manually wait for the channel to reach READY so we fail fast when LND is unreachable.
+	connectCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	conn.Connect()
+	state := conn.GetState()
+	for {
+		if state == connectivity.Ready {
+			break
+		}
+		if ok := conn.WaitForStateChange(connectCtx, state); !ok {
+			conn.Close()
+			return nil, fmt.Errorf("timed out waiting for LND connection (last state: %s)", state)
+		}
+		state = conn.GetState()
 	}
 	log.Printf("Successfully connected to LND host %s", cfg.LNDHost)
 

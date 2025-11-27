@@ -41,12 +41,12 @@ export function QRPayment({ invoice, onSimulatePayment, onClose }: QRPaymentProp
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center">
-          <div className="rounded-lg bg-foreground p-3">
+          <div className="rounded-lg bg-white p-3">
             <QRCode
               value={invoice.bolt11}
               size={160}
-              bgColor="hsl(var(--foreground))"
-              fgColor="hsl(var(--background))"
+              bgColor="#ffffff"
+              fgColor="#000000"
             />
           </div>
           <div className="mt-3 flex items-baseline gap-1">

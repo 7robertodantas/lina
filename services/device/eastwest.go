@@ -4,18 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/status"
-
+	internalpkg "github.com/robertodantas/lnpay/internal"
 	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
 	lightningpb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
 	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 // LedgerClient wraps the gRPC client for the ledger service
@@ -28,63 +26,6 @@ type LedgerClient struct {
 type LightningClient struct {
 	client lightningpb.LightningServiceClient
 	conn   *grpc.ClientConn
-}
-
-// simplifyMethodName extracts service and method name from full gRPC method path
-// Example: /iot.payperuse.edge.interfaces.sync.ledger.LedgerService/CreateOrGetAuthorization
-// Returns: LedgerService/CreateOrGetAuthorization
-func simplifyMethodName(method string) string {
-	// Remove leading slash
-	method = strings.TrimPrefix(method, "/")
-
-	// Split by / to separate service path from method name
-	parts := strings.Split(method, "/")
-	if len(parts) != 2 {
-		// If format is unexpected, return as-is
-		return method
-	}
-
-	servicePath := parts[0]
-	methodName := parts[1]
-
-	// Split service path by dots and take the last part (service name)
-	serviceParts := strings.Split(servicePath, ".")
-	if len(serviceParts) == 0 {
-		return method
-	}
-
-	serviceName := serviceParts[len(serviceParts)-1]
-
-	return fmt.Sprintf("%s/%s", serviceName, methodName)
-}
-
-// loggingUnaryInterceptor logs gRPC requests and responses
-func loggingUnaryInterceptor(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-	start := time.Now()
-	simpleMethod := simplifyMethodName(method)
-
-	// Log request
-	log.Printf("[gRPC] Calling %s with request: %+v", simpleMethod, req)
-
-	// Invoke the actual RPC
-	err := invoker(ctx, method, req, reply, cc, opts...)
-
-	// Calculate duration
-	duration := time.Since(start)
-
-	// Log response or error
-	if err != nil {
-		st, ok := status.FromError(err)
-		if ok {
-			log.Printf("[gRPC] %s failed: code=%s, message=%s, duration=%v", simpleMethod, st.Code(), st.Message(), duration)
-		} else {
-			log.Printf("[gRPC] %s failed: error=%v, duration=%v", simpleMethod, err, duration)
-		}
-	} else {
-		log.Printf("[gRPC] %s succeeded: response=%+v, duration=%v", simpleMethod, reply, duration)
-	}
-
-	return err
 }
 
 // NewLedgerClient creates a new gRPC client connection to the ledger service
@@ -108,7 +49,7 @@ func NewLedgerClient(cfg Config) (*LedgerClient, error) {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
+		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
@@ -175,7 +116,7 @@ func NewLightningClient(cfg Config) (*LightningClient, error) {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithUnaryInterceptor(loggingUnaryInterceptor),
+		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create lightning gRPC client: %w", err)

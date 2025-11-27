@@ -348,27 +348,9 @@ func (m *SmartMeter) RequestTopUp(amountMsat int64) {
 		m.AddLog("Cannot request top-up - meter is offline", "error")
 		return
 	}
-
-	deviceID := m.GetDeviceID()
 	requestID := generateID()
 	m.southbound.PublishInvoiceRequest(requestID, amountMsat, "USER_TOPUP")
 	m.AddLog("Invoice requested: "+formatMsat(amountMsat)+" msat", "info")
-
-	// Simulate invoice response
-	time.AfterFunc(500*time.Millisecond, func() {
-		invoice := &InvoiceResponse{
-			DeviceId:   deviceID,
-			RequestId:  requestID,
-			Status:     mqttmodel.InvoiceStatus_INVOICE_STATUS_CREATED,
-			InvoiceId:  "inv-" + generateID(),
-			Bolt11:     generateBolt11(amountMsat),
-			AmountMsat: amountMsat,
-			ExpiresAt:  time.Now().Add(10 * time.Minute).Format(time.RFC3339),
-		}
-
-		m.SetInvoice(invoice)
-		m.AddLog("Invoice created - scan QR to pay", "success")
-	})
 }
 
 // HandleControlStop processes a stop control command
