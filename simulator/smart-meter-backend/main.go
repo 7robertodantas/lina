@@ -9,11 +9,13 @@ import (
 func main() {
 	cfg := LoadConfig()
 
-	// Create the smart meter
-	meter := NewSmartMeter(cfg)
+	// Create device instance
+	deviceID := "smart-meter-001"
+	deviceSecret := "smart-meter-001_password"
+	meter := NewSmartMeter(deviceID, deviceSecret, cfg)
 
-	// Create WebSocket handler (uses meter internals)
-	wsHandler := NewWebSocketHandler(meter, meter.southbound)
+	// Create WebSocket handler
+	wsHandler := NewWebSocketHandler(meter)
 
 	// HTTP handlers
 	http.HandleFunc("/ws", wsHandler.HandleWebSocket)

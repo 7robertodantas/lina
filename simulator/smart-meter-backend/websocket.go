@@ -28,20 +28,18 @@ var upgrader = websocket.Upgrader{
 
 // WebSocketHandler manages WebSocket connections for the UI
 type WebSocketHandler struct {
-	meter      *SmartMeter
-	southbound *SouthboundInterface
-	clients    map[*websocket.Conn]*sync.Mutex
-	clientsMu  sync.RWMutex
-	broadcast  chan interface{}
+	meter     *SmartMeter
+	clients   map[*websocket.Conn]*sync.Mutex
+	clientsMu sync.RWMutex
+	broadcast chan interface{}
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
-func NewWebSocketHandler(meter *SmartMeter, southbound *SouthboundInterface) *WebSocketHandler {
+func NewWebSocketHandler(meter *SmartMeter) *WebSocketHandler {
 	handler := &WebSocketHandler{
-		meter:      meter,
-		southbound: southbound,
-		clients:    make(map[*websocket.Conn]*sync.Mutex),
-		broadcast:  make(chan interface{}, 100),
+		meter:     meter,
+		clients:   make(map[*websocket.Conn]*sync.Mutex),
+		broadcast: make(chan interface{}, 100),
 	}
 
 	// Set the meter's state change callback to broadcast to all WS clients

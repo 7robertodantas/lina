@@ -69,8 +69,8 @@ func (sb *SouthboundInterface) Connect() {
 	}
 
 	deviceID := sb.meter.GetDeviceID()
-	username := sb.cfg.MQTTUsername
-	password := sb.cfg.MQTTPassword
+	username := deviceID
+	password := sb.meter.deviceSecret
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(brokerURL)

@@ -8,7 +8,6 @@ import (
 // Config holds environment-driven settings for the simulator backend runtime (MQTT and HTTP).
 // Distinct from ProtoConfig which is the device state configuration received over MQTT.
 type Config struct {
-	DeviceID          string
 	HTTPPort          string
 	MQTTBroker        string
 	MQTTUseTLS        bool
@@ -17,15 +16,11 @@ type Config struct {
 	MQTTTLSCACert     string
 	MQTTTLSSkipVerify bool
 	MQTTTLSServerName string
-	MQTTUsername      string
-	MQTTPassword      string
 }
 
 // LoadConfig loads runtime configuration from environment variables.
 func LoadConfig() *Config {
-	deviceID := getEnvCfg("DEVICE_ID", "smart-meter-001")
-	cfg := &Config{
-		DeviceID:          deviceID,
+	return &Config{
 		HTTPPort:          getEnvCfg("PORT", "8080"),
 		MQTTBroker:        getEnvCfg("MQTT_BROKER", "mosquitto"),
 		MQTTUseTLS:        boolEnvCfg("MQTT_USE_TLS", true),
@@ -34,10 +29,7 @@ func LoadConfig() *Config {
 		MQTTTLSCACert:     getEnvCfg("MQTT_TLS_CA_CERT", "/certs/ca.crt"),
 		MQTTTLSSkipVerify: boolEnvCfg("MQTT_TLS_SKIP_VERIFY", false),
 		MQTTTLSServerName: getEnvCfg("MQTT_TLS_SERVER_NAME", "mosquitto"),
-		MQTTUsername:      getEnvCfg("MQTT_USERNAME", deviceID),
-		MQTTPassword:      getEnvCfg("MQTT_PASSWORD", deviceID+"_password"),
 	}
-	return cfg
 }
 
 func getEnvCfg(key, def string) string {

@@ -30,11 +30,12 @@ type SmartMeter struct {
 	pendingAuthorization bool
 	stateChangeCallback  func(DeviceState)
 	logCallback          func(message, logType string)
+	deviceSecret         string
+	deviceID             string
 }
 
 // NewSmartMeter creates a new smart meter instance
-func NewSmartMeter(cfg *Config) *SmartMeter {
-	deviceID := cfg.DeviceID
+func NewSmartMeter(deviceID, deviceSecret string, cfg *Config) *SmartMeter {
 	// Make a copy of default appliances
 	appliances := make([]Appliance, len(defaultAppliances))
 	copy(appliances, defaultAppliances)
@@ -53,6 +54,8 @@ func NewSmartMeter(cfg *Config) *SmartMeter {
 	}
 
 	m := &SmartMeter{
+		deviceSecret: deviceSecret,
+		deviceID:     deviceID,
 		state: DeviceState{
 			DeviceID:             deviceID,
 			DeviceStatus:         "OFFLINE",
