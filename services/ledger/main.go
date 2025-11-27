@@ -111,6 +111,13 @@ func main() {
 		}
 	}()
 
+	// Start lightning consumer in a goroutine
+	go func() {
+		if err := streamHandler.StartLightningConsumer(ctx); err != nil && err != context.Canceled {
+			log.Printf("Lightning consumer error: %v", err)
+		}
+	}()
+
 	// Start expiration checker in a goroutine
 	go func() {
 		if err := streamHandler.StartExpirationChecker(ctx); err != nil && err != context.Canceled {

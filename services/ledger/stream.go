@@ -14,9 +14,13 @@ import (
 	"github.com/robertodantas/lnpay/internal"
 	consumptionpb "github.com/robertodantas/lnpay/proto/gen/model/consumption"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
 )
 
-const authorizationExpiredReason = "AUTHORIZATION_EXPIRED"
+const (
+	authorizationExpiredReason    = "AUTHORIZATION_EXPIRED"
+	lightningInvoiceSettledReason = "LIGHTNING_INVOICE_SETTLED"
+)
 
 // StreamHandler handles Redis stream operations for the ledger service
 type StreamHandler struct {
@@ -34,6 +38,81 @@ func NewStreamHandler(streamClient *internal.StreamClient, repo *LedgerRepositor
 		consumerName: "ledger-service",
 		groupName:    "ledger-consumers",
 	}
+}
+
+// StartLightningConsumer starts consuming from the event.lightning stream
+func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
+	streamName := "event.lightning"
+	client := sh.streamClient.Client()
+	streamCtx := sh.streamClient.Context()
+
+	// Create consumer group if it doesn't exist
+	err := client.XGroupCreateMkStream(streamCtx, streamName, sh.groupName, "0").Err()
+	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
+		log.Printf("Warning: failed to create consumer group for %s: %v", streamName, err)
+	}
+
+	log.Printf("Starting lightning consumer for stream: %s", streamName)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Println("Stopping lightning consumer...")
+			return ctx.Err()
+		default:
+			streams, err := client.XReadGroup(streamCtx, &redis.XReadGroupArgs{
+				Group:    sh.groupName,
+				Consumer: sh.consumerName,
+				Streams:  []string{streamName, ">"},
+				Count:    10,
+				Block:    5 * time.Second,
+			}).Result()
+
+			if err != nil {
+				if err == redis.Nil {
+					continue
+				}
+				log.Printf("Error reading from stream %s: %v", streamName, err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			for _, stream := range streams {
+				for _, msg := range stream.Messages {
+					if err := sh.handleLightningEvent(streamCtx, msg); err != nil {
+						log.Printf("Error handling lightning event %s: %v", msg.ID, err)
+					} else {
+						client.XAck(streamCtx, streamName, sh.groupName, msg.ID)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (sh *StreamHandler) handleLightningEvent(ctx context.Context, msg redis.XMessage) error {
+	eventJSON, ok := msg.Values["event"].(string)
+	if !ok {
+		return fmt.Errorf("invalid lightning event format: missing 'event' field")
+	}
+
+	var lightningEvent lightningmodel.LightningEvent
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal([]byte(eventJSON), &lightningEvent); err != nil {
+		return fmt.Errorf("failed to unmarshal lightning event: %w", err)
+	}
+
+	if lightningEvent.GetType() != lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_SETTLED {
+		log.Printf("Skipping lightning event type: %v", lightningEvent.GetType())
+		return nil
+	}
+
+	settled := lightningEvent.GetInvoiceSettled()
+	if settled == nil {
+		return fmt.Errorf("missing invoice_settled payload")
+	}
+
+	return sh.processInvoiceSettled(ctx, settled)
 }
 
 // StartConsumptionConsumer starts consuming from the event.consumption stream
@@ -236,6 +315,74 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		if err := sh.PublishDeviceDebited(ctx, deviceID, authorizationID, overflowEntry.AmountMsat, overflowEntry.BalanceAfter, overflowTimestamp); err != nil {
 			log.Printf("Failed to publish DeviceDebited event for overflow: %v", err)
 		}
+	}
+
+	return nil
+}
+
+// processInvoiceSettled credits the device balance when an invoice settles
+func (sh *StreamHandler) processInvoiceSettled(ctx context.Context, settled *lightningmodel.InvoiceSettledEvent) error {
+	if settled == nil {
+		return errors.New("invoice settled payload is nil")
+	}
+
+	invoiceID := settled.GetInvoiceId()
+	deviceID := settled.GetDeviceId()
+	amountMsat := settled.GetAmountReceivedMsat()
+
+	if invoiceID == "" {
+		return errors.New("missing invoice_id in lightning event")
+	}
+	if deviceID == "" {
+		return errors.New("missing device_id in lightning event")
+	}
+	if amountMsat <= 0 {
+		return fmt.Errorf("invalid amount for invoice %s: %d", invoiceID, amountMsat)
+	}
+
+	creditReq := CreditRequest{
+		DeviceID:       deviceID,
+		AmountMsat:     amountMsat,
+		Reason:         lightningInvoiceSettledReason,
+		CorrelationID:  invoiceID,
+		IdempotencyKey: invoiceID,
+	}
+
+	// Fast path for duplicate events
+	if kind, _, ok, err := sh.repo.GetCachedIdem(ctx, creditReq.IdempotencyKey); err != nil {
+		return fmt.Errorf("failed to check idempotency for invoice %s: %w", invoiceID, err)
+	} else if ok {
+		if kind == "credit" {
+			log.Printf("[LIGHTNING] Invoice %s already credited, skipping", invoiceID)
+			return nil
+		}
+		return fmt.Errorf("idempotency key %s already used for kind %s", invoiceID, kind)
+	}
+
+	tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to begin tx for invoice %s: %w", invoiceID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	entry, err := sh.repo.ApplyCredit(ctx, tx, creditReq)
+	if err != nil {
+		return fmt.Errorf("failed to apply credit for invoice %s: %w", invoiceID, err)
+	}
+
+	if err := sh.repo.SaveIdem(ctx, tx, creditReq.IdempotencyKey, "credit", hashReq("credit", creditReq), entry); err != nil {
+		return fmt.Errorf("failed to store idempotency for invoice %s: %w", invoiceID, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit credit for invoice %s: %w", invoiceID, err)
+	}
+
+	log.Printf("[LIGHTNING] Credited %d msat to device %s (invoice %s)", entry.AmountMsat, deviceID, invoiceID)
+
+	timestamp := time.Unix(entry.CreatedAt, 0).UTC().Format(time.RFC3339)
+	if err := sh.PublishDeviceCredited(ctx, entry.DeviceID, entry.AmountMsat, entry.BalanceAfter, timestamp); err != nil {
+		log.Printf("Failed to publish DeviceCreditedEvent for invoice %s: %v", invoiceID, err)
 	}
 
 	return nil
