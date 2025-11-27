@@ -148,11 +148,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  smartmeter:
+  smartmeter-core:
     build:
       context: .
       dockerfile: ./smartmeter/core/Dockerfile
-    container_name: smartmeter
+    container_name: smartmeter-core
     ports:
       - "8081:8080"  # Expose WebSocket on host port 8081
     environment:
@@ -172,6 +172,20 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
+    restart: unless-stopped
+
+  smartmeter-ui:
+    build:
+      context: ./smartmeter/ui
+      dockerfile: ./Dockerfile
+      args:
+        NEXT_PUBLIC_BACKEND_WS_URL: ${NEXT_PUBLIC_BACKEND_WS_URL:-ws://localhost:8081/ws}
+    container_name: smartmeter-ui
+    ports:
+      - "8082:80"
+    depends_on:
+      caddy:
+        condition: service_started
     restart: unless-stopped
 
   # lightning:

@@ -1,0 +1,21 @@
+:80 {
+    root * /usr/share/caddy
+    encode gzip
+    
+    # Try files, fallback to index.html for SPA routing
+    try_files {path} {path}/ /index.html
+    
+    file_server
+    
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    log {
+        output stdout
+    }
+}
