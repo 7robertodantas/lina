@@ -148,11 +148,11 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  smart-meter-backend:
+  smartmeter:
     build:
       context: .
-      dockerfile: ./simulator/smart-meter-backend/Dockerfile
-    container_name: smart-meter-backend
+      dockerfile: ./smartmeter/core/Dockerfile
+    container_name: smartmeter
     ports:
       - "8081:8080"  # Expose WebSocket on host port 8081
     environment:

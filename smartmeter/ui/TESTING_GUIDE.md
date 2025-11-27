@@ -6,7 +6,7 @@
 
 In terminal 1:
 ```bash
-cd simulator/smart-meter-backend
+cd simulator/core
 go run main.go
 ```
 
