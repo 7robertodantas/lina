@@ -24,6 +24,11 @@ func main() {
 		json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 	})
 
+	// Serve static files from /public directory
+	fs := http.FileServer(http.Dir("./public"))
+	http.Handle("/", fs)
+
 	log.Printf("Smart Meter Backend starting on port %s", cfg.HTTPPort)
+	log.Printf("Serving UI from /public directory")
 	log.Fatal(http.ListenAndServe(":"+cfg.HTTPPort, nil))
 }
