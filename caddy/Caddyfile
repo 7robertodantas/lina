@@ -49,12 +49,12 @@
     # Lightning service endpoints
     route /lnd/info* {
         uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
+        reverse_proxy lightning:8080
     }
 
     route /lnd/wallet* {
         uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
+        reverse_proxy lightning:8080
     }
 
     # Health check endpoint

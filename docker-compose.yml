@@ -92,6 +92,9 @@ services:
       - REDIS_DB=${REDIS_DB:-0}
       - LEDGER_GRPC_HOST=${LEDGER_GRPC_HOST:-ledger}
       - LEDGER_GRPC_PORT=${LEDGER_GRPC_PORT:-9090}
+      - LIGHTNING_GRPC_HOST=${LIGHTNING_GRPC_HOST:-lightning}
+      - LIGHTNING_GRPC_PORT=${LIGHTNING_GRPC_PORT:-9090}
+      - GIN_MODE=release
     volumes:
       - ./mosquitto/certs:/certs:ro
     depends_on:
@@ -120,6 +123,7 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
+      - GIN_MODE=release
     depends_on:
       redis:
         condition: service_healthy
@@ -143,9 +147,37 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - REDIS_DB=${REDIS_DB:-0}
+      - GIN_MODE=release
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
+
+  lightning:
+    build:
+      context: .
+      dockerfile: ./services/Dockerfile
+      args:
+        SERVICE: lightning
+    container_name: lightning
+    expose:
+      - "8080"
+    environment:
+      - LND_HOST=host.docker.internal:10001
+      - LND_MACAROON_HEX=${LND_MACAROON_HEX:-}
+      - LND_TLS_CERT_HEX=${LND_TLS_CERT_HEX:-}
+      - DB_PATH=${LIGHTNING_DB_PATH:-lightning.db}
+      - SERVICE_TOKEN=${LIGHTNING_SERVICE_TOKEN:-dev-token}
+      - LISTEN_ADDR=${LIGHTNING_LISTEN_ADDR:-:8080}
+      - GRPC_ADDR=${LIGHTNING_GRPC_ADDR:-:9090}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-0}
+      - GIN_MODE=release
+    depends_on:
+      redis:
+        condition: service_healthy      
     restart: unless-stopped
 
   smartmeter:
@@ -153,10 +185,10 @@ services:
       context: .
       dockerfile: ./smartmeter/Dockerfile
       args:
-        NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:8081/ws
+        NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:3001/ws
     container_name: smartmeter
     ports:
-      - "8081:8080"
+      - "3001:8080"
     environment:
       - PORT=8080
       - DEVICE_ID=${SMART_METER_DEVICE_ID:-smart-meter-001}
@@ -171,22 +203,10 @@ services:
       - MQTT_PASSWORD=${SMART_METER_MQTT_PASSWORD:-smart-meter-001_password}
     volumes:
       - ./mosquitto/certs:/certs:ro
-    depends_on:
+    depends_on:    
       mosquitto:
         condition: service_healthy
+      redis:
+        condition: service_healthy        
     restart: unless-stopped
 
-  # lightning:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #     args:
-  #       SERVICE: lightning
-  #   container_name: lightning
-  #   ports:
-  #     - "9083:8080"
-  #   environment:
-  #     LND_HOST: host.docker.internal:10001
-  #     LND_MACAROON_HEX: "${LND_MACAROON_HEX?Error: LND_MACAROON_HEX not set}"
-  #     LND_TLS_CERT_HEX: "${LND_TLS_CERT_HEX?Error: LND_TLS_CERT_HEX not set}"
-  #   restart: unless-stopped
