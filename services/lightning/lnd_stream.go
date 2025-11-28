@@ -18,31 +18,37 @@ var (
 	lndStreamTracer = otel.Tracer("lnd.stream")
 )
 
+// LightningEventWithContext wraps an event with its trace context
+type LightningEventWithContext struct {
+	Event   *lightningmodel.LightningEvent
+	Context context.Context // Store full context to maintain parent-child span relationship
+}
+
 type LNDEventStream struct {
 	lndClient   *LNDClient
-	subscribers []chan *lightningmodel.LightningEvent
+	subscribers []chan *LightningEventWithContext
 	mu          sync.RWMutex
 }
 
 func NewLNDEventStream(lndClient *LNDClient) *LNDEventStream {
 	return &LNDEventStream{
 		lndClient:   lndClient,
-		subscribers: make([]chan *lightningmodel.LightningEvent, 0),
+		subscribers: make([]chan *LightningEventWithContext, 0),
 	}
 }
 
 // Subscribe adds a new subscriber to receive events.
-func (es *LNDEventStream) Subscribe() <-chan *lightningmodel.LightningEvent {
+func (es *LNDEventStream) Subscribe() <-chan *LightningEventWithContext {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
-	ch := make(chan *lightningmodel.LightningEvent, 100)
+	ch := make(chan *LightningEventWithContext, 100)
 	es.subscribers = append(es.subscribers, ch)
 	return ch
 }
 
 // Unsubscribe removes a subscriber.
-func (es *LNDEventStream) Unsubscribe(ch <-chan *lightningmodel.LightningEvent) {
+func (es *LNDEventStream) Unsubscribe(ch <-chan *LightningEventWithContext) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
@@ -57,16 +63,30 @@ func (es *LNDEventStream) Unsubscribe(ch <-chan *lightningmodel.LightningEvent) 
 
 // Publish sends an event to all subscribers.
 func (es *LNDEventStream) Publish(ctx context.Context, event *lightningmodel.LightningEvent) {
+	ctx, span := lndStreamTracer.Start(ctx, "[stream] event.lightning publish",
+		trace.WithAttributes(
+			attribute.String("lnd.event.type", event.GetType().String()),
+		),
+	)
+	defer span.End()
+
 	es.mu.RLock()
 	defer es.mu.RUnlock()
 
+	eventWithCtx := &LightningEventWithContext{
+		Event:   event,
+		Context: ctx, // Store full context with active span
+	}
+
 	for _, ch := range es.subscribers {
 		select {
-		case ch <- event:
+		case ch <- eventWithCtx:
 		default:
 			logger.Warn(ctx, "Subscriber channel full, dropping lightning event via cloud LND node")
 		}
 	}
+
+	span.SetStatus(codes.Ok, "event published")
 }
 
 // Start begins listening for LND invoice updates and publishing events.
@@ -96,10 +116,8 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 					continue
 				}
 
-				// Use wrapper with tracing
-				if event := es.buildEventFromInvoiceWithTracing(ctx, invoice); event != nil {
-					es.Publish(ctx, event)
-				}
+				// Use wrapper with tracing - it will publish the event
+				es.buildEventFromInvoiceWithTracing(ctx, invoice)
 			}
 		}
 	}()
@@ -108,7 +126,7 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 }
 
 // buildEventFromInvoiceWithTracing wraps buildEventFromInvoice with OpenTelemetry tracing
-func (es *LNDEventStream) buildEventFromInvoiceWithTracing(ctx context.Context, invoice *lnrpc.Invoice) *lightningmodel.LightningEvent {
+func (es *LNDEventStream) buildEventFromInvoiceWithTracing(ctx context.Context, invoice *lnrpc.Invoice) {
 	invoiceID := fmt.Sprintf("%x", invoice.RHash)
 	amountMsat := invoice.ValueMsat
 	if amountMsat == 0 {
@@ -150,12 +168,13 @@ func (es *LNDEventStream) buildEventFromInvoiceWithTracing(ctx context.Context, 
 			span.SetAttributes(attribute.String("lnd.event.type", eventType))
 		}
 		span.SetStatus(codes.Ok, "event created")
+
+		// Publish with the current context so it becomes a child span
+		es.Publish(ctx, event)
 	} else {
 		span.SetAttributes(attribute.String("lnd.event.type", "IGNORED"))
 		span.SetStatus(codes.Ok, "unsupported state ignored")
 	}
-
-	return event
 }
 
 func (es *LNDEventStream) buildEventFromInvoice(ctx context.Context, invoice *lnrpc.Invoice) *lightningmodel.LightningEvent {

@@ -42,10 +42,11 @@ func (sp *StreamPublisher) Start(ctx context.Context) error {
 				logger.WithStream(LightningEventsStream, "produce").
 					Info(ctx, "Stream publisher stopped")
 				return
-			case event := <-eventChan:
-				if err := sp.publishEvent(ctx, event); err != nil {
+			case eventWithCtx := <-eventChan:
+				// Use the context from the event to maintain parent-child span relationship
+				if err := sp.publishEvent(eventWithCtx.Context, eventWithCtx.Event); err != nil {
 					logger.WithStream(LightningEventsStream, "produce").
-						Error(ctx, "Failed to publish lightning event", err)
+						Error(eventWithCtx.Context, "Failed to publish lightning event", err)
 				}
 			}
 		}
