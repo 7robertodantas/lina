@@ -6,30 +6,37 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
-
 	"github.com/robertodantas/lnpay/internal"
 	consumptionpb "github.com/robertodantas/lnpay/proto/gen/model/consumption"
 	devicepb "github.com/robertodantas/lnpay/proto/gen/model/device"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	"google.golang.org/protobuf/encoding/protojson"
+)
+
+var (
+	consumptionPropagator = otel.GetTextMapPropagator()
 )
 
 // StreamHandler handles Redis stream operations for the consumption service
 type StreamHandler struct {
-	streamClient *internal.StreamClient
-	cfg          Config
-	repository   *ConsumptionRepository
-	consumerName string
-	groupName    string
+	streamClient  *internal.StreamClient
+	cfg           Config
+	repository    *ConsumptionRepository
+	consumerName  string
+	groupName     string
+	outboxTrigger chan string // Signal when new outbox items need publishing
 }
 
 // NewStreamHandler creates a new stream handler
 func NewStreamHandler(streamClient *internal.StreamClient, cfg Config, repository *ConsumptionRepository) *StreamHandler {
 	return &StreamHandler{
-		streamClient: streamClient,
-		cfg:          cfg,
-		repository:   repository,
-		consumerName: "consumption-service",
-		groupName:    "consumption-consumers",
+		streamClient:  streamClient,
+		cfg:           cfg,
+		repository:    repository,
+		consumerName:  "consumption-service",
+		groupName:     "consumption-consumers",
+		outboxTrigger: make(chan string, 100),
 	}
 }
 
@@ -223,8 +230,12 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 			})
 	}
 
+	// Extract trace context to store in database
+	carrier := make(propagation.MapCarrier)
+	consumptionPropagator.Inject(ctx, carrier)
+
 	// Insert into consumption_records and optionally outbox (only if actualDebitMsat >= 1)
-	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, actualDebitMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp())
+	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, actualDebitMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
 	if err != nil {
 		return err
 	}
@@ -241,6 +252,30 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 				"debit_msat":                actualDebitMsat,
 				"remaining_fractional_msat": remainingFractionalMsat,
 			})
+
+		// Try to publish immediately after successful commit
+		// Extract parent context from stored trace context
+		publishCtx := ctx
+		if len(carrier) > 0 {
+			publishCarrier := propagation.MapCarrier(carrier)
+			publishCtx = consumptionPropagator.Extract(ctx, publishCarrier)
+		}
+
+		if err := sh.publishConsumptionEvent(publishCtx, reportID, deviceID, actualDebitMsat, usage.GetTimestamp()); err != nil {
+			logger.WithDeviceID(deviceID).
+				Warnf(ctx, "Failed to publish immediately, triggering outbox retry: %v", err)
+			// Non-blocking send to trigger outbox processing
+			select {
+			case sh.outboxTrigger <- reportID:
+			default:
+			}
+		} else {
+			// Successfully published, mark as published in outbox
+			if err := sh.repository.MarkOutboxAsPublished(ctx, reportID); err != nil {
+				logger.WithDeviceID(deviceID).
+					Warnf(ctx, "Failed to mark as published: %v", err)
+			}
+		}
 	} else {
 		logger.WithDeviceID(deviceID).
 			InfoWithFields(ctx, "Consumption accumulated", map[string]interface{}{
@@ -253,25 +288,22 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	return nil
 }
 
-// StartOutboxPublisher starts publishing events from outbox to event.consumption stream
+// StartOutboxPublisher processes outbox on-demand + periodic safety check
+// This runs less frequently as a safety net for failed immediate publishes
 func (sh *StreamHandler) StartOutboxPublisher(ctx context.Context) error {
-	logger.WithStream("event.consumption", "produce").
-		Info(ctx, "Starting outbox publisher")
-
-	ticker := time.NewTicker(1 * time.Second) // Check every second
+	ticker := time.NewTicker(5 * time.Minute) // Safety check every 5 minutes
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.WithStream("event.consumption", "produce").
-				Info(ctx, "Stopping outbox publisher")
 			return ctx.Err()
+		case <-sh.outboxTrigger:
+			// Triggered by failed publish - process immediately
+			sh.publishOutboxEvents(ctx)
 		case <-ticker.C:
-			if err := sh.publishOutboxEvents(ctx); err != nil {
-				logger.WithStream("event.consumption", "produce").
-					Error(ctx, "Error publishing outbox events", err)
-			}
+			// Periodic safety check for any missed events
+			sh.publishOutboxEvents(ctx)
 		}
 	}
 }
@@ -291,7 +323,16 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 
 	// Publish each event
 	for _, e := range events {
-		if err := sh.publishConsumptionEvent(ctx, e.ReportID, e.DeviceID, e.DebitMsat, e.Timestamp); err != nil {
+		// Extract parent context from stored trace context
+		var publishCtx context.Context
+		if e.TraceContext != nil && len(e.TraceContext) > 0 {
+			carrier := propagation.MapCarrier(e.TraceContext)
+			publishCtx = consumptionPropagator.Extract(ctx, carrier)
+		} else {
+			publishCtx = ctx
+		}
+
+		if err := sh.publishConsumptionEvent(publishCtx, e.ReportID, e.DeviceID, e.DebitMsat, e.Timestamp); err != nil {
 			logger.WithDeviceID(e.DeviceID).
 				WithStream("event.consumption", "produce").
 				Errorf(ctx, "Failed to publish event for report %s: %v", e.ReportID, err)
