@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"os"
 	"time"
 
@@ -50,16 +49,19 @@ func createTLSConfig(cfg Config) (*tls.Config, error) {
 	}
 
 	if serverName != broker {
-		log.Printf("Using custom TLS server name: %s (broker hostname: %s)", serverName, broker)
+		logger.InfoWithFields("Using custom TLS server name on southbound mqtt", map[string]interface{}{
+			"server_name": serverName,
+			"broker":      broker,
+		})
 	}
 
 	if skipVerify {
-		log.Println("WARNING: TLS certificate verification is disabled (for testing only)")
+		logger.Warn("TLS certificate verification is disabled on southbound mqtt (for testing only)")
 	}
 
 	// Load CA certificate
 	caCertPath := cfg.MQTTTLSCACert
-	log.Printf("Loading CA certificate from: %s", caCertPath)
+	logger.Infof("Loading CA certificate from %s on southbound mqtt", caCertPath)
 	caCert, err := os.ReadFile(caCertPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
@@ -70,19 +72,22 @@ func createTLSConfig(cfg Config) (*tls.Config, error) {
 		return nil, fmt.Errorf("failed to parse CA certificate")
 	}
 	tlsConfig.RootCAs = caCertPool
-	log.Println("CA certificate loaded successfully")
+	logger.Info("CA certificate loaded successfully on southbound mqtt")
 
 	// Load edge node certificate and key if provided and required
 	if cfg.MQTTTLSRequireEdgeCert && cfg.MQTTTLSEdgeCert != "" && cfg.MQTTTLSEdgeKey != "" {
-		log.Printf("Loading edge node certificate from: %s and key from: %s", cfg.MQTTTLSEdgeCert, cfg.MQTTTLSEdgeKey)
+		logger.InfoWithFields("Loading edge node certificate on southbound mqtt", map[string]interface{}{
+			"cert_path": cfg.MQTTTLSEdgeCert,
+			"key_path":  cfg.MQTTTLSEdgeKey,
+		})
 		cert, err := tls.LoadX509KeyPair(cfg.MQTTTLSEdgeCert, cfg.MQTTTLSEdgeKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load edge node certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
-		log.Println("Edge node certificate loaded for client authentication")
+		logger.Info("Edge node certificate loaded for client authentication on southbound mqtt")
 	} else {
-		log.Println("No edge node certificate required - using CA-only server verification")
+		logger.Info("No edge node certificate required on southbound mqtt - using CA-only server verification")
 	}
 
 	return tlsConfig, nil
@@ -102,10 +107,10 @@ func buildMQTTOptions(opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOpti
 	mqttOpts.SetKeepAlive(opts.KeepAlive)
 	mqttOpts.SetPingTimeout(10 * time.Second)
 	mqttOpts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		log.Printf("MQTT connection lost: %v", err)
+		logger.Error("MQTT connection lost on southbound mqtt", err)
 	})
 	mqttOpts.SetOnConnectHandler(func(client mqtt.Client) {
-		log.Println("MQTT OnConnect handler called")
+		logger.Info("MQTT OnConnect handler called on southbound mqtt")
 	})
 
 	// Set username/password if provided
@@ -118,13 +123,13 @@ func buildMQTTOptions(opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOpti
 
 	// Configure TLS if enabled
 	if opts.UseTLS {
-		log.Println("Configuring TLS for MQTT connection...")
+		logger.Info("Configuring TLS for MQTT connection on southbound mqtt")
 		tlsConfig, err := createTLSConfig(cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
 		mqttOpts.SetTLSConfig(tlsConfig)
-		log.Println("TLS configuration created successfully")
+		logger.Info("TLS configuration created successfully on southbound mqtt")
 	}
 
 	return mqttOpts, nil
@@ -138,7 +143,7 @@ func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
 	}
 
 	brokerURL := fmt.Sprintf("%s://%s:%d", opts.Protocol, opts.Broker, opts.Port)
-	log.Printf("Attempting to connect to MQTT broker at %s...", brokerURL)
+	logger.Infof("Attempting to connect to MQTT broker at %s on southbound mqtt", brokerURL)
 
 	client := mqtt.NewClient(mqttOpts)
 	token := client.Connect()
@@ -152,7 +157,7 @@ func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
 	if !connected {
 		if token.Error() != nil {
 			errMsg := token.Error().Error()
-			log.Printf("MQTT connection error (timeout): %s", errMsg)
+			logger.Errorf("MQTT connection error (timeout) on southbound mqtt: %s", errMsg)
 			return nil, fmt.Errorf("connection timeout after %v: %w", timeout, token.Error())
 		}
 		return nil, fmt.Errorf("connection timeout after %v - broker may not be accepting connections or certificate validation failed", timeout)
@@ -160,11 +165,11 @@ func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
 
 	if token.Error() != nil {
 		errMsg := token.Error().Error()
-		log.Printf("MQTT connection error details: %s", errMsg)
+		logger.Errorf("MQTT connection error details on southbound mqtt: %s", errMsg)
 		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", token.Error())
 	}
 
-	log.Printf("Connected to MQTT broker at %s", brokerURL)
+	logger.Infof("Connected to MQTT broker at %s on southbound mqtt", brokerURL)
 	return client, nil
 }
 
@@ -235,7 +240,9 @@ func (m *MQTTClient) Publish(topic string, qos byte, retained bool, payload []by
 		return fmt.Errorf("client disconnected after publish - broker may have denied the publish")
 	}
 
-	log.Printf("Published message to topic: %s", topic)
+	logger.InfoWithFields("Published message on southbound mqtt", map[string]interface{}{
+		"topic": topic,
+	})
 	return nil
 }
 
@@ -245,14 +252,17 @@ func (m *MQTTClient) Subscribe(topic string, qos byte, handler mqtt.MessageHandl
 	if token.Wait() && token.Error() != nil {
 		return fmt.Errorf("failed to subscribe to topic: %w", token.Error())
 	}
-	log.Printf("Subscribed to topic: %s", topic)
+	logger.InfoWithFields("Subscribed to topic on southbound mqtt", map[string]interface{}{
+		"topic": topic,
+		"qos":   qos,
+	})
 	return nil
 }
 
 // Disconnect disconnects from the MQTT broker
 func (m *MQTTClient) Disconnect() {
 	m.client.Disconnect(250)
-	log.Println("Disconnected from MQTT broker")
+	logger.Info("Disconnected from MQTT broker on southbound mqtt")
 }
 
 // GetClient returns the underlying MQTT client

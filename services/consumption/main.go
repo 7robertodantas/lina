@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -10,22 +9,26 @@ import (
 	"github.com/robertodantas/lnpay/internal"
 )
 
+var logger = internal.NewLogger("consumption")
+
 func main() {
+	logger.Info("Starting consumption service")
+
 	cfg := LoadConfig()
 	repository, err := NewConsumptionRepository(cfg.DBPath, cfg.BusyTimeoutMS)
 	if err != nil {
-		log.Fatalf("Failed to create consumption repository: %v", err)
+		logger.Fatal("Failed to create consumption repository", err)
 	}
 	defer repository.Close()
 
 	// Connect to Redis stream
-	log.Println("Connecting to Redis...")
+	logger.Info("Connecting to Redis")
 	streamClient, err := internal.NewStreamClientFromEnv()
 	if err != nil {
-		log.Fatalf("Failed to create Redis stream client: %v", err)
+		logger.Fatal("Failed to create Redis stream client", err)
 	}
 	defer streamClient.Close()
-	log.Println("Redis stream client connected successfully")
+	logger.Info("Redis stream client connected successfully")
 
 	// Create stream handler
 	streamHandler := NewStreamHandler(streamClient, cfg, repository)
@@ -37,21 +40,23 @@ func main() {
 	// Start device event consumer (consumes from event.device stream)
 	go func() {
 		if err := streamHandler.StartDeviceConsumer(ctx); err != nil && err != context.Canceled {
-			log.Printf("Device consumer error: %v", err)
+			logger.WithStream("event.device", "consume").
+				Error("Device consumer error", err)
 		}
 	}()
 
 	// Start outbox publisher (publishes to event.consumption stream)
 	go func() {
 		if err := streamHandler.StartOutboxPublisher(ctx); err != nil && err != context.Canceled {
-			log.Printf("Outbox publisher error: %v", err)
+			logger.WithStream("event.consumption", "produce").
+				Error("Outbox publisher error", err)
 		}
 	}()
 
 	// Start outbox cleanup (removes old published records after retention period)
 	go func() {
 		if err := streamHandler.StartOutboxCleanup(ctx); err != nil && err != context.Canceled {
-			log.Printf("Outbox cleanup error: %v", err)
+			logger.Error("Outbox cleanup error", err)
 		}
 	}()
 
@@ -60,7 +65,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down consumption service...")
+	logger.Info("Shutting down consumption service")
 	cancel() // Cancel context to stop consumers
-	log.Println("Consumption service stopped")
+	logger.Info("Consumption service stopped")
 }

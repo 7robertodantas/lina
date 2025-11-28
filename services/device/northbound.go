@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"time"
 
@@ -111,42 +110,54 @@ func (nb *NorthboundInterface) createDevice(c *gin.Context) {
 
 	if deviceExists {
 		// Update existing device in database
-		log.Printf("Device %s already exists, updating...", device.DeviceID)
+		logger.WithDeviceID(device.DeviceID).
+			Info("Device already exists, updating via northbound REST")
 		if err := nb.repo.UpdateDevice(device); err != nil {
-			log.Printf("Failed to update device in database: %v", err)
+			logger.WithDeviceID(device.DeviceID).
+				Error("Failed to update device in database via northbound REST", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "failed to update device",
 			})
 			return
 		}
-		log.Printf("Device %s updated in database", device.DeviceID)
+		logger.WithDeviceID(device.DeviceID).
+			Info("Device updated in database via northbound REST")
 	} else {
 		// Create new device in database
 		if err := nb.repo.CreateDevice(device); err != nil {
-			log.Printf("Failed to create device in database: %v", err)
+			logger.WithDeviceID(device.DeviceID).
+				Error("Failed to create device in database via northbound REST", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "failed to create device",
 			})
 			return
 		}
-		log.Printf("Device %s created in database", device.DeviceID)
+		logger.WithDeviceID(device.DeviceID).
+			Info("Device created in database via northbound REST")
 	}
 
 	// Trigger dynsec provisioning (using device_secret as password)
-	log.Printf("Provisioning device in dynsec: %s", device.DeviceID)
+	logger.WithDeviceID(device.DeviceID).
+		Info("Provisioning device in dynsec via northbound REST")
 	if err := nb.dynSec.ProvisionDevice(device.DeviceID, req.DeviceSecret); err != nil {
-		log.Printf("Warning: Failed to provision device in dynsec: %v", err)
+		logger.WithDeviceID(device.DeviceID).
+			Warnf("Failed to provision device in dynsec via northbound REST: %v", err)
 		// Continue even if provisioning fails - device is already in database
 	} else {
-		log.Printf("Device %s provisioned successfully in dynsec", device.DeviceID)
+		logger.WithDeviceID(device.DeviceID).
+			Info("Device provisioned successfully in dynsec via northbound REST")
 	}
 
 	// Publish device configuration to /devices/{device_id}/config
 	if err := nb.publishDeviceConfig(device); err != nil {
-		log.Printf("Warning: Failed to publish device config: %v", err)
+		logger.WithDeviceID(device.DeviceID).
+			Warnf("Failed to publish device config on southbound mqtt via northbound REST: %v", err)
 		// Continue even if publishing fails - device is already in database and provisioned
 	} else {
-		log.Printf("Device config published to /devices/%s/config", device.DeviceID)
+		logger.WithDeviceID(device.DeviceID).
+			InfoWithFields("Device config published on southbound mqtt via northbound REST", map[string]interface{}{
+				"topic": fmt.Sprintf("/devices/%s/config", device.DeviceID),
+			})
 	}
 
 	// Return 200 OK for updates, 201 Created for new devices
@@ -161,7 +172,7 @@ func (nb *NorthboundInterface) createDevice(c *gin.Context) {
 func (nb *NorthboundInterface) listDevices(c *gin.Context) {
 	devices, err := nb.repo.ListDevices()
 	if err != nil {
-		log.Printf("Failed to list devices: %v", err)
+		logger.Error("Failed to list devices via northbound REST", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to list devices",
 		})
@@ -192,7 +203,7 @@ func (nb *NorthboundInterface) Start(addr string) error {
 		Handler: nb.router,
 	}
 
-	log.Printf("Starting northbound REST API server on %s", addr)
+	logger.Infof("Starting northbound REST API server on %s", addr)
 	return nb.server.ListenAndServe()
 }
 
@@ -242,7 +253,7 @@ func (nb *NorthboundInterface) publishDeviceConfig(device *Device) error {
 // Stop gracefully stops the HTTP server
 func (nb *NorthboundInterface) Stop(ctx context.Context) error {
 	if nb.server != nil {
-		log.Println("Stopping northbound REST API server...")
+		logger.Info("Stopping northbound REST API server")
 		return nb.server.Shutdown(ctx)
 	}
 	return nil

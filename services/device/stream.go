@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -68,7 +67,8 @@ func (sc *StreamClient) PublishDeviceUsageReportedEvent(payload *mqttpb.UsagePay
 	} else {
 		// For other pricing units, we'd need conversion logic
 		// For now, assume msat or log a warning
-		log.Printf("Warning: device %s has pricing_unit %s, assuming msat", payload.GetDeviceId(), device.PricingUnit)
+		logger.WithDeviceID(payload.GetDeviceId()).
+			Warnf("Device has pricing_unit %s, assuming msat", device.PricingUnit)
 		parsed, err := strconv.ParseInt(device.UnitPrice, 10, 64)
 		if err != nil {
 			return fmt.Errorf("failed to parse unit_price %s for device %s: %w", device.UnitPrice, payload.GetDeviceId(), err)
@@ -125,7 +125,12 @@ func (sc *StreamClient) PublishDeviceUsageReportedEvent(payload *mqttpb.UsagePay
 		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, result.Err())
 	}
 
-	log.Printf("Published DeviceEvent (usage reported) to stream %s (ID: %s)", streamName, result.Val())
+	logger.WithDeviceID(payload.GetDeviceId()).
+		WithStream(streamName, "produce").
+		InfoWithFields("Published DeviceEvent (usage reported) on southbound mqtt", map[string]interface{}{
+			"stream_id": result.Val(),
+			"report_id": payload.GetReportId(),
+		})
 	return nil
 }
 
@@ -140,12 +145,14 @@ func (sc *StreamClient) consumeLedgerBalanceEvents(ctx context.Context, mqttClie
 	lastID := "$"
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 
-	log.Printf("Starting ledger balance subscriber on stream %s", streamName)
+	logger.WithStream(streamName, "consume").
+		Info("Starting ledger balance subscriber")
 
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("Stopping ledger balance subscriber")
+			logger.WithStream(streamName, "consume").
+				Info("Stopping ledger balance subscriber")
 			return
 		default:
 		}
@@ -162,7 +169,8 @@ func (sc *StreamClient) consumeLedgerBalanceEvents(ctx context.Context, mqttClie
 			if ctx.Err() != nil {
 				return
 			}
-			log.Printf("ledger balance subscriber read error: %v", err)
+			logger.WithStream(streamName, "consume").
+				Error("Ledger balance subscriber read error", err)
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
@@ -171,7 +179,8 @@ func (sc *StreamClient) consumeLedgerBalanceEvents(ctx context.Context, mqttClie
 			for _, msg := range stream.Messages {
 				lastID = msg.ID
 				if err := sc.handleLedgerMessage(ctx, mqttClient, msg, opts); err != nil {
-					log.Printf("failed to handle ledger message %s: %v", msg.ID, err)
+					logger.WithStream(streamName, "consume").
+						Errorf("Failed to handle ledger message %s: %v", msg.ID, err)
 				}
 			}
 		}
@@ -201,11 +210,12 @@ func (sc *StreamClient) handleLedgerMessage(ctx context.Context, mqttClient *MQT
 		if payload == nil {
 			return fmt.Errorf("ledger event missing DeviceDebited payload")
 		}
-		log.Printf("[DEVICE_DEBITED] Device: %s, Authorization: %s, Amount: %d, New Balance: %d",
-			payload.GetDeviceId(),
-			payload.GetAuthorizationId(),
-			payload.GetAmountMsat(),
-			payload.GetNewBalanceMsat())
+		logger.WithDeviceID(payload.GetDeviceId()).
+			InfoWithFields("Device debited via eastwest gRPC", map[string]interface{}{
+				"authorization_id": payload.GetAuthorizationId(),
+				"amount_msat":      payload.GetAmountMsat(),
+				"new_balance_msat": payload.GetNewBalanceMsat(),
+			})
 		return sc.publishBalanceUpdate(ctx, mqttClient, payload.GetDeviceId(), payload.GetNewBalanceMsat(), payload.GetTimestamp())
 	case ledgermodel.LedgerEventType_LEDGER_EVENT_TYPE_AUTHORIZATION_COMPLETED:
 		payload := ledgerEvent.GetAuthorizationCompleted()
@@ -224,11 +234,13 @@ func (sc *StreamClient) handleLedgerMessage(ctx context.Context, mqttClient *MQT
 		if payload == nil {
 			return fmt.Errorf("ledger event missing AuthorizationDebitFailed payload")
 		}
-		log.Printf("[AUTHORIZATION_DEBIT_FAILED] Device: %s, Reason: %s, Requested: %d, Remaining: %d",
-			payload.GetDeviceId(),
-			payload.GetReason(),
-			payload.GetRequestedMsat(),
-			payload.GetRemainingMsat())
+		logger.WithDeviceID(payload.GetDeviceId()).
+			WarnWithFields("Authorization debit failed via eastwest gRPC", map[string]interface{}{
+				"authorization_id": payload.GetAuthorizationId(),
+				"reason":          payload.GetReason(),
+				"requested_msat":  payload.GetRequestedMsat(),
+				"remaining_msat":  payload.GetRemainingMsat(),
+			})
 		return sc.publishAuthorizationControl(ctx, mqttClient, payload.GetDeviceId(), payload.GetAuthorizationId(), "AUTHORIZE")
 	default:
 		return nil
@@ -262,7 +274,10 @@ func (sc *StreamClient) publishBalanceUpdate(ctx context.Context, mqttClient *MQ
 		return fmt.Errorf("failed to publish balance to MQTT: %w", err)
 	}
 
-	log.Printf("[BALANCE] Published updated balance for device %s (available=%d)", deviceID, availableMsat)
+	logger.WithDeviceID(deviceID).
+		InfoWithFields("Published updated balance on southbound mqtt", map[string]interface{}{
+			"available_msat": availableMsat,
+		})
 	return nil
 }
 
@@ -289,7 +304,11 @@ func (sc *StreamClient) publishAuthorizationControl(ctx context.Context, mqttCli
 		return fmt.Errorf("failed to publish control command to MQTT: %w", err)
 	}
 
-	log.Printf("[CONTROL] Published AUTHORIZATION control to device %s (authorization_id=%s, reason=%s)", deviceID, authorizationID, reason)
+	logger.WithDeviceID(deviceID).
+		InfoWithFields("Published AUTHORIZATION control on southbound mqtt", map[string]interface{}{
+			"authorization_id": authorizationID,
+			"reason":          reason,
+		})
 	return nil
 }
 

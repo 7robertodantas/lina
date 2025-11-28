@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -57,7 +56,7 @@ func (es *LNDEventStream) Publish(event *lightningmodel.LightningEvent) {
 		select {
 		case ch <- event:
 		default:
-			log.Printf("subscriber channel full, dropping lightning event")
+			logger.Warn("Subscriber channel full, dropping lightning event via cloud LND node")
 		}
 	}
 }
@@ -69,22 +68,22 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to invoices: %w", err)
 	}
 
-	log.Println("LND event stream started, listening for invoice updates...")
+	logger.Info("LND event stream started, listening for invoice updates via cloud LND node")
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("LND event stream stopped")
+				logger.Info("LND event stream stopped via cloud LND node")
 				return
 			default:
 				invoice, err := stream.Recv()
 				if err != nil {
-					log.Printf("error receiving invoice update: %v", err)
+					logger.Error("Error receiving invoice update via cloud LND node", err)
 					time.Sleep(5 * time.Second)
 					stream, err = es.lndClient.SubscribeInvoices(ctx, 0, 0)
 					if err != nil {
-						log.Printf("failed to reconnect invoice stream: %v", err)
+						logger.Error("Failed to reconnect invoice stream via cloud LND node", err)
 					}
 					continue
 				}
@@ -109,7 +108,12 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 
 	expiresAt := time.Unix(invoice.CreationDate+invoice.Expiry, 0).UTC().Format(time.RFC3339)
 	stateName := invoice.State.String()
-	log.Printf("Processing invoice update: invoice_id=%s state=%s device_id=%s amount_msat=%d", invoiceID, stateName, deviceMeta.DeviceID, amountMsat)
+	logger.WithDeviceID(deviceMeta.DeviceID).
+		InfoWithFields("Processing invoice update via cloud LND node", map[string]interface{}{
+			"invoice_id":  invoiceID,
+			"state":       stateName,
+			"amount_msat": amountMsat,
+		})
 
 	switch invoice.State {
 	case lnrpc.Invoice_OPEN, lnrpc.Invoice_ACCEPTED:
@@ -131,7 +135,11 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 		}
 	case lnrpc.Invoice_SETTLED:
 		timestamp := time.Unix(invoice.SettleDate, 0).UTC().Format(time.RFC3339)
-		log.Printf("Invoice settled: invoice_id=%s amount_received_msat=%d device_id=%s", invoiceID, invoice.AmtPaidSat*1000, deviceMeta.DeviceID)
+		logger.WithDeviceID(deviceMeta.DeviceID).
+			InfoWithFields("Invoice settled via cloud LND node", map[string]interface{}{
+				"invoice_id":           invoiceID,
+				"amount_received_msat": invoice.AmtPaidSat * 1000,
+			})
 		return &lightningmodel.LightningEvent{
 			Type: lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_SETTLED,
 			Payload: &lightningmodel.LightningEvent_InvoiceSettled{
@@ -146,7 +154,10 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 		}
 	case lnrpc.Invoice_CANCELED:
 		timestamp := time.Unix(invoice.CreationDate+invoice.Expiry, 0).UTC().Format(time.RFC3339)
-		log.Printf("Invoice expired/canceled: invoice_id=%s device_id=%s", invoiceID, deviceMeta.DeviceID)
+		logger.WithDeviceID(deviceMeta.DeviceID).
+			InfoWithFields("Invoice expired/canceled via cloud LND node", map[string]interface{}{
+				"invoice_id": invoiceID,
+			})
 		return &lightningmodel.LightningEvent{
 			Type: lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED,
 			Payload: &lightningmodel.LightningEvent_InvoiceExpired{
@@ -158,7 +169,10 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 			},
 		}
 	default:
-		log.Printf("Ignoring invoice update with unsupported state: invoice_id=%s state=%s", invoiceID, stateName)
+		logger.DebugWithFields("Ignoring invoice update with unsupported state via cloud LND node", map[string]interface{}{
+			"invoice_id": invoiceID,
+			"state":      stateName,
+		})
 		return nil
 	}
 }

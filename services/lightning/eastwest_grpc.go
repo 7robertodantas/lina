@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	lightningservicepb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
@@ -39,23 +38,29 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 		return nil, status.Error(codes.InvalidArgument, "amount_msat must be greater than 0")
 	}
 
-	log.Printf("CreateInvoice request received: device_id=%s amount_msat=%d reason=%s", req.DeviceId, req.AmountMsat, req.Reason)
+	logger.WithDeviceID(req.DeviceId).
+		InfoWithFields("CreateInvoice request received via eastwest gRPC", map[string]interface{}{
+			"amount_msat": req.AmountMsat,
+			"reason":      req.Reason,
+		})
 
 	memo := encodeInvoiceMetadata(req.DeviceId, req.Reason)
 	invoiceResp, err := s.lndClient.CreateInvoice(ctx, req.AmountMsat, memo, defaultInvoiceExpirySeconds)
 	if err != nil {
-		log.Printf("CreateInvoice failed for device_id=%s: %v", req.DeviceId, err)
+		logger.WithDeviceID(req.DeviceId).
+			Error("CreateInvoice failed via eastwest gRPC", err)
 		return nil, status.Errorf(codes.Internal, "failed to create invoice: %v", err)
 	}
 
 	invoiceID := fmt.Sprintf("%x", invoiceResp.RHash)
 	expiresAt := time.Now().UTC().Add(time.Duration(defaultInvoiceExpirySeconds) * time.Second).Format(time.RFC3339)
 
-	log.Printf("Invoice response: %+v", invoiceResp)
-	log.Printf("Invoice response payment request: %s", invoiceResp.PaymentRequest)
-	log.Printf("Invoice response payment hash: %x", invoiceResp.RHash)
-	log.Printf("Invoice response payment request: %s", invoiceResp.PaymentRequest)
-	log.Printf("Invoice response payment hash: %x", invoiceResp.RHash)
+	logger.WithDeviceID(req.DeviceId).
+		DebugWithFields("Invoice response received via eastwest gRPC", map[string]interface{}{
+			"invoice_id":      invoiceID,
+			"payment_request": invoiceResp.PaymentRequest,
+			"payment_hash":    fmt.Sprintf("%x", invoiceResp.RHash),
+		})
 
 	invoice := &lightningmodel.Invoice{
 		InvoiceId:  invoiceID,
@@ -68,11 +73,18 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 
 	if s.streamPublisher != nil {
 		if err := s.streamPublisher.PublishInvoiceCreated(ctx, invoice); err != nil {
-			log.Printf("failed to publish invoice created event: %v", err)
+			logger.WithDeviceID(req.DeviceId).
+				WithStream("event.lightning", "produce").
+				Error("Failed to publish invoice created event via eastwest gRPC", err)
 		}
 	}
 
-	log.Printf("Invoice created successfully: invoice_id=%s device_id=%s amount_msat=%d expires_at=%s", invoiceID, req.DeviceId, req.AmountMsat, expiresAt)
+	logger.WithDeviceID(req.DeviceId).
+		InfoWithFields("Invoice created successfully via eastwest gRPC", map[string]interface{}{
+			"invoice_id":  invoiceID,
+			"amount_msat": req.AmountMsat,
+			"expires_at":  expiresAt,
+		})
 
 	return &lightningmodel.CreateInvoiceResponse{
 		Invoice: invoice,

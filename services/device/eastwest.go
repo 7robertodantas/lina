@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	internalpkg "github.com/robertodantas/lnpay/internal"
@@ -34,7 +33,7 @@ func NewLedgerClient(cfg Config) (*LedgerClient, error) {
 	port := cfg.LedgerGRPCPort
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("Connecting to ledger gRPC service at %s...", addr)
+	logger.Infof("Connecting to ledger gRPC service at %s via eastwest gRPC", addr)
 
 	// Configure keepalive for long-lived connections
 	// Time: 30s is a reasonable interval to avoid "too_many_pings" errors
@@ -49,7 +48,7 @@ func NewLedgerClient(cfg Config) (*LedgerClient, error) {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor),
+		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("device-service")),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
@@ -57,7 +56,7 @@ func NewLedgerClient(cfg Config) (*LedgerClient, error) {
 
 	client := ledgerpb.NewLedgerServiceClient(conn)
 
-	log.Printf("Connected to ledger gRPC service at %s", addr)
+	logger.Infof("Connected to ledger gRPC service at %s via eastwest gRPC", addr)
 
 	return &LedgerClient{
 		client: client,
@@ -104,7 +103,7 @@ func NewLightningClient(cfg Config) (*LightningClient, error) {
 	port := cfg.LightningGRPCPort
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	log.Printf("Connecting to lightning gRPC service at %s...", addr)
+	logger.Infof("Connecting to lightning gRPC service at %s via eastwest gRPC", addr)
 
 	keepaliveParams := keepalive.ClientParameters{
 		Time:                30 * time.Second,
@@ -116,7 +115,7 @@ func NewLightningClient(cfg Config) (*LightningClient, error) {
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor),
+		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("device-service")),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create lightning gRPC client: %w", err)
@@ -124,7 +123,7 @@ func NewLightningClient(cfg Config) (*LightningClient, error) {
 
 	client := lightningpb.NewLightningServiceClient(conn)
 
-	log.Printf("Connected to lightning gRPC service at %s", addr)
+	logger.Infof("Connected to lightning gRPC service at %s via eastwest gRPC", addr)
 
 	return &LightningClient{
 		client: client,

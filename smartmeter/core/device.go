@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"math"
 	"math/rand"
 	"sync"
@@ -119,7 +118,19 @@ func (m *SmartMeter) AddLog(message, logType string) {
 	}
 	m.mu.Unlock()
 
-	log.Printf("[%s] %s", logType, message)
+	// Use structured logger with device context
+	logEntry := logger.WithDeviceID(m.deviceID)
+
+	switch logType {
+	case "error":
+		logEntry.Error(message, nil)
+	case "warning", "warn":
+		logEntry.Warn(message)
+	case "success":
+		logEntry.Info(message)
+	default:
+		logEntry.Info(message)
+	}
 
 	// Call log callback if set
 	m.mu.RLock()
@@ -191,7 +202,8 @@ func (m *SmartMeter) completeStartupSequence() {
 	// Wait for subscriptions
 	select {
 	case <-m.southbound.GetSubscriptionsReady():
-		log.Printf("Subscriptions ready, proceeding with startup sequence")
+		logger.WithDeviceID(m.deviceID).
+			Info("Subscriptions ready, proceeding with startup sequence on southbound mqtt")
 	case <-time.After(10 * time.Second):
 		m.AddLog("Timeout waiting for subscriptions - reverting to OFFLINE", "error")
 		m.Shutdown()

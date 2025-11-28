@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -63,7 +62,7 @@ func (sb *SouthboundInterface) Start() error {
 		return fmt.Errorf("failed to subscribe to invoice request topic: %w", err)
 	}
 
-	log.Println("Southbound interface started - all subscriptions active")
+	logger.Info("Southbound interface started - all subscriptions active on southbound mqtt")
 	return nil
 }
 
@@ -85,15 +84,16 @@ func (sb *SouthboundInterface) handleHeartbeat(client mqtt.Client, msg mqtt.Mess
 	var payload mqttpb.HeartbeatPayload
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 	if err := opts.Unmarshal(msg.Payload(), &payload); err != nil {
-		log.Printf("Error parsing heartbeat payload from device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error parsing heartbeat payload on southbound mqtt", err)
 		return
 	}
 
-	log.Printf("[HEARTBEAT] Device: %s, Status: %s, Timestamp: %s",
-		payload.GetDeviceId(),
-		payload.GetStatus().String(),
-		payload.GetTimestamp(),
-	)
+	logger.WithDeviceID(payload.GetDeviceId()).
+		InfoWithFields("Heartbeat received on southbound mqtt", map[string]interface{}{
+			"status":    payload.GetStatus().String(),
+			"timestamp": payload.GetTimestamp(),
+		})
 }
 
 // handleUsage processes usage messages from devices
@@ -104,22 +104,25 @@ func (sb *SouthboundInterface) handleUsage(client mqtt.Client, msg mqtt.Message)
 	var payload mqttpb.UsagePayload
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 	if err := opts.Unmarshal(msg.Payload(), &payload); err != nil {
-		log.Printf("Error parsing usage payload from device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error parsing usage payload on southbound mqtt", err)
 		return
 	}
 
-	log.Printf("[USAGE] Device: %s, ReportID: %s, Strategy: %s, Measure: %.2f %s, Timestamp: %s",
-		payload.GetDeviceId(),
-		payload.GetReportId(),
-		payload.GetStrategy().String(),
-		payload.GetMeasure(),
-		payload.GetUnit(),
-		payload.GetTimestamp(),
-	)
+	logger.WithDeviceID(payload.GetDeviceId()).
+		InfoWithFields("Usage received on southbound mqtt", map[string]interface{}{
+			"report_id": payload.GetReportId(),
+			"strategy":  payload.GetStrategy().String(),
+			"measure":   payload.GetMeasure(),
+			"unit":      payload.GetUnit(),
+			"timestamp": payload.GetTimestamp(),
+		})
 
 	// Publish DeviceUsageReportedEvent to Redis stream (with price_per_unit from device config)
 	if err := sb.streamClient.PublishDeviceUsageReportedEvent(&payload, sb.repo); err != nil {
-		log.Printf("Error publishing usage event to Redis stream: %v", err)
+		logger.WithDeviceID(payload.GetDeviceId()).
+			WithStream("event.device", "produce").
+			Error("Error publishing usage event to Redis stream on southbound mqtt", err)
 		return
 	}
 }
@@ -144,17 +147,18 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 	// AuthorizationRequestPayload doesn't have enums, so we can use protojson.Unmarshal directly
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 	if err := opts.Unmarshal(msg.Payload(), &request); err != nil {
-		log.Printf("Error parsing authorization request payload from device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error parsing authorization request payload on southbound mqtt", err)
 		return
 	}
 
-	log.Printf("[AUTHORIZATION REQUEST] Device: %s, RequestID: %s, RequestMsat: %d, Reason: %s, Timestamp: %s",
-		request.GetDeviceId(),
-		request.GetRequestId(),
-		request.GetRequestMsat(),
-		request.GetReason(),
-		request.GetTimestamp(),
-	)
+	logger.WithDeviceID(request.GetDeviceId()).
+		InfoWithFields("Authorization request received on southbound mqtt", map[string]interface{}{
+			"request_id":   request.GetRequestId(),
+			"request_msat": request.GetRequestMsat(),
+			"reason":       request.GetReason(),
+			"timestamp":    request.GetTimestamp(),
+		})
 
 	// Call ledger service via gRPC
 	ctx, cancel := context.WithTimeout(context.Background(), sb.invoiceTimeout)
@@ -168,7 +172,8 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 		request.GetReason(),
 	)
 	if err != nil {
-		log.Printf("Error calling ledger service for device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error calling ledger service on southbound mqtt", err)
 		// Send error response to device
 		response := &mqttpb.AuthorizationResponsePayload{
 			DeviceId:  request.GetDeviceId(),
@@ -179,12 +184,14 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 		marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
 		responseJSON, marshalErr := marshalOpts.Marshal(response)
 		if marshalErr != nil {
-			log.Printf("Error marshaling authorization error response: %v", marshalErr)
+			logger.WithDeviceID(deviceID).
+				Error("Error marshaling authorization error response on southbound mqtt", marshalErr)
 			return
 		}
 		responseTopic := fmt.Sprintf("/devices/%s/response/authorize", deviceID)
 		if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
-			log.Printf("Error publishing error response to device %s: %v", deviceID, err)
+			logger.WithDeviceID(deviceID).
+				Error("Error publishing error response to device on southbound mqtt", err)
 		}
 		return
 	}
@@ -216,18 +223,24 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(client mqtt.Client, ms
 	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
 	responseJSON, err := marshalOpts.Marshal(response)
 	if err != nil {
-		log.Printf("Error marshaling authorization response: %v", err)
+		logger.WithDeviceID(deviceID).
+			Error("Error marshaling authorization response on southbound mqtt", err)
 		return
 	}
 
 	// Publish response to /devices/{deviceId}/response/authorize
 	responseTopic := fmt.Sprintf("/devices/%s/response/authorize", deviceID)
 	if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
-		log.Printf("Error publishing authorization response to device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error publishing authorization response to device on southbound mqtt", err)
 		return
 	}
 
-	log.Printf("[AUTHORIZATION RESPONSE] Published to %s, Status: %s", responseTopic, response.Status.String())
+	logger.WithDeviceID(deviceID).
+		InfoWithFields("Authorization response published on southbound mqtt", map[string]interface{}{
+			"topic":  responseTopic,
+			"status": response.Status.String(),
+		})
 }
 
 // handleInvoiceRequest processes invoice requests from devices
@@ -239,20 +252,22 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 	// InvoiceRequestPayload doesn't have enums, so we can use protojson.Unmarshal directly
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 	if err := opts.Unmarshal(msg.Payload(), &request); err != nil {
-		log.Printf("Error parsing invoice request payload from device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error parsing invoice request payload on southbound mqtt", err)
 		return
 	}
 
-	log.Printf("[INVOICE REQUEST] Device: %s, RequestID: %s, AmountMsat: %d, Reason: %s, Timestamp: %s",
-		request.GetDeviceId(),
-		request.GetRequestId(),
-		request.GetAmountMsat(),
-		request.GetReason(),
-		request.GetTimestamp(),
-	)
+	logger.WithDeviceID(request.GetDeviceId()).
+		InfoWithFields("Invoice request received on southbound mqtt", map[string]interface{}{
+			"request_id":  request.GetRequestId(),
+			"amount_msat": request.GetAmountMsat(),
+			"reason":      request.GetReason(),
+			"timestamp":   request.GetTimestamp(),
+		})
 
 	if sb.lightningClient == nil {
-		log.Printf("Lightning client not initialized; cannot process invoice request for device %s", deviceID)
+		logger.WithDeviceID(deviceID).
+			Warn("Lightning client not initialized on southbound mqtt; cannot process invoice request")
 		return
 	}
 
@@ -266,7 +281,8 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 		request.GetReason(),
 	)
 	if err != nil {
-		log.Printf("Error calling lightning service for device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error calling lightning service on southbound mqtt", err)
 		// Response lacks reason field, so we only signal failure via status.
 		response := &mqttpb.InvoiceResponsePayload{
 			DeviceId:  request.GetDeviceId(),
@@ -276,19 +292,22 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 		marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
 		responseJSON, marshalErr := marshalOpts.Marshal(response)
 		if marshalErr != nil {
-			log.Printf("Error marshaling invoice error response: %v", marshalErr)
+			logger.WithDeviceID(deviceID).
+				Error("Error marshaling invoice error response on southbound mqtt", marshalErr)
 			return
 		}
 		responseTopic := fmt.Sprintf("/devices/%s/response/invoice", deviceID)
 		if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
-			log.Printf("Error publishing invoice error response to device %s: %v", deviceID, err)
+			logger.WithDeviceID(deviceID).
+				Error("Error publishing invoice error response to device on southbound mqtt", err)
 		}
 		return
 	}
 
 	invoice := lightningResp.GetInvoice()
 	if invoice == nil {
-		log.Printf("Lightning service returned empty invoice for device %s", deviceID)
+		logger.WithDeviceID(deviceID).
+			Warn("Lightning service returned empty invoice on southbound mqtt")
 		return
 	}
 
@@ -306,16 +325,23 @@ func (sb *SouthboundInterface) handleInvoiceRequest(client mqtt.Client, msg mqtt
 	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
 	responseJSON, err := marshalOpts.Marshal(response)
 	if err != nil {
-		log.Printf("Error marshaling invoice response: %v", err)
+		logger.WithDeviceID(deviceID).
+			Error("Error marshaling invoice response on southbound mqtt", err)
 		return
 	}
 
 	// Publish response to /devices/{deviceId}/response/invoice
 	responseTopic := fmt.Sprintf("/devices/%s/response/invoice", deviceID)
 	if err := sb.mqttClient.Publish(responseTopic, 1, false, responseJSON); err != nil {
-		log.Printf("Error publishing invoice response to device %s: %v", deviceID, err)
+		logger.WithDeviceID(deviceID).
+			Error("Error publishing invoice response to device on southbound mqtt", err)
 		return
 	}
 
-	log.Printf("[INVOICE RESPONSE] Published to %s", responseTopic)
+	logger.WithDeviceID(deviceID).
+		InfoWithFields("Invoice response published on southbound mqtt", map[string]interface{}{
+			"topic":      responseTopic,
+			"invoice_id": response.InvoiceId,
+			"status":     response.Status.String(),
+		})
 }

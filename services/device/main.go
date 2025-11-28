@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,10 +13,14 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/robertodantas/lnpay/internal"
+
 	// Import the generated proto package
 	// Note: The path matches the go_package in the proto file + the gen/ output directory
 	devicepb "github.com/robertodantas/lnpay/proto/gen/model/device"
 )
+
+var logger = internal.NewLogger("device")
 
 // EmitUsageRecord creates and serializes a DeviceUsageReportedEvent
 // This demonstrates how to use the generated proto files to emit events
@@ -83,7 +86,7 @@ func ExampleEmitUsageRecord() {
 		devicepb.UsageReportingStrategy_USAGE_STRATEGY_DELTA,
 	)
 	if err != nil {
-		log.Printf("Error emitting usage record: %v", err)
+		logger.Errorf("Error emitting usage record: %v", err)
 		return
 	}
 
@@ -97,7 +100,7 @@ func ExampleEmitUsageRecord() {
 }
 
 func main() {
-	log.Println("Starting device service...")
+	logger.Info("Starting device service")
 
 	cfg := LoadConfig()
 
@@ -107,16 +110,16 @@ func main() {
 	// Initialize device repository
 	repo, err := NewDeviceRepository(cfg.DBPath)
 	if err != nil {
-		log.Fatalf("Failed to initialize device repository: %v", err)
+		logger.Fatal("Failed to initialize device repository", err)
 	}
 	defer repo.Close()
-	log.Println("Device repository initialized")
+	logger.Info("Device repository initialized")
 
 	// Initialize dynamic security service
-	log.Println("Initializing dynamic security service...")
+	logger.Info("Initializing dynamic security service")
 	dynSecService, err := NewDynSecService(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize dynamic security service: %v", err)
+		logger.Fatal("Failed to initialize dynamic security service", err)
 	}
 	defer dynSecService.Disconnect()
 
@@ -128,92 +131,92 @@ func main() {
 	deviceServicePassword := cfg.MQTTPassword
 	if deviceServicePassword == "" {
 		deviceServicePassword = "device-service-password" // Default password if not set
-		log.Printf("Warning: MQTT_PASSWORD not set, using default password")
+		logger.Warn("MQTT_PASSWORD not set, using default password")
 	}
 
-	log.Printf("Provisioning device service user: %s", deviceServiceUsername)
+	logger.Infof("Provisioning device service user: %s", deviceServiceUsername)
 	if err := dynSecService.ProvisionDeviceService(deviceServiceUsername, deviceServicePassword); err != nil {
-		log.Printf("Failed to provision device service user: %v", err)
+		logger.Warnf("Failed to provision device service user: %v", err)
 		// Continue even if provisioning fails (user might already be provisioned)
 	} else {
-		log.Println("Device service user provisioned successfully")
+		logger.Info("Device service user provisioned successfully")
 	}
 
 	// Connect to MQTT broker
-	log.Println("Connecting to MQTT broker...")
+	logger.Info("Connecting to MQTT broker")
 	mqttClient, err := NewMQTTClient(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create MQTT client: %v", err)
+		logger.Fatal("Failed to create MQTT client", err)
 	}
 	defer mqttClient.Disconnect()
-	log.Println("MQTT client connected successfully")
+	logger.Info("MQTT client connected successfully")
 
 	// Connect to Redis
-	log.Println("Connecting to Redis...")
+	logger.Info("Connecting to Redis")
 	streamClient, err := NewStreamClient()
 	if err != nil {
-		log.Fatalf("Failed to create Redis stream client: %v", err)
+		logger.Fatal("Failed to create Redis stream client", err)
 	}
 	defer streamClient.Close()
-	log.Println("Redis stream client connected successfully")
+	logger.Info("Redis stream client connected successfully")
 
 	// Connect to ledger service via gRPC
-	log.Println("Connecting to ledger service...")
+	logger.Info("Connecting to ledger service")
 	ledgerClient, err := NewLedgerClient(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create ledger gRPC client: %v", err)
+		logger.Fatal("Failed to create ledger gRPC client", err)
 	}
 	defer ledgerClient.Close()
-	log.Println("Ledger gRPC client connected successfully")
+	logger.Info("Ledger gRPC client connected successfully")
 
 	// Connect to lightning service via gRPC
-	log.Println("Connecting to lightning service...")
+	logger.Info("Connecting to lightning service")
 	lightningClient, err := NewLightningClient(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create lightning gRPC client: %v", err)
+		logger.Fatal("Failed to create lightning gRPC client", err)
 	}
 	defer lightningClient.Close()
-	log.Println("Lightning gRPC client connected successfully")
+	logger.Info("Lightning gRPC client connected successfully")
 
 	// Initialize and start northbound REST API
-	log.Println("Initializing northbound REST API...")
+	logger.Info("Initializing northbound REST API")
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
 
 	// Start northbound server in a goroutine
 	go func() {
 		if err := northbound.Start(cfg.APIAddr); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start northbound API server: %v", err)
+			logger.Fatalf("Failed to start northbound API server: %v", err)
 		}
 	}()
 
 	// Initialize and start southbound interface
-	log.Println("Initializing southbound interface...")
+	logger.Info("Initializing southbound interface")
 	invoiceTimeout := time.Duration(cfg.LightningRPCTimeoutSeconds) * time.Second
 	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient, lightningClient, repo, invoiceTimeout)
 	if err := southbound.Start(); err != nil {
-		log.Fatalf("Failed to start southbound interface: %v", err)
+		logger.Fatal("Failed to start southbound interface", err)
 	}
 
 	// Start ledger balance subscriber to fan-out balance updates via MQTT
 	streamClient.StartLedgerBalanceSubscriber(serviceCtx, mqttClient)
 
-	log.Println("Device service is running. Press Ctrl+C to stop...")
-	log.Printf("Northbound REST API available at http://localhost%s", cfg.APIAddr)
+	logger.Info("Device service is running. Press Ctrl+C to stop")
+	logger.Infof("Northbound REST API available at http://localhost%s", cfg.APIAddr)
 
 	// Wait for interrupt signal to gracefully shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	log.Println("Shutting down device service...")
+	logger.Info("Shutting down device service")
 	serviceCancel()
 
 	// Gracefully shutdown northbound server
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := northbound.Stop(ctx); err != nil {
-		log.Printf("Error shutting down northbound server: %v", err)
+		logger.Errorf("Error shutting down northbound server: %v", err)
 	}
 
-	log.Println("Device service stopped")
+	logger.Info("Device service stopped")
 }

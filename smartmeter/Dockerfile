@@ -17,6 +17,10 @@ FROM golang:1.25-alpine AS core-builder
     COPY services/proto/go.mod ./services/proto/
     COPY services/proto/gen ./services/proto/gen
 
+    # Copy internal module
+    COPY services/internal/go.mod ./services/internal/
+    COPY services/internal/ *.go ./services/internal/
+
     # Copy core files
     COPY smartmeter/core/go.mod smartmeter/core/go.sum ./smartmeter/core/
     WORKDIR /workspace/smartmeter/core

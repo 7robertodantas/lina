@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -31,23 +30,78 @@ func SimplifyMethodName(method string) string {
 }
 
 // LoggingUnaryClientInterceptor logs outgoing unary gRPC calls, their responses, and durations.
-func LoggingUnaryClientInterceptor(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-	start := time.Now()
-	simpleMethod := SimplifyMethodName(method)
+// The service name should be passed via context using WithServiceName or extracted from the method.
+func LoggingUnaryClientInterceptor(serviceName string) func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	logger := NewLogger(serviceName)
+	
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		start := time.Now()
+		simpleMethod := SimplifyMethodName(method)
 
-	log.Printf("[gRPC] Calling %s with request: %+v", simpleMethod, req)
-	err := invoker(ctx, method, req, reply, cc, opts...)
-
-	duration := time.Since(start)
-	if err != nil {
-		if st, ok := status.FromError(err); ok {
-			log.Printf("[gRPC] %s failed: code=%s, message=%s, duration=%v", simpleMethod, st.Code(), st.Message(), duration)
-		} else {
-			log.Printf("[gRPC] %s failed: error=%v, duration=%v", simpleMethod, err, duration)
+		// Extract device_id from request if possible
+		deviceID := extractDeviceIDFromRequest(req)
+		
+		opLogger := logger
+		
+		if deviceID != "" {
+			opLogger = opLogger.WithDeviceID(deviceID)
 		}
-	} else {
-		log.Printf("[gRPC] %s succeeded: response=%+v, duration=%v", simpleMethod, reply, duration)
-	}
 
-	return err
+		opLogger.InfoWithFields(fmt.Sprintf("gRPC call started: %s via eastwest gRPC", simpleMethod), map[string]interface{}{
+			"method": simpleMethod,
+			"request": req,
+		})
+
+		err := invoker(ctx, method, req, reply, cc, opts...)
+		duration := time.Since(start)
+
+		if err != nil {
+			if st, ok := status.FromError(err); ok {
+				opLogger.ErrorWithFields(fmt.Sprintf("gRPC call failed: %s via eastwest gRPC", simpleMethod), err, map[string]interface{}{
+					"grpc_code":    st.Code().String(),
+					"grpc_message": st.Message(),
+					"duration":     duration.String(),
+				})
+			} else {
+				opLogger.ErrorWithFields(fmt.Sprintf("gRPC call failed: %s via eastwest gRPC", simpleMethod), err, map[string]interface{}{
+					"duration": duration.String(),
+				})
+			}
+		} else {
+			opLogger.InfoWithFields(fmt.Sprintf("gRPC call succeeded: %s via eastwest gRPC", simpleMethod), map[string]interface{}{
+				"response": reply,
+				"duration": duration.String(),
+			})
+		}
+
+		return err
+	}
+}
+
+// extractDeviceIDFromRequest attempts to extract device_id from common request types
+func extractDeviceIDFromRequest(req interface{}) string {
+	// Try to extract device_id using type assertion or reflection
+	// This is a simple implementation - can be extended for specific types
+	if reqMap, ok := req.(map[string]interface{}); ok {
+		if deviceID, ok := reqMap["device_id"].(string); ok {
+			return deviceID
+		}
+		if deviceID, ok := reqMap["DeviceId"].(string); ok {
+			return deviceID
+		}
+	}
+	
+	// Try common struct field names via fmt.Sprintf
+	reqStr := fmt.Sprintf("%+v", req)
+	if strings.Contains(reqStr, "device_id") || strings.Contains(reqStr, "DeviceId") {
+		// Extract using simple string parsing (not perfect but works for most cases)
+		parts := strings.Fields(reqStr)
+		for i, part := range parts {
+			if (part == "device_id:" || part == "DeviceId:") && i+1 < len(parts) {
+				return strings.Trim(parts[i+1], "{}")
+			}
+		}
+	}
+	
+	return ""
 }

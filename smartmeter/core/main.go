@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
+
+	"github.com/robertodantas/lnpay/internal"
 )
+
+var logger = internal.NewLogger("smart-meter-core")
 
 func main() {
 	cfg := LoadConfig()
@@ -28,7 +31,11 @@ func main() {
 	fs := http.FileServer(http.Dir("./public"))
 	http.Handle("/", fs)
 
-	log.Printf("Smart Meter Backend starting on port %s", cfg.HTTPPort)
-	log.Printf("Serving UI from /public directory")
-	log.Fatal(http.ListenAndServe(":"+cfg.HTTPPort, nil))
+	logger.InfoWithFields("Smart Meter Backend starting", map[string]interface{}{
+		"port": cfg.HTTPPort,
+	})
+	logger.Info("Serving UI from /public directory")
+	if err := http.ListenAndServe(":"+cfg.HTTPPort, nil); err != nil {
+		logger.Fatal("Server failed", err)
+	}
 }

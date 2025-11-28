@@ -4,7 +4,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -144,7 +143,9 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 			if token.Error() != nil {
 				sb.meter.AddLog("Failed to subscribe to "+t.topic+": "+token.Error().Error(), "error")
 			} else {
-				log.Printf("Subscribed to %s", t.topic)
+				logger.InfoWithFields("Subscribed to topic on southbound mqtt", map[string]interface{}{
+					"topic": t.topic,
+				})
 			}
 		} else {
 			sb.meter.AddLog("Timeout subscribing to "+t.topic, "error")
@@ -154,7 +155,7 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 	// Additional delay to ensure broker has fully processed all subscriptions
 	// This prevents race conditions where responses arrive before subscriptions are ready
 	time.Sleep(500 * time.Millisecond)
-	log.Printf("All subscriptions established, ready to send messages")
+	logger.Info("All subscriptions established, ready to send messages on southbound mqtt")
 
 	// Signal that subscriptions are ready
 	select {
@@ -166,7 +167,9 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 
 // MQTT Message Handlers
 func (sb *SouthboundInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Message) {
-	log.Printf("DEBUG: Raw config payload: %s", string(msg.Payload()))
+	logger.DebugWithFields("Raw config payload received on southbound mqtt", map[string]interface{}{
+		"payload": string(msg.Payload()),
+	})
 
 	var config DeviceConfig
 	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &config); err != nil {

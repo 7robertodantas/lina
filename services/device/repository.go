@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -79,7 +78,8 @@ func (r *DeviceRepository) CreateDevice(device *Device) error {
 		return fmt.Errorf("failed to insert device: %w", err)
 	}
 
-	log.Printf("Device created in database: %s", device.DeviceID)
+	logger.WithDeviceID(device.DeviceID).
+		Info("Device created in database")
 	return nil
 }
 
@@ -159,7 +159,8 @@ func (r *DeviceRepository) UpdateDevice(device *Device) error {
 		return fmt.Errorf("device not found: %s", device.DeviceID)
 	}
 
-	log.Printf("Device updated in database: %s", device.DeviceID)
+	logger.WithDeviceID(device.DeviceID).
+		Info("Device updated in database")
 	return nil
 }
 

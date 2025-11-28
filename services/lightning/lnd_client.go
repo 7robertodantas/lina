@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
@@ -53,15 +52,15 @@ func NewLNDClient(cfg Config) (*LNDClient, error) {
 	mac := &macaroonCredential{macaroon: macaroonBytes}
 
 	// Dial LND
-	log.Printf("Dialing LND host %s", cfg.LNDHost)
+	logger.Infof("Dialing LND host %s via cloud LND node", cfg.LNDHost)
 	conn, err := grpc.NewClient(
 		cfg.LNDHost,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithPerRPCCredentials(mac),
-		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor),
+		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("lightning-service")),
 	)
 	if err != nil {
-		log.Printf("Failed to dial LND host %s: %v", cfg.LNDHost, err)
+		logger.Errorf("Failed to dial LND host %s via cloud LND node: %v", cfg.LNDHost, err)
 		return nil, fmt.Errorf("failed to dial LND: %w", err)
 	}
 
@@ -81,7 +80,7 @@ func NewLNDClient(cfg Config) (*LNDClient, error) {
 		}
 		state = conn.GetState()
 	}
-	log.Printf("Successfully connected to LND host %s", cfg.LNDHost)
+	logger.Infof("Successfully connected to LND host %s via cloud LND node", cfg.LNDHost)
 
 	// Create clients
 	client := lnrpc.NewLightningClient(conn)
@@ -130,7 +129,11 @@ func (c *LNDClient) CreateInvoice(ctx context.Context, amountMsat int64, memo st
 		return nil, fmt.Errorf("amount must be positive")
 	}
 
-	log.Printf("Creating invoice via LND: amount_msat=%d expiry=%ds memo_len=%d", amountMsat, expirySeconds, len(memo))
+	logger.InfoWithFields("Creating invoice via cloud LND node", map[string]interface{}{
+		"amount_msat": amountMsat,
+		"expiry":      expirySeconds,
+		"memo_len":    len(memo),
+	})
 	invoice := &lnrpc.Invoice{
 		Memo:      memo,
 		ValueMsat: amountMsat,
@@ -149,7 +152,10 @@ func (c *LNDClient) LookupInvoice(ctx context.Context, paymentHash []byte) (*lnr
 
 // SubscribeInvoices creates a subscription stream for invoice updates
 func (c *LNDClient) SubscribeInvoices(ctx context.Context, addIndex, settleIndex uint64) (lnrpc.Lightning_SubscribeInvoicesClient, error) {
-	log.Printf("Subscribing to LND invoices stream (add_index=%d settle_index=%d)", addIndex, settleIndex)
+	logger.InfoWithFields("Subscribing to LND invoices stream via cloud LND node", map[string]interface{}{
+		"add_index":    addIndex,
+		"settle_index": settleIndex,
+	})
 	return c.client.SubscribeInvoices(ctx, &lnrpc.InvoiceSubscription{
 		AddIndex:    addIndex,
 		SettleIndex: settleIndex,
@@ -159,7 +165,7 @@ func (c *LNDClient) SubscribeInvoices(ctx context.Context, addIndex, settleIndex
 // Close closes the connection
 func (c *LNDClient) Close() error {
 	if c.conn != nil {
-		log.Println("Closing LND gRPC connection")
+		logger.Info("Closing LND gRPC connection via cloud LND node")
 		return c.conn.Close()
 	}
 	return nil

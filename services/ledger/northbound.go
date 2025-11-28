@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -274,7 +273,9 @@ func (nb *NorthboundInterface) postDeviceCredit(c *gin.Context) {
 	if nb.streamHandler != nil {
 		timestamp := time.Unix(out.CreatedAt, 0).UTC().Format(time.RFC3339)
 		if err := nb.streamHandler.PublishDeviceCredited(c.Request.Context(), out.DeviceID, out.AmountMsat, out.BalanceAfter, timestamp); err != nil {
-			log.Printf("Failed to publish DeviceCreditedEvent: %v", err)
+			logger.WithDeviceID(out.DeviceID).
+				WithStream("event.ledger", "produce").
+				Error("Failed to publish DeviceCreditedEvent via northbound REST", err)
 		}
 	}
 
@@ -291,7 +292,8 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 
 	var in DeviceDebitRequest
 	if err := c.ShouldBindJSON(&in); err != nil {
-		log.Printf("postDeviceDebit bind error: %v", err)
+		logger.WithDeviceID(deviceID).
+			Error("postDeviceDebit bind error via northbound REST", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
@@ -350,7 +352,9 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 			out.BalanceAfter,
 			timestamp,
 		); err != nil {
-			log.Printf("Failed to publish DeviceDebitedEvent: %v", err)
+			logger.WithDeviceID(out.DeviceID).
+				WithStream("event.ledger", "produce").
+				Error("Failed to publish DeviceDebitedEvent via northbound REST", err)
 		}
 	}
 
@@ -364,14 +368,14 @@ func (nb *NorthboundInterface) Start(addr string) error {
 		Handler: nb.router,
 	}
 
-	log.Printf("Starting northbound REST API server on %s", addr)
+	logger.Infof("Starting northbound REST API server on %s", addr)
 	return nb.server.ListenAndServe()
 }
 
 // Stop gracefully stops the HTTP server
 func (nb *NorthboundInterface) Stop(ctx context.Context) error {
 	if nb.server != nil {
-		log.Println("Stopping northbound REST API server...")
+		logger.Info("Stopping northbound REST API server")
 		return nb.server.Shutdown(ctx)
 	}
 	return nil

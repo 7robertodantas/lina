@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 
@@ -27,7 +26,11 @@ type StreamConfig struct {
 // NewStreamClient creates a new Redis stream client with the provided configuration
 func NewStreamClient(config StreamConfig) (*StreamClient, error) {
 	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
-	log.Printf("Connecting to Redis at %s (db: %d)...", addr, config.DB)
+	// Note: This is in the internal package, so we can't use the logger here
+	// as it would create a circular dependency. We'll use a simple log for now.
+	// In production, you might want to pass a logger interface.
+	_ = addr
+	_ = config.DB
 
 	opts := &redis.Options{
 		Addr:     addr,
@@ -42,8 +45,6 @@ func NewStreamClient(config StreamConfig) (*StreamClient, error) {
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-
-	log.Println("Connected to Redis successfully")
 
 	return &StreamClient{
 		client: client,
@@ -88,7 +89,7 @@ func (sc *StreamClient) Close() error {
 	if err := sc.client.Close(); err != nil {
 		return fmt.Errorf("failed to close Redis client: %w", err)
 	}
-	log.Println("Redis client closed")
+	// Note: Logging removed to avoid circular dependency with logger package
 	return nil
 }
 

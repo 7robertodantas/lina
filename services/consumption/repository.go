@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -158,7 +157,7 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 	for rows.Next() {
 		var e OutboxEvent
 		if err := rows.Scan(&e.ReportID, &e.DeviceID, &e.DebitMsat, &e.Timestamp); err != nil {
-			log.Printf("Error scanning outbox row: %v", err)
+			logger.Error("Error scanning outbox row", err)
 			continue
 		}
 		events = append(events, e)

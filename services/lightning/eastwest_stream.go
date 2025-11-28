@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -31,7 +30,8 @@ func NewStreamPublisher(streamClient *internal.StreamClient, lndStream *LNDEvent
 func (sp *StreamPublisher) Start(ctx context.Context) error {
 	eventChan := sp.lndStream.Subscribe()
 
-	log.Println("Stream publisher started, forwarding events to Redis...")
+	logger.WithStream(LightningEventsStream, "produce").
+		Info("Stream publisher started, forwarding events to Redis")
 
 	go func() {
 		defer sp.lndStream.Unsubscribe(eventChan)
@@ -39,11 +39,13 @@ func (sp *StreamPublisher) Start(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				log.Println("Stream publisher stopped")
+				logger.WithStream(LightningEventsStream, "produce").
+					Info("Stream publisher stopped")
 				return
 			case event := <-eventChan:
 				if err := sp.publishEvent(ctx, event); err != nil {
-					log.Printf("failed to publish lightning event: %v", err)
+					logger.WithStream(LightningEventsStream, "produce").
+						Error("Failed to publish lightning event", err)
 				}
 			}
 		}
@@ -78,8 +80,36 @@ func (sp *StreamPublisher) publishEvent(ctx context.Context, event *lightningmod
 		return fmt.Errorf("failed to publish lightning event: %w", err)
 	}
 
-	log.Printf("Published event to Redis stream %s (ID: %s)", LightningEventsStream, result.Val())
+	// Extract device_id from event if available
+	deviceID := extractDeviceIDFromLightningEvent(event)
+	logEntry := logger.WithStream(LightningEventsStream, "produce")
+	if deviceID != "" {
+		logEntry = logEntry.WithDeviceID(deviceID)
+	}
+	logEntry.InfoWithFields("Published event to Redis stream", map[string]interface{}{
+		"stream_id":  result.Val(),
+		"event_type": event.GetType().String(),
+	})
 	return nil
+}
+
+// extractDeviceIDFromLightningEvent extracts device_id from various lightning event types
+func extractDeviceIDFromLightningEvent(event *lightningmodel.LightningEvent) string {
+	switch payload := event.GetPayload().(type) {
+	case *lightningmodel.LightningEvent_InvoiceCreated:
+		if payload.InvoiceCreated != nil && payload.InvoiceCreated.Invoice != nil {
+			return payload.InvoiceCreated.Invoice.DeviceId
+		}
+	case *lightningmodel.LightningEvent_InvoiceSettled:
+		if payload.InvoiceSettled != nil {
+			return payload.InvoiceSettled.DeviceId
+		}
+	case *lightningmodel.LightningEvent_InvoiceExpired:
+		if payload.InvoiceExpired != nil {
+			return payload.InvoiceExpired.DeviceId
+		}
+	}
+	return ""
 }
 
 // PublishInvoiceCreated publishes an invoice created event immediately after creation.

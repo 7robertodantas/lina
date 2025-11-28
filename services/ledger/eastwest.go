@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -112,7 +111,12 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	}
 
 	// Create debit ledger entry for the authorization
-	log.Printf("Creating authorization hold debit for device %s: %d msat (auth_id: %s) reason %s", req.DeviceId, req.RequestMsat, authID, req.Reason)
+	logger.WithDeviceID(req.DeviceId).
+		InfoWithFields("Creating authorization hold debit via eastwest gRPC", map[string]interface{}{
+			"authorization_id": authID,
+			"amount_msat":      req.RequestMsat,
+			"reason":           req.Reason,
+		})
 	debitReq := DebitRequest{
 		DeviceID:      req.DeviceId,
 		AmountMsat:    req.RequestMsat,
@@ -134,7 +138,9 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	if s.streamHandler != nil {
 		timestamp := time.Unix(entry.CreatedAt, 0).UTC().Format(time.RFC3339)
 		if err := s.streamHandler.PublishDeviceDebited(ctx, req.DeviceId, authID, entry.AmountMsat, entry.BalanceAfter, timestamp); err != nil {
-			log.Printf("Failed to publish DeviceDebitedEvent for authorization %s: %v", authID, err)
+			logger.WithDeviceID(req.DeviceId).
+				WithStream("event.ledger", "produce").
+				Errorf("Failed to publish DeviceDebitedEvent for authorization %s via eastwest gRPC: %v", authID, err)
 		}
 	}
 
