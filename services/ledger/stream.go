@@ -42,11 +42,10 @@ func NewStreamHandler(streamClient *internal.StreamClient, repo *LedgerRepositor
 // StartLightningConsumer starts consuming from the event.lightning stream
 func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 	streamName := "event.lightning"
-	client := sh.streamClient.Client()
 	streamCtx := sh.streamClient.Context()
 
 	// Create consumer group if it doesn't exist
-	err := client.XGroupCreateMkStream(streamCtx, streamName, sh.groupName, "0").Err()
+	err := sh.streamClient.XGroupCreateMkStreamWithSpan(streamCtx, streamName, sh.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
 			Warnf("Failed to create consumer group: %v", err)
@@ -62,13 +61,13 @@ func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 				Info("Stopping lightning consumer")
 			return ctx.Err()
 		default:
-			streams, err := client.XReadGroup(streamCtx, &redis.XReadGroupArgs{
+			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
 				Group:    sh.groupName,
 				Consumer: sh.consumerName,
 				Streams:  []string{streamName, ">"},
 				Count:    10,
 				Block:    5 * time.Second,
-			}).Result()
+			})
 
 			if err != nil {
 				if err == redis.Nil {
@@ -86,7 +85,7 @@ func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 						logger.WithStream(streamName, "consume").
 							Errorf("Error handling lightning event %s: %v", msg.ID, err)
 					} else {
-						client.XAck(streamCtx, streamName, sh.groupName, msg.ID)
+						sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -123,11 +122,10 @@ func (sh *StreamHandler) handleLightningEvent(ctx context.Context, msg redis.XMe
 // StartConsumptionConsumer starts consuming from the event.consumption stream
 func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 	streamName := "event.consumption"
-	client := sh.streamClient.Client()
 	streamCtx := sh.streamClient.Context()
 
 	// Create consumer group if it doesn't exist
-	err := client.XGroupCreateMkStream(streamCtx, streamName, sh.groupName, "0").Err()
+	err := sh.streamClient.XGroupCreateMkStreamWithSpan(streamCtx, streamName, sh.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
 			Warnf("Failed to create consumer group: %v", err)
@@ -145,13 +143,13 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 			return ctx.Err()
 		default:
 			// Read from stream with blocking read (wait up to 5 seconds)
-			streams, err := client.XReadGroup(streamCtx, &redis.XReadGroupArgs{
+			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
 				Group:    sh.groupName,
 				Consumer: sh.consumerName,
 				Streams:  []string{streamName, ">"},
 				Count:    10, // Read up to 10 messages at a time
 				Block:    5 * time.Second,
-			}).Result()
+			})
 
 			if err != nil {
 				if err == redis.Nil {
@@ -173,7 +171,7 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 						// Continue processing other messages
 					} else {
 						// Acknowledge the message
-						client.XAck(streamCtx, streamName, sh.groupName, msg.ID)
+						sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -576,13 +574,19 @@ func (sh *StreamHandler) publishLedgerEvent(ctx context.Context, ledgerEvent *le
 	}
 
 	// Use XADD to add entry to stream
-	result := sh.streamClient.Client().XAdd(ctx, &redis.XAddArgs{
+	// Clean event type: "LEDGER_EVENT_TYPE_AUTHORIZATION_DEBITED" -> "AUTHORIZATION_DEBITED"
+	eventTypeFull := ledgerEvent.GetType().String()
+	eventType := eventTypeFull
+	if len(eventTypeFull) > len("LEDGER_EVENT_TYPE_") && eventTypeFull[:len("LEDGER_EVENT_TYPE_")] == "LEDGER_EVENT_TYPE_" {
+		eventType = eventTypeFull[len("LEDGER_EVENT_TYPE_"):]
+	}
+	streamID, err := sh.streamClient.XAddWithSpan(ctx, streamName, &redis.XAddArgs{
 		Stream: streamName,
 		Values: values,
-	})
+	}, eventType)
 
-	if result.Err() != nil {
-		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, result.Err())
+	if err != nil {
+		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, err)
 	}
 
 	// Extract device_id from event if available
@@ -593,7 +597,7 @@ func (sh *StreamHandler) publishLedgerEvent(ctx context.Context, ledgerEvent *le
 	}
 	logEntry.InfoWithFields("Published LedgerEvent", map[string]interface{}{
 		"event_type": ledgerEvent.GetType().String(),
-		"stream_id":  result.Val(),
+		"stream_id":  streamID,
 	})
 	return nil
 }

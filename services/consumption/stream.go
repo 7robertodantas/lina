@@ -36,11 +36,10 @@ func NewStreamHandler(streamClient *internal.StreamClient, cfg Config, repositor
 // StartDeviceConsumer starts consuming from the event.device stream
 func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 	streamName := "event.device"
-	client := sh.streamClient.Client()
 	streamCtx := sh.streamClient.Context()
 
 	// Create consumer group if it doesn't exist
-	err := client.XGroupCreateMkStream(streamCtx, streamName, sh.groupName, "0").Err()
+	err := sh.streamClient.XGroupCreateMkStreamWithSpan(streamCtx, streamName, sh.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
 			Warnf("Failed to create consumer group: %v", err)
@@ -58,13 +57,13 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 			return ctx.Err()
 		default:
 			// Read from stream with blocking read (wait up to 5 seconds)
-			streams, err := client.XReadGroup(streamCtx, &redis.XReadGroupArgs{
+			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
 				Group:    sh.groupName,
 				Consumer: sh.consumerName,
 				Streams:  []string{streamName, ">"},
 				Count:    10, // Read up to 10 messages at a time
 				Block:    5 * time.Second,
-			}).Result()
+			})
 
 			if err != nil {
 				if err == redis.Nil {
@@ -86,7 +85,7 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 						// Continue processing other messages
 					} else {
 						// Acknowledge the message
-						client.XAck(streamCtx, streamName, sh.groupName, msg.ID)
+						sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -125,9 +124,9 @@ func (sh *StreamHandler) handleDeviceEvent(ctx context.Context, msg redis.XMessa
 	logger.WithStream("event.device", "consume").
 		WithDeviceID(usage.GetDeviceId()).
 		InfoWithFields("Device event received", map[string]interface{}{
-			"report_id":        usage.GetReportId(),
-			"measure":          usage.GetMeasure(),
-			"unit":             usage.GetUnit(),
+			"report_id":           usage.GetReportId(),
+			"measure":             usage.GetMeasure(),
+			"unit":                usage.GetUnit(),
 			"price_per_unit_msat": usage.GetPricePerUnitMsat(),
 		})
 
@@ -177,10 +176,10 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 
 	logger.WithDeviceID(deviceID).
 		InfoWithFields("Processing report", map[string]interface{}{
-			"report_id":  reportID,
-			"measure":    measure,
-			"unit":       usage.GetUnit(),
-			"price_msat": pricePerUnitMsat,
+			"report_id":        reportID,
+			"measure":          measure,
+			"unit":             usage.GetUnit(),
+			"price_msat":       pricePerUnitMsat,
 			"accumulated_msat": accumulated,
 		})
 
@@ -204,7 +203,7 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	}
 	logger.WithDeviceID(deviceID).
 		DebugWithFields("Ledger: added amount", map[string]interface{}{
-			"amount_msat": usageDebitMsat,
+			"amount_msat":  usageDebitMsat,
 			"balance_msat": balanceAfterAdd,
 		})
 
@@ -237,15 +236,15 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	if actualDebitMsat >= 1 {
 		logger.WithDeviceID(deviceID).
 			InfoWithFields("Consumption recorded", map[string]interface{}{
-				"report_id":           reportID,
-				"debit_msat":          actualDebitMsat,
+				"report_id":                 reportID,
+				"debit_msat":                actualDebitMsat,
 				"remaining_fractional_msat": remainingFractionalMsat,
 			})
 	} else {
 		logger.WithDeviceID(deviceID).
 			InfoWithFields("Consumption accumulated", map[string]interface{}{
-				"report_id":        reportID,
-				"usage_msat":       usageDebitMsat,
+				"report_id":              reportID,
+				"usage_msat":             usageDebitMsat,
 				"total_accumulated_msat": totalMsat,
 			})
 	}
@@ -348,13 +347,19 @@ func (sh *StreamHandler) publishConsumptionEvent(ctx context.Context, reportID, 
 	}
 
 	// Use XADD to add entry to stream
-	result := sh.streamClient.Client().XAdd(ctx, &redis.XAddArgs{
+	// Clean event type: "CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED" -> "DEVICE_CONSUMPTION_RECORDED"
+	eventTypeFull := consumptionEvent.Type.String()
+	eventType := eventTypeFull
+	if len(eventTypeFull) > len("CONSUMPTION_EVENT_TYPE_") && eventTypeFull[:len("CONSUMPTION_EVENT_TYPE_")] == "CONSUMPTION_EVENT_TYPE_" {
+		eventType = eventTypeFull[len("CONSUMPTION_EVENT_TYPE_"):]
+	}
+	streamID, err := sh.streamClient.XAddWithSpan(ctx, streamName, &redis.XAddArgs{
 		Stream: streamName,
 		Values: values,
-	})
+	}, eventType)
 
-	if result.Err() != nil {
-		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, result.Err())
+	if err != nil {
+		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, err)
 	}
 
 	logger.WithDeviceID(deviceID).
@@ -362,7 +367,7 @@ func (sh *StreamHandler) publishConsumptionEvent(ctx context.Context, reportID, 
 		InfoWithFields("Published DeviceConsumptionRecorded event", map[string]interface{}{
 			"report_id":  reportID,
 			"debit_msat": debitMsat,
-			"stream_id":  result.Val(),
+			"stream_id":  streamID,
 		})
 	return nil
 }
@@ -400,7 +405,7 @@ func (sh *StreamHandler) cleanupOutbox(ctx context.Context) error {
 
 	if rowsAffected > 0 {
 		logger.InfoWithFields("Cleaned up old published records from outbox", map[string]interface{}{
-			"rows_affected": rowsAffected,
+			"rows_affected":  rowsAffected,
 			"retention_days": retentionDays,
 		})
 	}

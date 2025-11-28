@@ -140,7 +140,6 @@ func (sc *StreamClient) StartLedgerBalanceSubscriber(ctx context.Context, mqttCl
 }
 
 func (sc *StreamClient) consumeLedgerBalanceEvents(ctx context.Context, mqttClient *MQTTClient) {
-	client := sc.Client()
 	streamName := "event.ledger"
 	lastID := "$"
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
@@ -157,11 +156,11 @@ func (sc *StreamClient) consumeLedgerBalanceEvents(ctx context.Context, mqttClie
 		default:
 		}
 
-		streams, err := client.XRead(ctx, &redis.XReadArgs{
+		streams, err := sc.XReadWithSpan(ctx, streamName, &redis.XReadArgs{
 			Streams: []string{streamName, lastID},
 			Count:   20,
 			Block:   5 * time.Second,
-		}).Result()
+		})
 		if err != nil {
 			if err == redis.Nil {
 				continue
