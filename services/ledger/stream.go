@@ -80,7 +80,8 @@ func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					if err := sh.handleLightningEvent(ctx, msg); err != nil {
+					// Wrap event processing with tracing
+					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleLightningEvent); err != nil {
 						logger.WithStream(streamName, "consume").
 							Errorf(ctx, "Error handling lightning event %s: %v", msg.ID, err)
 					} else {
@@ -127,7 +128,6 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
 			Warnf(ctx, "Failed to create consumer group: %v", err)
-		// Continue anyway, group might already exist
 	}
 
 	logger.WithStream(streamName, "consume").
@@ -140,18 +140,17 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 				Info(ctx, "Stopping consumption consumer")
 			return ctx.Err()
 		default:
-			// Read from stream with blocking read (wait up to 5 seconds)
+			// Read from stream - this creates a span and returns a context with that span
 			streams, err := sh.streamClient.XReadGroupWithSpan(ctx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
 				Group:    sh.groupName,
 				Consumer: sh.consumerName,
 				Streams:  []string{streamName, ">"},
-				Count:    10, // Read up to 10 messages at a time
+				Count:    10,
 				Block:    5 * time.Second,
 			})
 
 			if err != nil {
 				if err == redis.Nil {
-					// No messages, continue
 					continue
 				}
 				logger.WithStream(streamName, "consume").
@@ -160,15 +159,14 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 				continue
 			}
 
-			// Process messages
+			// Process messages with the context that has the read span
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					if err := sh.handleConsumptionEvent(ctx, msg); err != nil {
+					// TraceEventProcessing will create a child span of the read operation
+					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleConsumptionEvent); err != nil {
 						logger.WithStream(streamName, "consume").
 							Errorf(ctx, "Error handling consumption event %s: %v", msg.ID, err)
-						// Continue processing other messages
 					} else {
-						// Acknowledge the message
 						sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}

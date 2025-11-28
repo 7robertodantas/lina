@@ -79,7 +79,8 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 			// Process messages
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					if err := sh.handleDeviceEvent(streamCtx, msg); err != nil {
+					// Wrap event processing with tracing
+					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleDeviceEvent); err != nil {
 						logger.WithStream(streamName, "consume").
 							Errorf(streamCtx, "Error handling device event %s: %v", msg.ID, err)
 						// Continue processing other messages

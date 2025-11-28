@@ -8,6 +8,14 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	lndStreamTracer = otel.Tracer("lnd.stream")
 )
 
 type LNDEventStream struct {
@@ -88,7 +96,8 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 					continue
 				}
 
-				if event := es.buildEventFromInvoice(ctx, invoice); event != nil {
+				// Use wrapper with tracing
+				if event := es.buildEventFromInvoiceWithTracing(ctx, invoice); event != nil {
 					es.Publish(ctx, event)
 				}
 			}
@@ -96,6 +105,57 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 	}()
 
 	return nil
+}
+
+// buildEventFromInvoiceWithTracing wraps buildEventFromInvoice with OpenTelemetry tracing
+func (es *LNDEventStream) buildEventFromInvoiceWithTracing(ctx context.Context, invoice *lnrpc.Invoice) *lightningmodel.LightningEvent {
+	invoiceID := fmt.Sprintf("%x", invoice.RHash)
+	amountMsat := invoice.ValueMsat
+	if amountMsat == 0 {
+		amountMsat = invoice.Value * 1000
+	}
+	stateName := invoice.State.String()
+	deviceMeta := decodeInvoiceMetadata(invoice.Memo)
+
+	// Create span for invoice processing
+	ctx, span := lndStreamTracer.Start(ctx, "[lnd] invoice stream received",
+		trace.WithAttributes(
+			attribute.String("lnd.invoice.id", invoiceID),
+			attribute.String("lnd.invoice.state", stateName),
+			attribute.Int64("lnd.invoice.amount_msat", amountMsat),
+			attribute.String("lnd.device_id", deviceMeta.DeviceID),
+			attribute.String("lnd.operation", "INVOICE_UPDATE"),
+		),
+	)
+	defer span.End()
+
+	// Call the actual business logic
+	event := es.buildEventFromInvoice(ctx, invoice)
+
+	// Add event type to span based on result
+	if event != nil {
+		var eventType string
+		switch event.GetType() {
+		case lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_CREATED:
+			eventType = "INVOICE_CREATED"
+		case lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_SETTLED:
+			eventType = "INVOICE_SETTLED"
+			if settled := event.GetInvoiceSettled(); settled != nil {
+				span.SetAttributes(attribute.Int64("lnd.invoice.amount_received_msat", settled.AmountReceivedMsat))
+			}
+		case lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED:
+			eventType = "INVOICE_EXPIRED"
+		}
+		if eventType != "" {
+			span.SetAttributes(attribute.String("lnd.event.type", eventType))
+		}
+		span.SetStatus(codes.Ok, "event created")
+	} else {
+		span.SetAttributes(attribute.String("lnd.event.type", "IGNORED"))
+		span.SetStatus(codes.Ok, "unsupported state ignored")
+	}
+
+	return event
 }
 
 func (es *LNDEventStream) buildEventFromInvoice(ctx context.Context, invoice *lnrpc.Invoice) *lightningmodel.LightningEvent {

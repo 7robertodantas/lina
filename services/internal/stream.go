@@ -17,6 +17,7 @@ import (
 
 var (
 	streamTracer = otel.Tracer("redis.stream")
+	eventTracer  = otel.Tracer("event.processor")
 )
 
 // StreamClient wraps the Redis client for stream operations
@@ -110,47 +111,27 @@ func (sc *StreamClient) Close() error {
 }
 
 // XReadGroupWithSpan performs XReadGroup with a meaningful OpenTelemetry span
+// Note: This doesn't propagate the span context to returned streams because XReadGroup
+// is a blocking operation. Event processing spans are created separately via TraceEventProcessing.
 func (sc *StreamClient) XReadGroupWithSpan(ctx context.Context, streamName, groupName, consumerName string, args *redis.XReadGroupArgs) ([]redis.XStream, error) {
-	spanName := fmt.Sprintf("[stream] %s read", streamName)
-	ctx, span := streamTracer.Start(ctx, spanName,
-		trace.WithAttributes(
-			attribute.String("redis.stream.name", streamName),
-			attribute.String("redis.stream.group", groupName),
-			attribute.String("redis.stream.consumer", consumerName),
-			attribute.String("redis.operation", "XREADGROUP"),
-		),
-	)
-	defer span.End()
 
 	client := sc.Client()
 	result := client.XReadGroup(ctx, args)
 	if result.Err() != nil {
-		// redis.Nil is not an error - it means no messages available
 		if result.Err() == redis.Nil {
-			span.SetAttributes(attribute.Bool("redis.stream.empty", true))
-			span.SetStatus(codes.Ok, "no messages")
 			return nil, redis.Nil
 		}
-		span.RecordError(result.Err())
-		span.SetStatus(codes.Error, result.Err().Error())
 		return nil, result.Err()
 	}
 
 	streams, err := result.Result()
 	if err != nil {
-		// redis.Nil is not an error - it means no messages available
 		if err == redis.Nil {
-			span.SetAttributes(attribute.Bool("redis.stream.empty", true))
-			span.SetStatus(codes.Ok, "no messages")
 			return nil, redis.Nil
 		}
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
 		return nil, err
 	}
 
-	span.SetAttributes(attribute.Int("redis.stream.messages.count", len(streams)))
-	span.SetStatus(codes.Ok, "success")
 	return streams, nil
 }
 
@@ -230,7 +211,7 @@ func (sc *StreamClient) XAckWithSpan(ctx context.Context, streamName, groupName,
 
 // XReadWithSpan performs XRead with a meaningful OpenTelemetry span
 func (sc *StreamClient) XReadWithSpan(ctx context.Context, streamName string, args *redis.XReadArgs) ([]redis.XStream, error) {
-	spanName := fmt.Sprintf("[stream] %s read", streamName)
+	spanName := fmt.Sprintf("[%s] stream read ", streamName)
 	ctx, span := streamTracer.Start(ctx, spanName,
 		trace.WithAttributes(
 			attribute.String("redis.stream.name", streamName),
@@ -295,6 +276,42 @@ func (sc *StreamClient) XGroupCreateMkStreamWithSpan(ctx context.Context, stream
 		span.RecordError(result.Err())
 		span.SetStatus(codes.Error, result.Err().Error())
 		return result.Err()
+	}
+
+	span.SetStatus(codes.Ok, "success")
+	return nil
+}
+
+// TraceEventProcessing wraps event processing with an OpenTelemetry span
+// It extracts event metadata from the Redis message and creates a meaningful span
+func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMessage, fn func(context.Context, redis.XMessage) error) error {
+	// Extract event type from message
+	eventType := extractEventTypeFromMessage(msg)
+
+	spanName := fmt.Sprintf("[%s] processing", streamName)
+	if eventType != "" {
+		spanName = fmt.Sprintf("[%s] processing [%s]", streamName, eventType)
+	}
+
+	ctx, span := eventTracer.Start(ctx, spanName,
+		trace.WithAttributes(
+			attribute.String("event.stream", streamName),
+			attribute.String("event.message.id", msg.ID),
+			attribute.String("event.operation", "PROCESS"),
+		),
+	)
+	if eventType != "" {
+		span.SetAttributes(attribute.String("event.type", eventType))
+	}
+	defer span.End()
+
+	// Call the actual processing function
+	err := fn(ctx, msg)
+
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return err
 	}
 
 	span.SetStatus(codes.Ok, "success")
