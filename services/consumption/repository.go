@@ -290,3 +290,115 @@ func (r *ConsumptionRepository) BeginTx(ctx context.Context, opts *sql.TxOptions
 func (r *ConsumptionRepository) Close() error {
 	return r.db.Close()
 }
+
+// ListDeviceConsumptions retrieves consumption records for a device with outbox status
+func (r *ConsumptionRepository) ListDeviceConsumptions(ctx context.Context, deviceID string, limit int) ([]ConsumptionResponse, error) {
+	query := `
+		SELECT 
+			c.report_id, 
+			c.device_id, 
+			c.debit_msat, 
+			c.measure, 
+			c.price_per_unit_msat, 
+			c.unit, 
+			c.timestamp, 
+			c.created_at,
+			COALESCE(o.published, 0) as published,
+			o.traceparent
+		FROM consumption_records c
+		LEFT JOIN consumption_outbox o ON c.report_id = o.report_id
+		WHERE c.device_id = ?
+		ORDER BY c.created_at DESC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, deviceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query device consumptions: %w", err)
+	}
+	defer rows.Close()
+
+	var results []ConsumptionResponse
+	for rows.Next() {
+		var resp ConsumptionResponse
+		var published int
+		var traceparent sql.NullString
+
+		if err := rows.Scan(
+			&resp.ReportID,
+			&resp.DeviceID,
+			&resp.DebitMsat,
+			&resp.Measure,
+			&resp.PricePerUnitMsat,
+			&resp.Unit,
+			&resp.Timestamp,
+			&resp.CreatedAt,
+			&published,
+			&traceparent,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan consumption: %w", err)
+		}
+
+		resp.Published = published == 1
+		if traceparent.Valid {
+			resp.Traceparent = traceparent.String
+		}
+
+		results = append(results, resp)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating consumptions: %w", err)
+	}
+
+	return results, nil
+}
+
+// ListDeviceAccumulations retrieves accumulation ledger entries for a device
+func (r *ConsumptionRepository) ListDeviceAccumulations(ctx context.Context, deviceID string, limit int) ([]AccumulationResponse, error) {
+	query := `
+		SELECT 
+			id, 
+			device_id, 
+			report_id, 
+			type, 
+			amount_msat, 
+			accumulated_balance_msat, 
+			created_at
+		FROM device_accumulation_ledger
+		WHERE device_id = ?
+		ORDER BY created_at DESC
+		LIMIT ?
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, deviceID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query device accumulations: %w", err)
+	}
+	defer rows.Close()
+
+	var results []AccumulationResponse
+	for rows.Next() {
+		var resp AccumulationResponse
+
+		if err := rows.Scan(
+			&resp.ID,
+			&resp.DeviceID,
+			&resp.ReportID,
+			&resp.Type,
+			&resp.AmountMsat,
+			&resp.AccumulatedBalanceMsat,
+			&resp.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan accumulation: %w", err)
+		}
+
+		results = append(results, resp)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating accumulations: %w", err)
+	}
+
+	return results, nil
+}

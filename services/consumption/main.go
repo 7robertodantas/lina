@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -55,6 +56,18 @@ func main() {
 	// Create stream handler
 	streamHandler := NewStreamHandler(streamClient, cfg, repository)
 
+	// Create northbound interface
+	// Initialize and start northbound REST API
+	logger.Info(ctx, "Initializing northbound REST API")
+	northbound := NewNorthboundInterface(repository, cfg)
+
+	// Start northbound server in a goroutine
+	go func() {
+		if err := northbound.Start(ctx, cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf(ctx, "Failed to start northbound API server: %v", err)
+		}
+	}()
+
 	// Create context for graceful shutdown
 	serviceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -90,4 +103,14 @@ func main() {
 	logger.Info(ctx, "Shutting down consumption service")
 	cancel() // Cancel context to stop consumers
 	logger.Info(ctx, "Consumption service stopped")
+
+	// Graceful shutdown
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := northbound.Stop(shutdownCtx); err != nil {
+		logger.Errorf(shutdownCtx, "Error stopping northbound API: %v", err)
+	}
 }

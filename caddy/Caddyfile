@@ -46,6 +46,11 @@
         reverse_proxy consumption:8080
     }
 
+    route /devices/*/accumulations* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy consumption:8080
+    }
+
     # Lightning service endpoints
     route /lnd/info* {
         uri path_regexp ^(.*)$ /api/v1$1
