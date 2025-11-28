@@ -42,26 +42,25 @@ func NewStreamHandler(streamClient *internal.StreamClient, repo *LedgerRepositor
 // StartLightningConsumer starts consuming from the event.lightning stream
 func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 	streamName := "event.lightning"
-	streamCtx := sh.streamClient.Context()
 
 	// Create consumer group if it doesn't exist
-	err := sh.streamClient.XGroupCreateMkStreamWithSpan(streamCtx, streamName, sh.groupName, "0")
+	err := sh.streamClient.XGroupCreateMkStreamWithSpan(ctx, streamName, sh.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
-			Warnf("Failed to create consumer group: %v", err)
+			Warnf(ctx, "Failed to create consumer group: %v", err)
 	}
 
 	logger.WithStream(streamName, "consume").
-		Info("Starting lightning consumer")
+		Info(ctx, "Starting lightning consumer")
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.WithStream(streamName, "consume").
-				Info("Stopping lightning consumer")
+				Info(ctx, "Stopping lightning consumer")
 			return ctx.Err()
 		default:
-			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
+			streams, err := sh.streamClient.XReadGroupWithSpan(ctx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
 				Group:    sh.groupName,
 				Consumer: sh.consumerName,
 				Streams:  []string{streamName, ">"},
@@ -74,18 +73,18 @@ func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Error("Error reading from stream", err)
+					Error(ctx, "Error reading from stream", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					if err := sh.handleLightningEvent(streamCtx, msg); err != nil {
+					if err := sh.handleLightningEvent(ctx, msg); err != nil {
 						logger.WithStream(streamName, "consume").
-							Errorf("Error handling lightning event %s: %v", msg.ID, err)
+							Errorf(ctx, "Error handling lightning event %s: %v", msg.ID, err)
 					} else {
-						sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
+						sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -107,7 +106,7 @@ func (sh *StreamHandler) handleLightningEvent(ctx context.Context, msg redis.XMe
 
 	if lightningEvent.GetType() != lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_SETTLED {
 		logger.WithStream("event.lightning", "consume").
-			Debugf("Skipping lightning event type: %v", lightningEvent.GetType())
+			Debugf(ctx, "Skipping lightning event type: %v", lightningEvent.GetType())
 		return nil
 	}
 
@@ -122,28 +121,27 @@ func (sh *StreamHandler) handleLightningEvent(ctx context.Context, msg redis.XMe
 // StartConsumptionConsumer starts consuming from the event.consumption stream
 func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 	streamName := "event.consumption"
-	streamCtx := sh.streamClient.Context()
 
 	// Create consumer group if it doesn't exist
-	err := sh.streamClient.XGroupCreateMkStreamWithSpan(streamCtx, streamName, sh.groupName, "0")
+	err := sh.streamClient.XGroupCreateMkStreamWithSpan(ctx, streamName, sh.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
-			Warnf("Failed to create consumer group: %v", err)
+			Warnf(ctx, "Failed to create consumer group: %v", err)
 		// Continue anyway, group might already exist
 	}
 
 	logger.WithStream(streamName, "consume").
-		Info("Starting consumption consumer")
+		Info(ctx, "Starting consumption consumer")
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.WithStream(streamName, "consume").
-				Info("Stopping consumption consumer")
+				Info(ctx, "Stopping consumption consumer")
 			return ctx.Err()
 		default:
 			// Read from stream with blocking read (wait up to 5 seconds)
-			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
+			streams, err := sh.streamClient.XReadGroupWithSpan(ctx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
 				Group:    sh.groupName,
 				Consumer: sh.consumerName,
 				Streams:  []string{streamName, ">"},
@@ -157,7 +155,7 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Error("Error reading from stream", err)
+					Error(ctx, "Error reading from stream", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -165,13 +163,13 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 			// Process messages
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					if err := sh.handleConsumptionEvent(streamCtx, msg); err != nil {
+					if err := sh.handleConsumptionEvent(ctx, msg); err != nil {
 						logger.WithStream(streamName, "consume").
-							Errorf("Error handling consumption event %s: %v", msg.ID, err)
+							Errorf(ctx, "Error handling consumption event %s: %v", msg.ID, err)
 						// Continue processing other messages
 					} else {
 						// Acknowledge the message
-						sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
+						sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -197,7 +195,7 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 	// Check event type
 	if consumptionEvent.GetType() != consumptionpb.ConsumptionEventType_CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED {
 		logger.WithStream("event.consumption", "consume").
-			Debugf("Skipping event type: %v", consumptionEvent.GetType())
+			Debugf(ctx, "Skipping event type: %v", consumptionEvent.GetType())
 		return nil
 	}
 
@@ -208,7 +206,7 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 
 	logger.WithStream("event.consumption", "consume").
 		WithDeviceID(recorded.GetDeviceId()).
-		InfoWithFields("Consumption received", map[string]interface{}{
+		InfoWithFields(ctx, "Consumption received", map[string]interface{}{
 			"debit_msat": recorded.GetDebitMsat(),
 		})
 
@@ -237,12 +235,12 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		if errors.Is(err, sql.ErrNoRows) {
 			// No active authorization found - publish failed event
 			logger.WithDeviceID(deviceID).
-				Warn("No active authorization found")
+				Warn(ctx, "No active authorization found")
 			timestamp := time.Now().Format(time.RFC3339)
 			if err := sh.PublishAuthorizationDebitFailed(ctx, "", deviceID, recorded.GetDebitMsat(), 0, "NO_ACTIVE_AUTHORIZATION", timestamp); err != nil {
 				logger.WithDeviceID(deviceID).
 					WithStream("event.ledger", "produce").
-					Error("Failed to publish AuthorizationDebitFailed event", err)
+					Error(ctx, "Failed to publish AuthorizationDebitFailed event", err)
 			}
 			return fmt.Errorf("no active authorization found for device %s", deviceID)
 		}
@@ -257,7 +255,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	// Check if we have enough remaining
 	if remainingMsat < debitAmount {
 		logger.WithDeviceID(deviceID).
-			WarnWithFields("Insufficient remaining in authorization", map[string]interface{}{
+			WarnWithFields(ctx, "Insufficient remaining in authorization", map[string]interface{}{
 				"authorization_id": authorizationID,
 				"remaining_msat":   remainingMsat,
 				"requested_msat":   debitAmount,
@@ -320,7 +318,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	if err := sh.PublishAuthorizationDebited(ctx, authorizationID, deviceID, debitAmount, newRemaining, timestamp); err != nil {
 		logger.WithDeviceID(deviceID).
 			WithStream("event.ledger", "produce").
-			Error("Failed to publish AuthorizationDebited event", err)
+			Error(ctx, "Failed to publish AuthorizationDebited event", err)
 	}
 
 	if newStatus == "completed" {
@@ -328,7 +326,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		if err := sh.PublishAuthorizationCompleted(ctx, authorizationID, deviceID, timestamp); err != nil {
 			logger.WithDeviceID(deviceID).
 				WithStream("event.ledger", "produce").
-				Error("Failed to publish AuthorizationCompleted event", err)
+				Error(ctx, "Failed to publish AuthorizationCompleted event", err)
 		}
 	}
 
@@ -338,7 +336,7 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 		if err := sh.PublishDeviceDebited(ctx, deviceID, authorizationID, overflowEntry.AmountMsat, overflowEntry.BalanceAfter, overflowTimestamp); err != nil {
 			logger.WithDeviceID(deviceID).
 				WithStream("event.ledger", "produce").
-				Error("Failed to publish DeviceDebited event for overflow", err)
+				Error(ctx, "Failed to publish DeviceDebited event for overflow", err)
 		}
 	}
 
@@ -380,7 +378,7 @@ func (sh *StreamHandler) processInvoiceSettled(ctx context.Context, settled *lig
 		if kind == "credit" {
 			logger.WithDeviceID(deviceID).
 				WithStream("event.lightning", "consume").
-				InfoWithFields("Invoice already credited, skipping", map[string]interface{}{
+				InfoWithFields(ctx, "Invoice already credited, skipping", map[string]interface{}{
 					"invoice_id": invoiceID,
 				})
 			return nil
@@ -409,7 +407,7 @@ func (sh *StreamHandler) processInvoiceSettled(ctx context.Context, settled *lig
 
 	logger.WithDeviceID(deviceID).
 		WithStream("event.lightning", "consume").
-		InfoWithFields("Credited device from invoice", map[string]interface{}{
+		InfoWithFields(ctx, "Credited device from invoice", map[string]interface{}{
 			"invoice_id":    invoiceID,
 			"amount_msat":   entry.AmountMsat,
 			"balance_after": entry.BalanceAfter,
@@ -419,7 +417,7 @@ func (sh *StreamHandler) processInvoiceSettled(ctx context.Context, settled *lig
 	if err := sh.PublishDeviceCredited(ctx, entry.DeviceID, entry.AmountMsat, entry.BalanceAfter, timestamp); err != nil {
 		logger.WithDeviceID(deviceID).
 			WithStream("event.ledger", "produce").
-			Errorf("Failed to publish DeviceCreditedEvent for invoice %s: %v", invoiceID, err)
+			Errorf(ctx, "Failed to publish DeviceCreditedEvent for invoice %s: %v", invoiceID, err)
 	}
 
 	return nil
@@ -595,7 +593,7 @@ func (sh *StreamHandler) publishLedgerEvent(ctx context.Context, ledgerEvent *le
 	if deviceID != "" {
 		logEntry = logEntry.WithDeviceID(deviceID)
 	}
-	logEntry.InfoWithFields("Published LedgerEvent", map[string]interface{}{
+	logEntry.InfoWithFields(ctx, "Published LedgerEvent", map[string]interface{}{
 		"event_type": ledgerEvent.GetType().String(),
 		"stream_id":  streamID,
 	})
@@ -639,7 +637,7 @@ func extractDeviceIDFromLedgerEvent(event *ledgermodel.LedgerEvent) string {
 
 // StartExpirationChecker periodically checks for expired authorizations
 func (sh *StreamHandler) StartExpirationChecker(ctx context.Context) error {
-	logger.Info("Starting authorization expiration checker")
+	logger.Info(ctx, "Starting authorization expiration checker")
 
 	ticker := time.NewTicker(1 * time.Minute) // Check every minute
 	defer ticker.Stop()
@@ -647,11 +645,11 @@ func (sh *StreamHandler) StartExpirationChecker(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Stopping expiration checker")
+			logger.Info(ctx, "Stopping expiration checker")
 			return ctx.Err()
 		case <-ticker.C:
 			if err := sh.checkExpiredAuthorizations(ctx); err != nil {
-				logger.Error("Error checking expired authorizations", err)
+				logger.Error(ctx, "Error checking expired authorizations", err)
 			}
 		}
 	}
@@ -673,7 +671,7 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 	for _, auth := range expired {
 		tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{})
 		if err != nil {
-			logger.Error("Failed to begin transaction for expiration", err)
+			logger.Error(ctx, "Failed to begin transaction for expiration", err)
 			continue
 		}
 
@@ -681,10 +679,10 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 		if err != nil {
 			_ = tx.Rollback()
 			if errors.Is(err, sql.ErrNoRows) {
-				logger.Debugf("Authorization %s already processed, skipping", auth.AuthorizationID)
+				logger.Debugf(ctx, "Authorization %s already processed, skipping", auth.AuthorizationID)
 				continue
 			}
-			logger.Errorf("Failed to load authorization %s: %v", auth.AuthorizationID, err)
+			logger.Errorf(ctx, "Failed to load authorization %s: %v", auth.AuthorizationID, err)
 			continue
 		}
 
@@ -699,7 +697,7 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 			if err != nil {
 				_ = tx.Rollback()
 				logger.WithDeviceID(deviceID).
-					Errorf("Failed to credit device for expired authorization %s: %v", auth.AuthorizationID, err)
+					Errorf(ctx, "Failed to credit device for expired authorization %s: %v", auth.AuthorizationID, err)
 				continue
 			}
 			creditEntry = &entry
@@ -708,13 +706,13 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 		if err := sh.repo.MarkAuthorizationExpired(ctx, tx, auth.AuthorizationID); err != nil {
 			_ = tx.Rollback()
 			logger.WithDeviceID(deviceID).
-				Errorf("Failed to update expired authorization %s: %v", auth.AuthorizationID, err)
+				Errorf(ctx, "Failed to update expired authorization %s: %v", auth.AuthorizationID, err)
 			continue
 		}
 
 		if err := tx.Commit(); err != nil {
 			logger.WithDeviceID(deviceID).
-				Errorf("Failed to commit expiration update for %s: %v", auth.AuthorizationID, err)
+				Errorf(ctx, "Failed to commit expiration update for %s: %v", auth.AuthorizationID, err)
 			continue
 		}
 
@@ -725,7 +723,7 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 		if err := sh.PublishAuthorizationExpired(ctx, auth.AuthorizationID, deviceID, timestamp); err != nil {
 			logger.WithDeviceID(deviceID).
 				WithStream("event.ledger", "produce").
-				Error("Failed to publish AuthorizationExpired event", err)
+				Error(ctx, "Failed to publish AuthorizationExpired event", err)
 		}
 
 		if creditEntry != nil {
@@ -733,13 +731,13 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 			if err := sh.PublishDeviceCredited(ctx, deviceID, creditEntry.AmountMsat, creditEntry.BalanceAfter, creditTimestamp); err != nil {
 				logger.WithDeviceID(deviceID).
 					WithStream("event.ledger", "produce").
-					Errorf("Failed to publish DeviceCreditedEvent for authorization %s: %v", auth.AuthorizationID, err)
+					Errorf(ctx, "Failed to publish DeviceCreditedEvent for authorization %s: %v", auth.AuthorizationID, err)
 			}
 		}
 	}
 
 	if processed > 0 {
-		logger.InfoWithFields("Marked authorizations as expired", map[string]interface{}{
+		logger.InfoWithFields(ctx, "Marked authorizations as expired", map[string]interface{}{
 			"count": processed,
 		})
 	}

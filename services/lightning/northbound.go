@@ -46,7 +46,7 @@ func (nb *NorthboundInterface) registerRoutes() {
 }
 
 func (nb *NorthboundInterface) health(c *gin.Context) {
-	logger.InfoWithFields("Health check requested via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(c, "Health check requested via northbound REST", map[string]interface{}{
 		"client_ip": c.ClientIP(),
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -57,20 +57,20 @@ func (nb *NorthboundInterface) health(c *gin.Context) {
 
 func (nb *NorthboundInterface) getInfo(c *gin.Context) {
 	start := time.Now()
-	logger.InfoWithFields("Northbound getInfo request via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(c, "Northbound getInfo request via northbound REST", map[string]interface{}{
 		"client_ip": c.ClientIP(),
 	})
-	ctx, cancel := context.WithTimeout(c.Request.Context(), northboundRequestTimeout)
+	ctx, cancel := context.WithTimeout(c, northboundRequestTimeout)
 	defer cancel()
 
 	info, err := nb.lndClient.GetInfo(ctx)
 	if err != nil {
-		logger.Error("Northbound getInfo failed via northbound REST", err)
+		logger.Error(c, "Northbound getInfo failed via northbound REST", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
-	logger.InfoWithFields("Northbound getInfo succeeded via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(c, "Northbound getInfo succeeded via northbound REST", map[string]interface{}{
 		"duration":     time.Since(start).String(),
 		"alias":        info.Alias,
 		"block_height": info.BlockHeight,
@@ -80,20 +80,20 @@ func (nb *NorthboundInterface) getInfo(c *gin.Context) {
 
 func (nb *NorthboundInterface) getWallet(c *gin.Context) {
 	start := time.Now()
-	logger.InfoWithFields("Northbound getWallet request via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(c, "Northbound getWallet request via northbound REST", map[string]interface{}{
 		"client_ip": c.ClientIP(),
 	})
-	ctx, cancel := context.WithTimeout(c.Request.Context(), northboundRequestTimeout)
+	ctx, cancel := context.WithTimeout(c, northboundRequestTimeout)
 	defer cancel()
 
 	bal, err := nb.lndClient.GetWalletBalance(ctx)
 	if err != nil {
-		logger.Error("Northbound getWallet failed via northbound REST", err)
+		logger.Error(c, "Northbound getWallet failed via northbound REST", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 		return
 	}
 
-	logger.InfoWithFields("Northbound getWallet succeeded via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(c, "Northbound getWallet succeeded via northbound REST", map[string]interface{}{
 		"duration":      time.Since(start).String(),
 		"confirmed_sat": bal.ConfirmedBalance,
 	})
@@ -101,8 +101,8 @@ func (nb *NorthboundInterface) getWallet(c *gin.Context) {
 }
 
 // Start boots the HTTP server.
-func (nb *NorthboundInterface) Start(addr string) error {
-	logger.Infof("Starting northbound HTTP server on %s", addr)
+func (nb *NorthboundInterface) Start(ctx context.Context, addr string) error {
+	logger.Infof(ctx, "Starting northbound HTTP server on %s", addr)
 	nb.server = &http.Server{
 		Addr:    addr,
 		Handler: nb.router,
@@ -113,7 +113,7 @@ func (nb *NorthboundInterface) Start(addr string) error {
 
 // Stop gracefully stops the HTTP server.
 func (nb *NorthboundInterface) Stop(ctx context.Context) error {
-	logger.Info("Stopping northbound HTTP server")
+	logger.Info(ctx, "Stopping northbound HTTP server")
 	if nb.server == nil {
 		return nil
 	}

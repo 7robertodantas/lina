@@ -1,17 +1,21 @@
 package internal
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Logger provides structured logfmt logging with context
 type Logger struct {
 	serviceName string
 	fields      map[string]interface{}
+	ctx         context.Context // Optional context for trace extraction
 }
 
 // NewLogger creates a new logger instance for a service
@@ -106,7 +110,8 @@ func formatLogfmtValue(v interface{}) string {
 }
 
 // log writes a structured logfmt log entry
-func (l *Logger) log(level, message string, err error, duration time.Duration, additionalFields map[string]interface{}) {
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) log(ctx context.Context, level, message string, err error, duration time.Duration, additionalFields map[string]interface{}) {
 	var parts []string
 
 	// Always include timestamp, level, service, and message
@@ -114,6 +119,29 @@ func (l *Logger) log(level, message string, err error, duration time.Duration, a
 	parts = append(parts, fmt.Sprintf("level=%s", level))
 	parts = append(parts, fmt.Sprintf("service=%s", l.serviceName))
 	parts = append(parts, fmt.Sprintf("message=%s", formatLogfmtValue(message)))
+
+	// Extract trace ID and span ID from context if available
+	// Priority: explicit ctx parameter > stored ctx in logger
+	var traceCtx context.Context
+	if ctx != nil {
+		traceCtx = ctx
+	} else if l.ctx != nil {
+		traceCtx = l.ctx
+	}
+
+	if traceCtx != nil {
+		span := trace.SpanFromContext(traceCtx)
+		if span.SpanContext().IsValid() {
+			traceID := span.SpanContext().TraceID().String()
+			spanID := span.SpanContext().SpanID().String()
+			if traceID != "" {
+				parts = append(parts, fmt.Sprintf("trace_id=%s", traceID))
+			}
+			if spanID != "" {
+				parts = append(parts, fmt.Sprintf("span_id=%s", spanID))
+			}
+		}
+	}
 
 	// Extract common fields from context
 	if deviceID, ok := l.fields["device_id"].(string); ok && deviceID != "" {
@@ -153,71 +181,89 @@ func (l *Logger) log(level, message string, err error, duration time.Duration, a
 }
 
 // Info logs an info level message
-func (l *Logger) Info(message string) {
-	l.log("info", message, nil, 0, nil)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Info(ctx context.Context, message string) {
+	l.log(ctx, "info", message, nil, 0, nil)
 }
 
 // Infof logs an info level message with formatting
-func (l *Logger) Infof(format string, args ...interface{}) {
-	l.Info(fmt.Sprintf(format, args...))
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Infof(ctx context.Context, format string, args ...interface{}) {
+	l.Info(ctx, fmt.Sprintf(format, args...))
 }
 
 // InfoWithFields logs an info level message with additional fields
-func (l *Logger) InfoWithFields(message string, fields map[string]interface{}) {
-	l.log("info", message, nil, 0, fields)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) InfoWithFields(ctx context.Context, message string, fields map[string]interface{}) {
+	l.log(ctx, "info", message, nil, 0, fields)
 }
 
 // Error logs an error level message
-func (l *Logger) Error(message string, err error) {
-	l.log("error", message, err, 0, nil)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Error(ctx context.Context, message string, err error) {
+	l.log(ctx, "error", message, err, 0, nil)
 }
 
 // Errorf logs an error level message with formatting
-func (l *Logger) Errorf(format string, args ...interface{}) {
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Errorf(ctx context.Context, format string, args ...interface{}) {
 	var err error
+	var formatArgs []interface{}
+
+	// Extract error from args (last argument if it's an error)
 	if len(args) > 0 {
 		if e, ok := args[len(args)-1].(error); ok {
 			err = e
-			args = args[:len(args)-1]
+			formatArgs = args[:len(args)-1]
+		} else {
+			formatArgs = args
 		}
 	}
-	message := fmt.Sprintf(format, args...)
-	l.log("error", message, err, 0, nil)
+
+	message := fmt.Sprintf(format, formatArgs...)
+	l.log(ctx, "error", message, err, 0, nil)
 }
 
 // ErrorWithFields logs an error level message with additional fields
-func (l *Logger) ErrorWithFields(message string, err error, fields map[string]interface{}) {
-	l.log("error", message, err, 0, fields)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) ErrorWithFields(ctx context.Context, message string, err error, fields map[string]interface{}) {
+	l.log(ctx, "error", message, err, 0, fields)
 }
 
 // Warn logs a warning level message
-func (l *Logger) Warn(message string) {
-	l.log("warn", message, nil, 0, nil)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Warn(ctx context.Context, message string) {
+	l.log(ctx, "warn", message, nil, 0, nil)
 }
 
 // Warnf logs a warning level message with formatting
-func (l *Logger) Warnf(format string, args ...interface{}) {
-	l.Warn(fmt.Sprintf(format, args...))
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Warnf(ctx context.Context, format string, args ...interface{}) {
+	l.Warn(ctx, fmt.Sprintf(format, args...))
 }
 
 // WarnWithFields logs a warning level message with additional fields
-func (l *Logger) WarnWithFields(message string, fields map[string]interface{}) {
-	l.log("warn", message, nil, 0, fields)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) WarnWithFields(ctx context.Context, message string, fields map[string]interface{}) {
+	l.log(ctx, "warn", message, nil, 0, fields)
 }
 
 // Debug logs a debug level message
-func (l *Logger) Debug(message string) {
-	l.log("debug", message, nil, 0, nil)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Debug(ctx context.Context, message string) {
+	l.log(ctx, "debug", message, nil, 0, nil)
 }
 
 // Debugf logs a debug level message with formatting
-func (l *Logger) Debugf(format string, args ...interface{}) {
-	l.Debug(fmt.Sprintf(format, args...))
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Debugf(ctx context.Context, format string, args ...interface{}) {
+	l.Debug(ctx, fmt.Sprintf(format, args...))
 }
 
 // DebugWithFields logs a debug level message with additional fields
-func (l *Logger) DebugWithFields(message string, fields map[string]interface{}) {
-	l.log("debug", message, nil, 0, fields)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) DebugWithFields(ctx context.Context, message string, fields map[string]interface{}) {
+	l.log(ctx, "debug", message, nil, 0, fields)
 }
 
 // WithDuration logs a message with duration information
@@ -225,21 +271,36 @@ func (l *Logger) WithDuration(duration time.Duration) *Logger {
 	return l.withField("duration", duration.String())
 }
 
+// WithContext adds a context to the logger for trace ID extraction
+func (l *Logger) WithContext(ctx context.Context) *Logger {
+	newLogger := &Logger{
+		serviceName: l.serviceName,
+		fields:      make(map[string]interface{}),
+		ctx:         ctx,
+	}
+	// Copy existing fields
+	for k, v := range l.fields {
+		newLogger.fields[k] = v
+	}
+	return newLogger
+}
+
 // LogOperation logs the start/end of an operation with duration
-func (l *Logger) LogOperation(operation string, fn func() error) error {
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) LogOperation(ctx context.Context, operation string, fn func() error) error {
 	start := time.Now()
 	opLogger := l.withField("operation", operation)
-	opLogger.Info(fmt.Sprintf("Operation %s started", strings.ReplaceAll(operation, "_", " ")))
+	opLogger.Info(ctx, fmt.Sprintf("Operation %s started", strings.ReplaceAll(operation, "_", " ")))
 
 	err := fn()
 	duration := time.Since(start)
 
 	if err != nil {
-		opLogger.ErrorWithFields(fmt.Sprintf("Operation %s failed", strings.ReplaceAll(operation, "_", " ")), err, map[string]interface{}{
+		opLogger.ErrorWithFields(ctx, fmt.Sprintf("Operation %s failed", strings.ReplaceAll(operation, "_", " ")), err, map[string]interface{}{
 			"duration": duration.String(),
 		})
 	} else {
-		opLogger.InfoWithFields(fmt.Sprintf("Operation %s completed", strings.ReplaceAll(operation, "_", " ")), map[string]interface{}{
+		opLogger.InfoWithFields(ctx, fmt.Sprintf("Operation %s completed", strings.ReplaceAll(operation, "_", " ")), map[string]interface{}{
 			"duration": duration.String(),
 		})
 	}
@@ -248,13 +309,15 @@ func (l *Logger) LogOperation(operation string, fn func() error) error {
 }
 
 // Fatal logs a fatal error and exits
-func (l *Logger) Fatal(message string, err error) {
-	l.log("fatal", message, err, 0, nil)
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Fatal(ctx context.Context, message string, err error) {
+	l.log(ctx, "fatal", message, err, 0, nil)
 	os.Exit(1)
 }
 
 // Fatalf logs a fatal error with formatting and exits
-func (l *Logger) Fatalf(format string, args ...interface{}) {
+// ctx is optional - if provided, trace context will be extracted from it
+func (l *Logger) Fatalf(ctx context.Context, format string, args ...interface{}) {
 	var err error
 	if len(args) > 0 {
 		if e, ok := args[len(args)-1].(error); ok {
@@ -263,5 +326,5 @@ func (l *Logger) Fatalf(format string, args ...interface{}) {
 		}
 	}
 	message := fmt.Sprintf(format, args...)
-	l.Fatal(message, err)
+	l.Fatal(ctx, message, err)
 }

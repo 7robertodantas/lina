@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // CreateDeviceRequest represents the request body for creating a device
@@ -110,57 +110,57 @@ func (nb *NorthboundInterface) createDevice(c *gin.Context) {
 	}
 
 	// Check if device already exists
-	_, err = nb.repo.GetDevice(device.DeviceID)
+	_, err = nb.repo.GetDevice(c, device.DeviceID)
 	deviceExists := err == nil
 
 	if deviceExists {
 		// Update existing device in database
 		logger.WithDeviceID(device.DeviceID).
-			Info("Device already exists, updating via northbound REST")
-		if err := nb.repo.UpdateDevice(device); err != nil {
+			Info(c, "Device already exists, updating via northbound REST")
+		if err := nb.repo.UpdateDevice(c, device); err != nil {
 			logger.WithDeviceID(device.DeviceID).
-				Error("Failed to update device in database via northbound REST", err)
+				Error(c, "Failed to update device in database via northbound REST", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "failed to update device",
 			})
 			return
 		}
 		logger.WithDeviceID(device.DeviceID).
-			Info("Device updated in database via northbound REST")
+			Info(c, "Device updated in database via northbound REST")
 	} else {
 		// Create new device in database
-		if err := nb.repo.CreateDevice(device); err != nil {
+		if err := nb.repo.CreateDevice(c, device); err != nil {
 			logger.WithDeviceID(device.DeviceID).
-				Error("Failed to create device in database via northbound REST", err)
+				Error(c, "Failed to create device in database via northbound REST", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": "failed to create device",
 			})
 			return
 		}
 		logger.WithDeviceID(device.DeviceID).
-			Info("Device created in database via northbound REST")
+			Info(c, "Device created in database via northbound REST")
 	}
 
 	// Trigger dynsec provisioning (using device_secret as password)
 	logger.WithDeviceID(device.DeviceID).
-		Info("Provisioning device in dynsec via northbound REST")
-	if err := nb.dynSec.ProvisionDevice(device.DeviceID, req.DeviceSecret); err != nil {
+		Info(c, "Provisioning device in dynsec via northbound REST")
+	if err := nb.dynSec.ProvisionDevice(c, device.DeviceID, req.DeviceSecret); err != nil {
 		logger.WithDeviceID(device.DeviceID).
-			Warnf("Failed to provision device in dynsec via northbound REST: %v", err)
+			Warnf(c, "Failed to provision device in dynsec via northbound REST: %v", err)
 		// Continue even if provisioning fails - device is already in database
 	} else {
 		logger.WithDeviceID(device.DeviceID).
-			Info("Device provisioned successfully in dynsec via northbound REST")
+			Info(c, "Device provisioned successfully in dynsec via northbound REST")
 	}
 
 	// Publish device configuration to /devices/{device_id}/config
-	if err := nb.publishDeviceConfig(device); err != nil {
+	if err := nb.publishDeviceConfig(c, device); err != nil {
 		logger.WithDeviceID(device.DeviceID).
-			Warnf("Failed to publish device config on southbound mqtt via northbound REST: %v", err)
+			Warnf(c, "Failed to publish device config on southbound mqtt via northbound REST: %v", err)
 		// Continue even if publishing fails - device is already in database and provisioned
 	} else {
 		logger.WithDeviceID(device.DeviceID).
-			InfoWithFields("Device config published on southbound mqtt via northbound REST", map[string]interface{}{
+			InfoWithFields(c, "Device config published on southbound mqtt via northbound REST", map[string]interface{}{
 				"topic": fmt.Sprintf("/devices/%s/config", device.DeviceID),
 			})
 	}
@@ -175,9 +175,9 @@ func (nb *NorthboundInterface) createDevice(c *gin.Context) {
 
 // listDevices handles GET /devices
 func (nb *NorthboundInterface) listDevices(c *gin.Context) {
-	devices, err := nb.repo.ListDevices()
+	devices, err := nb.repo.ListDevices(c)
 	if err != nil {
-		logger.Error("Failed to list devices via northbound REST", err)
+		logger.Error(c, "Failed to list devices via northbound REST", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": "failed to list devices",
 		})
@@ -190,7 +190,7 @@ func (nb *NorthboundInterface) listDevices(c *gin.Context) {
 // getDevice handles GET /devices/:id
 func (nb *NorthboundInterface) getDevice(c *gin.Context) {
 	deviceID := c.Param("id")
-	device, err := nb.repo.GetDevice(deviceID)
+	device, err := nb.repo.GetDevice(c, deviceID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"error": "device not found",
@@ -202,7 +202,7 @@ func (nb *NorthboundInterface) getDevice(c *gin.Context) {
 }
 
 // Start starts the HTTP server
-func (nb *NorthboundInterface) Start(addr string) error {
+func (nb *NorthboundInterface) Start(ctx context.Context, addr string) error {
 	// OpenTelemetry middleware is already added in NewNorthboundInterface
 	// It will automatically name spans as "{HTTP_METHOD} {route_template}"
 	// e.g., "GET /api/v1/devices", "POST /api/v1/devices", "GET /api/v1/devices/:id"
@@ -211,12 +211,12 @@ func (nb *NorthboundInterface) Start(addr string) error {
 		Handler: nb.router,
 	}
 
-	logger.Infof("Starting northbound REST API server on %s", addr)
+	logger.Infof(ctx, "Starting northbound REST API server on %s", addr)
 	return nb.server.ListenAndServe()
 }
 
 // publishDeviceConfig publishes the device configuration to MQTT
-func (nb *NorthboundInterface) publishDeviceConfig(device *Device) error {
+func (nb *NorthboundInterface) publishDeviceConfig(ctx context.Context, device *Device) error {
 	// Map reporting_strategy string to enum
 	var reportingStrategy mqttpb.ReportingStrategy
 	switch device.ReportingStrategy {
@@ -251,7 +251,7 @@ func (nb *NorthboundInterface) publishDeviceConfig(device *Device) error {
 
 	// Publish to /devices/{device_id}/config (retained message)
 	configTopic := fmt.Sprintf("/devices/%s/config", device.DeviceID)
-	if err := nb.mqttClient.Publish(configTopic, 1, true, configJSON); err != nil {
+	if err := nb.mqttClient.Publish(ctx, configTopic, 1, true, configJSON); err != nil {
 		return fmt.Errorf("failed to publish config: %w", err)
 	}
 
@@ -261,7 +261,7 @@ func (nb *NorthboundInterface) publishDeviceConfig(device *Device) error {
 // Stop gracefully stops the HTTP server
 func (nb *NorthboundInterface) Stop(ctx context.Context) error {
 	if nb.server != nil {
-		logger.Info("Stopping northbound REST API server")
+		logger.Info(ctx, "Stopping northbound REST API server")
 		return nb.server.Shutdown(ctx)
 	}
 	return nil

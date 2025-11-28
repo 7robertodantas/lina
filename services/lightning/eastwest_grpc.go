@@ -39,7 +39,7 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 	}
 
 	logger.WithDeviceID(req.DeviceId).
-		InfoWithFields("CreateInvoice request received via eastwest gRPC", map[string]interface{}{
+		InfoWithFields(ctx, "CreateInvoice request received via eastwest gRPC", map[string]interface{}{
 			"amount_msat": req.AmountMsat,
 			"reason":      req.Reason,
 		})
@@ -48,7 +48,7 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 	invoiceResp, err := s.lndClient.CreateInvoice(ctx, req.AmountMsat, memo, defaultInvoiceExpirySeconds)
 	if err != nil {
 		logger.WithDeviceID(req.DeviceId).
-			Error("CreateInvoice failed via eastwest gRPC", err)
+			Error(ctx, "CreateInvoice failed via eastwest gRPC", err)
 		return nil, status.Errorf(codes.Internal, "failed to create invoice: %v", err)
 	}
 
@@ -56,7 +56,7 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 	expiresAt := time.Now().UTC().Add(time.Duration(defaultInvoiceExpirySeconds) * time.Second).Format(time.RFC3339)
 
 	logger.WithDeviceID(req.DeviceId).
-		DebugWithFields("Invoice response received via eastwest gRPC", map[string]interface{}{
+		DebugWithFields(ctx, "Invoice response received via eastwest gRPC", map[string]interface{}{
 			"invoice_id":      invoiceID,
 			"payment_request": invoiceResp.PaymentRequest,
 			"payment_hash":    fmt.Sprintf("%x", invoiceResp.RHash),
@@ -75,12 +75,12 @@ func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.
 		if err := s.streamPublisher.PublishInvoiceCreated(ctx, invoice); err != nil {
 			logger.WithDeviceID(req.DeviceId).
 				WithStream("event.lightning", "produce").
-				Error("Failed to publish invoice created event via eastwest gRPC", err)
+				Error(ctx, "Failed to publish invoice created event via eastwest gRPC", err)
 		}
 	}
 
 	logger.WithDeviceID(req.DeviceId).
-		InfoWithFields("Invoice created successfully via eastwest gRPC", map[string]interface{}{
+		InfoWithFields(ctx, "Invoice created successfully via eastwest gRPC", map[string]interface{}{
 			"invoice_id":  invoiceID,
 			"amount_msat": req.AmountMsat,
 			"expires_at":  expiresAt,

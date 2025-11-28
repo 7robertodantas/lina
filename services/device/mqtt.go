@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -31,7 +32,7 @@ type MQTTConnectionOptions struct {
 }
 
 // createTLSConfig creates a TLS configuration from config
-func createTLSConfig(cfg Config) (*tls.Config, error) {
+func createTLSConfig(ctx context.Context, cfg Config) (*tls.Config, error) {
 	// Check if we should skip certificate verification (for testing only)
 	skipVerify := cfg.MQTTTLSSkipVerify
 
@@ -49,19 +50,19 @@ func createTLSConfig(cfg Config) (*tls.Config, error) {
 	}
 
 	if serverName != broker {
-		logger.InfoWithFields("Using custom TLS server name on southbound mqtt", map[string]interface{}{
+		logger.InfoWithFields(ctx, "Using custom TLS server name on southbound mqtt", map[string]interface{}{
 			"server_name": serverName,
 			"broker":      broker,
 		})
 	}
 
 	if skipVerify {
-		logger.Warn("TLS certificate verification is disabled on southbound mqtt (for testing only)")
+		logger.Warn(ctx, "TLS certificate verification is disabled on southbound mqtt (for testing only)")
 	}
 
 	// Load CA certificate
 	caCertPath := cfg.MQTTTLSCACert
-	logger.Infof("Loading CA certificate from %s on southbound mqtt", caCertPath)
+	logger.Infof(ctx, "Loading CA certificate from %s on southbound mqtt", caCertPath)
 	caCert, err := os.ReadFile(caCertPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
@@ -72,11 +73,11 @@ func createTLSConfig(cfg Config) (*tls.Config, error) {
 		return nil, fmt.Errorf("failed to parse CA certificate")
 	}
 	tlsConfig.RootCAs = caCertPool
-	logger.Info("CA certificate loaded successfully on southbound mqtt")
+	logger.Info(ctx, "CA certificate loaded successfully on southbound mqtt")
 
 	// Load edge node certificate and key if provided and required
 	if cfg.MQTTTLSRequireEdgeCert && cfg.MQTTTLSEdgeCert != "" && cfg.MQTTTLSEdgeKey != "" {
-		logger.InfoWithFields("Loading edge node certificate on southbound mqtt", map[string]interface{}{
+		logger.InfoWithFields(ctx, "Loading edge node certificate on southbound mqtt", map[string]interface{}{
 			"cert_path": cfg.MQTTTLSEdgeCert,
 			"key_path":  cfg.MQTTTLSEdgeKey,
 		})
@@ -85,16 +86,16 @@ func createTLSConfig(cfg Config) (*tls.Config, error) {
 			return nil, fmt.Errorf("failed to load edge node certificate: %w", err)
 		}
 		tlsConfig.Certificates = []tls.Certificate{cert}
-		logger.Info("Edge node certificate loaded for client authentication on southbound mqtt")
+		logger.Info(ctx, "Edge node certificate loaded for client authentication on southbound mqtt")
 	} else {
-		logger.Info("No edge node certificate required on southbound mqtt - using CA-only server verification")
+		logger.Info(ctx, "No edge node certificate required on southbound mqtt - using CA-only server verification")
 	}
 
 	return tlsConfig, nil
 }
 
 // buildMQTTOptions creates MQTT client options from connection options
-func buildMQTTOptions(opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOptions, error) {
+func buildMQTTOptions(ctx context.Context, opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOptions, error) {
 	brokerURL := fmt.Sprintf("%s://%s:%d", opts.Protocol, opts.Broker, opts.Port)
 
 	mqttOpts := mqtt.NewClientOptions()
@@ -107,10 +108,10 @@ func buildMQTTOptions(opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOpti
 	mqttOpts.SetKeepAlive(opts.KeepAlive)
 	mqttOpts.SetPingTimeout(10 * time.Second)
 	mqttOpts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		logger.Error("MQTT connection lost on southbound mqtt", err)
+		logger.Error(ctx, "MQTT connection lost on southbound mqtt", err)
 	})
 	mqttOpts.SetOnConnectHandler(func(client mqtt.Client) {
-		logger.Info("MQTT OnConnect handler called on southbound mqtt")
+		logger.Info(ctx, "MQTT OnConnect handler called on southbound mqtt")
 	})
 
 	// Set username/password if provided
@@ -123,27 +124,27 @@ func buildMQTTOptions(opts *MQTTConnectionOptions, cfg Config) (*mqtt.ClientOpti
 
 	// Configure TLS if enabled
 	if opts.UseTLS {
-		logger.Info("Configuring TLS for MQTT connection on southbound mqtt")
-		tlsConfig, err := createTLSConfig(cfg)
+		logger.Info(ctx, "Configuring TLS for MQTT connection on southbound mqtt")
+		tlsConfig, err := createTLSConfig(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create TLS config: %w", err)
 		}
 		mqttOpts.SetTLSConfig(tlsConfig)
-		logger.Info("TLS configuration created successfully on southbound mqtt")
+		logger.Info(ctx, "TLS configuration created successfully on southbound mqtt")
 	}
 
 	return mqttOpts, nil
 }
 
 // ConnectMQTT connects to MQTT broker with the given options and returns the client
-func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
-	mqttOpts, err := buildMQTTOptions(opts, cfg)
+func ConnectMQTT(ctx context.Context, opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
+	mqttOpts, err := buildMQTTOptions(ctx, opts, cfg)
 	if err != nil {
 		return nil, err
 	}
 
 	brokerURL := fmt.Sprintf("%s://%s:%d", opts.Protocol, opts.Broker, opts.Port)
-	logger.Infof("Attempting to connect to MQTT broker at %s on southbound mqtt", brokerURL)
+	logger.Infof(ctx, "Attempting to connect to MQTT broker at %s on southbound mqtt", brokerURL)
 
 	client := mqtt.NewClient(mqttOpts)
 	token := client.Connect()
@@ -157,7 +158,7 @@ func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
 	if !connected {
 		if token.Error() != nil {
 			errMsg := token.Error().Error()
-			logger.Errorf("MQTT connection error (timeout) on southbound mqtt: %s", errMsg)
+			logger.Errorf(ctx, "MQTT connection error (timeout) on southbound mqtt: %s", errMsg)
 			return nil, fmt.Errorf("connection timeout after %v: %w", timeout, token.Error())
 		}
 		return nil, fmt.Errorf("connection timeout after %v - broker may not be accepting connections or certificate validation failed", timeout)
@@ -165,16 +166,16 @@ func ConnectMQTT(opts *MQTTConnectionOptions, cfg Config) (mqtt.Client, error) {
 
 	if token.Error() != nil {
 		errMsg := token.Error().Error()
-		logger.Errorf("MQTT connection error details on southbound mqtt: %s", errMsg)
+		logger.Errorf(ctx, "MQTT connection error details on southbound mqtt: %s", errMsg)
 		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", token.Error())
 	}
 
-	logger.Infof("Connected to MQTT broker at %s on southbound mqtt", brokerURL)
+	logger.Infof(ctx, "Connected to MQTT broker at %s on southbound mqtt", brokerURL)
 	return client, nil
 }
 
 // NewMQTTClient creates a new MQTT client with TLS support using config
-func NewMQTTClient(cfg Config) (*MQTTClient, error) {
+func NewMQTTClient(ctx context.Context, cfg Config) (*MQTTClient, error) {
 	broker := cfg.MQTTBroker
 	useTLS := cfg.MQTTUseTLS
 
@@ -204,7 +205,7 @@ func NewMQTTClient(cfg Config) (*MQTTClient, error) {
 		KeepAlive: 60 * time.Second,
 	}
 
-	client, err := ConnectMQTT(opts, cfg)
+	client, err := ConnectMQTT(ctx, opts, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +218,7 @@ func NewMQTTClient(cfg Config) (*MQTTClient, error) {
 }
 
 // Publish publishes a message to the specified topic
-func (m *MQTTClient) Publish(topic string, qos byte, retained bool, payload []byte) error {
+func (m *MQTTClient) Publish(ctx context.Context, topic string, qos byte, retained bool, payload []byte) error {
 	// Check if client is connected before attempting to publish
 	if !m.client.IsConnected() {
 		return fmt.Errorf("MQTT client is not connected")
@@ -240,19 +241,19 @@ func (m *MQTTClient) Publish(topic string, qos byte, retained bool, payload []by
 		return fmt.Errorf("client disconnected after publish - broker may have denied the publish")
 	}
 
-	logger.InfoWithFields("Published message on southbound mqtt", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Published message on southbound mqtt", map[string]interface{}{
 		"topic": topic,
 	})
 	return nil
 }
 
 // Subscribe subscribes to a topic with a message handler
-func (m *MQTTClient) Subscribe(topic string, qos byte, handler mqtt.MessageHandler) error {
+func (m *MQTTClient) Subscribe(ctx context.Context, topic string, qos byte, handler mqtt.MessageHandler) error {
 	token := m.client.Subscribe(topic, qos, handler)
 	if token.Wait() && token.Error() != nil {
 		return fmt.Errorf("failed to subscribe to topic: %w", token.Error())
 	}
-	logger.InfoWithFields("Subscribed to topic on southbound mqtt", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Subscribed to topic on southbound mqtt", map[string]interface{}{
 		"topic": topic,
 		"qos":   qos,
 	})
@@ -262,7 +263,7 @@ func (m *MQTTClient) Subscribe(topic string, qos byte, handler mqtt.MessageHandl
 // Disconnect disconnects from the MQTT broker
 func (m *MQTTClient) Disconnect() {
 	m.client.Disconnect(250)
-	logger.Info("Disconnected from MQTT broker on southbound mqtt")
+	logger.Info(context.Background(), "Disconnected from MQTT broker on southbound mqtt")
 }
 
 // GetClient returns the underlying MQTT client

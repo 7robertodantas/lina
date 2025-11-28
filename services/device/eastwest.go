@@ -29,12 +29,12 @@ type LightningClient struct {
 }
 
 // NewLedgerClient creates a new gRPC client connection to the ledger service
-func NewLedgerClient(cfg Config) (*LedgerClient, error) {
+func NewLedgerClient(ctx context.Context, cfg Config) (*LedgerClient, error) {
 	host := cfg.LedgerGRPCHost
 	port := cfg.LedgerGRPCPort
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	logger.Infof("Connecting to ledger gRPC service at %s via eastwest gRPC", addr)
+	logger.Infof(ctx, "Connecting to ledger gRPC service at %s via eastwest gRPC", addr)
 
 	// Configure keepalive for long-lived connections
 	// Time: 30s is a reasonable interval to avoid "too_many_pings" errors
@@ -58,7 +58,7 @@ func NewLedgerClient(cfg Config) (*LedgerClient, error) {
 
 	client := ledgerpb.NewLedgerServiceClient(conn)
 
-	logger.Infof("Connected to ledger gRPC service at %s via eastwest gRPC", addr)
+	logger.Infof(ctx, "Connected to ledger gRPC service at %s via eastwest gRPC", addr)
 
 	return &LedgerClient{
 		client: client,
@@ -100,12 +100,12 @@ func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID st
 }
 
 // NewLightningClient creates a new gRPC client connection to the lightning service
-func NewLightningClient(cfg Config) (*LightningClient, error) {
+func NewLightningClient(ctx context.Context, cfg Config) (*LightningClient, error) {
 	host := cfg.LightningGRPCHost
 	port := cfg.LightningGRPCPort
 
 	addr := fmt.Sprintf("%s:%d", host, port)
-	logger.Infof("Connecting to lightning gRPC service at %s via eastwest gRPC", addr)
+	logger.Infof(ctx, "Connecting to lightning gRPC service at %s via eastwest gRPC", addr)
 
 	keepaliveParams := keepalive.ClientParameters{
 		Time:                30 * time.Second,
@@ -126,7 +126,7 @@ func NewLightningClient(cfg Config) (*LightningClient, error) {
 
 	client := lightningpb.NewLightningServiceClient(conn)
 
-	logger.Infof("Connected to lightning gRPC service at %s via eastwest gRPC", addr)
+	logger.Infof(ctx, "Connected to lightning gRPC service at %s via eastwest gRPC", addr)
 
 	return &LightningClient{
 		client: client,

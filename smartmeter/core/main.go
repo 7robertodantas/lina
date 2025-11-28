@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 
@@ -10,6 +11,8 @@ import (
 var logger = internal.NewLogger("smart-meter-core")
 
 func main() {
+	ctx := context.Background()
+
 	cfg := LoadConfig()
 
 	// Create device instance
@@ -31,11 +34,11 @@ func main() {
 	fs := http.FileServer(http.Dir("./public"))
 	http.Handle("/", fs)
 
-	logger.InfoWithFields("Smart Meter Backend starting", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Smart Meter Backend starting", map[string]interface{}{
 		"port": cfg.HTTPPort,
 	})
-	logger.Info("Serving UI from /public directory")
+	logger.Info(ctx, "Serving UI from /public directory")
 	if err := http.ListenAndServe(":"+cfg.HTTPPort, nil); err != nil {
-		logger.Fatal("Server failed", err)
+		logger.Fatal(ctx, "Server failed", err)
 	}
 }

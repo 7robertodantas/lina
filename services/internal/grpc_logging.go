@@ -33,22 +33,22 @@ func SimplifyMethodName(method string) string {
 // The service name should be passed via context using WithServiceName or extracted from the method.
 func LoggingUnaryClientInterceptor(serviceName string) func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 	logger := NewLogger(serviceName)
-	
+
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		start := time.Now()
 		simpleMethod := SimplifyMethodName(method)
 
 		// Extract device_id from request if possible
 		deviceID := extractDeviceIDFromRequest(req)
-		
+
 		opLogger := logger
-		
+
 		if deviceID != "" {
 			opLogger = opLogger.WithDeviceID(deviceID)
 		}
 
-		opLogger.InfoWithFields(fmt.Sprintf("gRPC call started: %s via eastwest gRPC", simpleMethod), map[string]interface{}{
-			"method": simpleMethod,
+		opLogger.InfoWithFields(ctx, fmt.Sprintf("gRPC call started: %s via eastwest gRPC", simpleMethod), map[string]interface{}{
+			"method":  simpleMethod,
 			"request": req,
 		})
 
@@ -57,18 +57,18 @@ func LoggingUnaryClientInterceptor(serviceName string) func(ctx context.Context,
 
 		if err != nil {
 			if st, ok := status.FromError(err); ok {
-				opLogger.ErrorWithFields(fmt.Sprintf("gRPC call failed: %s via eastwest gRPC", simpleMethod), err, map[string]interface{}{
+				opLogger.ErrorWithFields(ctx, fmt.Sprintf("gRPC call failed: %s via eastwest gRPC", simpleMethod), err, map[string]interface{}{
 					"grpc_code":    st.Code().String(),
 					"grpc_message": st.Message(),
 					"duration":     duration.String(),
 				})
 			} else {
-				opLogger.ErrorWithFields(fmt.Sprintf("gRPC call failed: %s via eastwest gRPC", simpleMethod), err, map[string]interface{}{
+				opLogger.ErrorWithFields(ctx, fmt.Sprintf("gRPC call failed: %s via eastwest gRPC", simpleMethod), err, map[string]interface{}{
 					"duration": duration.String(),
 				})
 			}
 		} else {
-			opLogger.InfoWithFields(fmt.Sprintf("gRPC call succeeded: %s via eastwest gRPC", simpleMethod), map[string]interface{}{
+			opLogger.InfoWithFields(ctx, fmt.Sprintf("gRPC call succeeded: %s via eastwest gRPC", simpleMethod), map[string]interface{}{
 				"response": reply,
 				"duration": duration.String(),
 			})
@@ -90,7 +90,7 @@ func extractDeviceIDFromRequest(req interface{}) string {
 			return deviceID
 		}
 	}
-	
+
 	// Try common struct field names via fmt.Sprintf
 	reqStr := fmt.Sprintf("%+v", req)
 	if strings.Contains(reqStr, "device_id") || strings.Contains(reqStr, "DeviceId") {
@@ -102,6 +102,6 @@ func extractDeviceIDFromRequest(req interface{}) string {
 			}
 		}
 	}
-	
+
 	return ""
 }

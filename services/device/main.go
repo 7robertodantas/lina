@@ -86,7 +86,7 @@ func ExampleEmitUsageRecord() {
 		devicepb.UsageReportingStrategy_USAGE_STRATEGY_DELTA,
 	)
 	if err != nil {
-		logger.Errorf("Error emitting usage record: %v", err)
+		logger.Errorf(nil, "Error emitting usage record: %v", err)
 		return
 	}
 
@@ -100,7 +100,9 @@ func ExampleEmitUsageRecord() {
 }
 
 func main() {
-	logger.Info("Starting device service")
+	ctx := context.Background()
+
+	logger.Info(ctx, "Starting device service")
 
 	cfg := LoadConfig()
 
@@ -110,36 +112,36 @@ func main() {
 		ExporterOTLPEndpoint: cfg.OTELExporterOTLPEndpoint,
 	})
 	if err != nil {
-		logger.Warnf("Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
+		logger.Warnf(ctx, "Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
 	} else {
-		logger.Infof("OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
+		logger.Infof(ctx, "OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
 		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := tracerShutdown(ctx); err != nil {
-				logger.Errorf("Error shutting down tracer: %v", err)
+			if err := tracerShutdown(shutdownCtx); err != nil {
+				logger.Errorf(shutdownCtx, "Error shutting down tracer: %v", err)
 			}
 		}()
 	}
 
-	serviceCtx, serviceCancel := context.WithCancel(context.Background())
+	serviceCtx, serviceCancel := context.WithCancel(ctx)
 	defer serviceCancel()
 
 	// Initialize device repository
-	repo, err := NewDeviceRepository(cfg.DBPath)
+	repo, err := NewDeviceRepository(ctx, cfg.DBPath)
 	if err != nil {
-		logger.Fatal("Failed to initialize device repository", err)
+		logger.Fatal(ctx, "Failed to initialize device repository", err)
 	}
 	defer repo.Close()
-	logger.Info("Device repository initialized")
+	logger.Info(ctx, "Device repository initialized")
 
 	// Initialize dynamic security service
-	logger.Info("Initializing dynamic security service")
-	dynSecService, err := NewDynSecService(cfg)
+	logger.Info(ctx, "Initializing dynamic security service")
+	dynSecService, err := NewDynSecService(ctx, cfg)
 	if err != nil {
-		logger.Fatal("Failed to initialize dynamic security service", err)
+		logger.Fatal(ctx, "Failed to initialize dynamic security service", err)
 	}
-	defer dynSecService.Disconnect()
+	defer dynSecService.Disconnect(ctx)
 
 	// Provision device service user with ACLs to subscribe to device topics
 	deviceServiceUsername := cfg.MQTTUsername
@@ -149,92 +151,92 @@ func main() {
 	deviceServicePassword := cfg.MQTTPassword
 	if deviceServicePassword == "" {
 		deviceServicePassword = "device-service-password" // Default password if not set
-		logger.Warn("MQTT_PASSWORD not set, using default password")
+		logger.Warn(ctx, "MQTT_PASSWORD not set, using default password")
 	}
 
-	logger.Infof("Provisioning device service user: %s", deviceServiceUsername)
-	if err := dynSecService.ProvisionDeviceService(deviceServiceUsername, deviceServicePassword); err != nil {
-		logger.Warnf("Failed to provision device service user: %v", err)
+	logger.Infof(ctx, "Provisioning device service user: %s", deviceServiceUsername)
+	if err := dynSecService.ProvisionDeviceService(ctx, deviceServiceUsername, deviceServicePassword); err != nil {
+		logger.Warnf(ctx, "Failed to provision device service user: %v", err)
 		// Continue even if provisioning fails (user might already be provisioned)
 	} else {
-		logger.Info("Device service user provisioned successfully")
+		logger.Info(ctx, "Device service user provisioned successfully")
 	}
 
 	// Connect to MQTT broker
-	logger.Info("Connecting to MQTT broker")
-	mqttClient, err := NewMQTTClient(cfg)
+	logger.Info(ctx, "Connecting to MQTT broker")
+	mqttClient, err := NewMQTTClient(ctx, cfg)
 	if err != nil {
-		logger.Fatal("Failed to create MQTT client", err)
+		logger.Fatal(ctx, "Failed to create MQTT client", err)
 	}
 	defer mqttClient.Disconnect()
-	logger.Info("MQTT client connected successfully")
+	logger.Info(ctx, "MQTT client connected successfully")
 
 	// Connect to Redis
-	logger.Info("Connecting to Redis")
-	streamClient, err := NewStreamClient()
+	logger.Info(ctx, "Connecting to Redis")
+	streamClient, err := NewStreamClient(ctx)
 	if err != nil {
-		logger.Fatal("Failed to create Redis stream client", err)
+		logger.Fatal(ctx, "Failed to create Redis stream client", err)
 	}
 	defer streamClient.Close()
-	logger.Info("Redis stream client connected successfully")
+	logger.Info(ctx, "Redis stream client connected successfully")
 
 	// Connect to ledger service via gRPC
-	logger.Info("Connecting to ledger service")
-	ledgerClient, err := NewLedgerClient(cfg)
+	logger.Info(ctx, "Connecting to ledger service")
+	ledgerClient, err := NewLedgerClient(ctx, cfg)
 	if err != nil {
-		logger.Fatal("Failed to create ledger gRPC client", err)
+		logger.Fatal(ctx, "Failed to create ledger gRPC client", err)
 	}
 	defer ledgerClient.Close()
-	logger.Info("Ledger gRPC client connected successfully")
+	logger.Info(ctx, "Ledger gRPC client connected successfully")
 
 	// Connect to lightning service via gRPC
-	logger.Info("Connecting to lightning service")
-	lightningClient, err := NewLightningClient(cfg)
+	logger.Info(ctx, "Connecting to lightning service")
+	lightningClient, err := NewLightningClient(ctx, cfg)
 	if err != nil {
-		logger.Fatal("Failed to create lightning gRPC client", err)
+		logger.Fatal(ctx, "Failed to create lightning gRPC client", err)
 	}
 	defer lightningClient.Close()
-	logger.Info("Lightning gRPC client connected successfully")
+	logger.Info(ctx, "Lightning gRPC client connected successfully")
 
 	// Initialize and start northbound REST API
-	logger.Info("Initializing northbound REST API")
+	logger.Info(ctx, "Initializing northbound REST API")
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
 
 	// Start northbound server in a goroutine
 	go func() {
-		if err := northbound.Start(cfg.APIAddr); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("Failed to start northbound API server: %v", err)
+		if err := northbound.Start(ctx, cfg.APIAddr); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf(ctx, "Failed to start northbound API server: %v", err)
 		}
 	}()
 
 	// Initialize and start southbound interface
-	logger.Info("Initializing southbound interface")
+	logger.Info(ctx, "Initializing southbound interface")
 	invoiceTimeout := time.Duration(cfg.LightningRPCTimeoutSeconds) * time.Second
 	southbound := NewSouthboundInterface(mqttClient, streamClient, ledgerClient, lightningClient, repo, invoiceTimeout)
-	if err := southbound.Start(); err != nil {
-		logger.Fatal("Failed to start southbound interface", err)
+	if err := southbound.Start(ctx); err != nil {
+		logger.Fatal(ctx, "Failed to start southbound interface", err)
 	}
 
 	// Start ledger balance subscriber to fan-out balance updates via MQTT
 	streamClient.StartLedgerBalanceSubscriber(serviceCtx, mqttClient)
 
-	logger.Info("Device service is running. Press Ctrl+C to stop")
-	logger.Infof("Northbound REST API available at http://localhost%s", cfg.APIAddr)
+	logger.Info(ctx, "Device service is running. Press Ctrl+C to stop")
+	logger.Infof(ctx, "Northbound REST API available at http://localhost%s", cfg.APIAddr)
 
 	// Wait for interrupt signal to gracefully shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	logger.Info("Shutting down device service")
+	logger.Info(ctx, "Shutting down device service")
 	serviceCancel()
 
 	// Gracefully shutdown northbound server
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := northbound.Stop(ctx); err != nil {
-		logger.Errorf("Error shutting down northbound server: %v", err)
+	if err := northbound.Stop(shutdownCtx); err != nil {
+		logger.Errorf(shutdownCtx, "Error shutting down northbound server: %v", err)
 	}
 
-	logger.Info("Device service stopped")
+	logger.Info(ctx, "Device service stopped")
 }

@@ -48,7 +48,7 @@ func (es *LNDEventStream) Unsubscribe(ch <-chan *lightningmodel.LightningEvent) 
 }
 
 // Publish sends an event to all subscribers.
-func (es *LNDEventStream) Publish(event *lightningmodel.LightningEvent) {
+func (es *LNDEventStream) Publish(ctx context.Context, event *lightningmodel.LightningEvent) {
 	es.mu.RLock()
 	defer es.mu.RUnlock()
 
@@ -56,7 +56,7 @@ func (es *LNDEventStream) Publish(event *lightningmodel.LightningEvent) {
 		select {
 		case ch <- event:
 		default:
-			logger.Warn("Subscriber channel full, dropping lightning event via cloud LND node")
+			logger.Warn(ctx, "Subscriber channel full, dropping lightning event via cloud LND node")
 		}
 	}
 }
@@ -68,28 +68,28 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to subscribe to invoices: %w", err)
 	}
 
-	logger.Info("LND event stream started, listening for invoice updates via cloud LND node")
+	logger.Info(ctx, "LND event stream started, listening for invoice updates via cloud LND node")
 
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				logger.Info("LND event stream stopped via cloud LND node")
+				logger.Info(ctx, "LND event stream stopped via cloud LND node")
 				return
 			default:
 				invoice, err := stream.Recv()
 				if err != nil {
-					logger.Error("Error receiving invoice update via cloud LND node", err)
+					logger.Error(ctx, "Error receiving invoice update via cloud LND node", err)
 					time.Sleep(5 * time.Second)
 					stream, err = es.lndClient.SubscribeInvoices(ctx, 0, 0)
 					if err != nil {
-						logger.Error("Failed to reconnect invoice stream via cloud LND node", err)
+						logger.Error(ctx, "Failed to reconnect invoice stream via cloud LND node", err)
 					}
 					continue
 				}
 
-				if event := es.buildEventFromInvoice(invoice); event != nil {
-					es.Publish(event)
+				if event := es.buildEventFromInvoice(ctx, invoice); event != nil {
+					es.Publish(ctx, event)
 				}
 			}
 		}
@@ -98,7 +98,7 @@ func (es *LNDEventStream) Start(ctx context.Context) error {
 	return nil
 }
 
-func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightningmodel.LightningEvent {
+func (es *LNDEventStream) buildEventFromInvoice(ctx context.Context, invoice *lnrpc.Invoice) *lightningmodel.LightningEvent {
 	deviceMeta := decodeInvoiceMetadata(invoice.Memo)
 	invoiceID := fmt.Sprintf("%x", invoice.RHash)
 	amountMsat := invoice.ValueMsat
@@ -109,7 +109,7 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 	expiresAt := time.Unix(invoice.CreationDate+invoice.Expiry, 0).UTC().Format(time.RFC3339)
 	stateName := invoice.State.String()
 	logger.WithDeviceID(deviceMeta.DeviceID).
-		InfoWithFields("Processing invoice update via cloud LND node", map[string]interface{}{
+		InfoWithFields(ctx, "Processing invoice update via cloud LND node", map[string]interface{}{
 			"invoice_id":  invoiceID,
 			"state":       stateName,
 			"amount_msat": amountMsat,
@@ -136,7 +136,7 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 	case lnrpc.Invoice_SETTLED:
 		timestamp := time.Unix(invoice.SettleDate, 0).UTC().Format(time.RFC3339)
 		logger.WithDeviceID(deviceMeta.DeviceID).
-			InfoWithFields("Invoice settled via cloud LND node", map[string]interface{}{
+			InfoWithFields(ctx, "Invoice settled via cloud LND node", map[string]interface{}{
 				"invoice_id":           invoiceID,
 				"amount_received_msat": invoice.AmtPaidSat * 1000,
 			})
@@ -155,7 +155,7 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 	case lnrpc.Invoice_CANCELED:
 		timestamp := time.Unix(invoice.CreationDate+invoice.Expiry, 0).UTC().Format(time.RFC3339)
 		logger.WithDeviceID(deviceMeta.DeviceID).
-			InfoWithFields("Invoice expired/canceled via cloud LND node", map[string]interface{}{
+			InfoWithFields(ctx, "Invoice expired/canceled via cloud LND node", map[string]interface{}{
 				"invoice_id": invoiceID,
 			})
 		return &lightningmodel.LightningEvent{
@@ -169,7 +169,7 @@ func (es *LNDEventStream) buildEventFromInvoice(invoice *lnrpc.Invoice) *lightni
 			},
 		}
 	default:
-		logger.DebugWithFields("Ignoring invoice update with unsupported state via cloud LND node", map[string]interface{}{
+		logger.DebugWithFields(ctx, "Ignoring invoice update with unsupported state via cloud LND node", map[string]interface{}{
 			"invoice_id": invoiceID,
 			"state":      stateName,
 		})

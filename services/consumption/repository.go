@@ -157,7 +157,7 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 	for rows.Next() {
 		var e OutboxEvent
 		if err := rows.Scan(&e.ReportID, &e.DeviceID, &e.DebitMsat, &e.Timestamp); err != nil {
-			logger.Error("Error scanning outbox row", err)
+			logger.Error(ctx, "Error scanning outbox row", err)
 			continue
 		}
 		events = append(events, e)

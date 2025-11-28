@@ -81,7 +81,9 @@ func djb2(b []byte) uint64 {
 */
 
 func main() {
-	logger.Info("Starting ledger service")
+	ctx := context.Background()
+
+	logger.Info(ctx, "Starting ledger service")
 
 	cfg := LoadConfig()
 
@@ -91,14 +93,14 @@ func main() {
 		ExporterOTLPEndpoint: cfg.OTELExporterOTLPEndpoint,
 	})
 	if err != nil {
-		logger.Warnf("Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
+		logger.Warnf(ctx, "Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
 	} else {
-		logger.Infof("OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
+		logger.Infof(ctx, "OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
 		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := tracerShutdown(ctx); err != nil {
-				logger.Errorf("Error shutting down tracer: %v", err)
+			if err := tracerShutdown(shutdownCtx); err != nil {
+				logger.Errorf(shutdownCtx, "Error shutting down tracer: %v", err)
 			}
 		}()
 	}
@@ -106,46 +108,46 @@ func main() {
 	// Initialize repository (creates DB connection and tables)
 	repo, err := NewLedgerRepository(cfg.DBPath, cfg.BusyTimeoutMS)
 	if err != nil {
-		logger.Fatal("Failed to initialize ledger repository", err)
+		logger.Fatal(ctx, "Failed to initialize ledger repository", err)
 	}
 	defer repo.Close()
 
 	// Connect to Redis stream
-	logger.Info("Connecting to Redis")
-	streamClient, err := internal.NewStreamClientFromEnv()
+	logger.Info(ctx, "Connecting to Redis")
+	streamClient, err := internal.NewStreamClientFromEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to create Redis stream client", err)
+		logger.Fatal(ctx, "Failed to create Redis stream client", err)
 	}
 	defer streamClient.Close()
-	logger.Info("Redis stream client connected successfully")
+	logger.Info(ctx, "Redis stream client connected successfully")
 
 	// Create stream handler
 	streamHandler := NewStreamHandler(streamClient, repo)
 
 	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	serviceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Start consumption consumer in a goroutine
 	go func() {
-		if err := streamHandler.StartConsumptionConsumer(ctx); err != nil && err != context.Canceled {
+		if err := streamHandler.StartConsumptionConsumer(serviceCtx); err != nil && err != context.Canceled {
 			logger.WithStream("event.consumption", "consume").
-				Error("Consumption consumer error", err)
+				Error(serviceCtx, "Consumption consumer error", err)
 		}
 	}()
 
 	// Start lightning consumer in a goroutine
 	go func() {
-		if err := streamHandler.StartLightningConsumer(ctx); err != nil && err != context.Canceled {
+		if err := streamHandler.StartLightningConsumer(serviceCtx); err != nil && err != context.Canceled {
 			logger.WithStream("event.lightning", "consume").
-				Error("Lightning consumer error", err)
+				Error(serviceCtx, "Lightning consumer error", err)
 		}
 	}()
 
 	// Start expiration checker in a goroutine
 	go func() {
-		if err := streamHandler.StartExpirationChecker(ctx); err != nil && err != context.Canceled {
-			logger.Error("Expiration checker error", err)
+		if err := streamHandler.StartExpirationChecker(serviceCtx); err != nil && err != context.Canceled {
+			logger.Error(serviceCtx, "Expiration checker error", err)
 		}
 	}()
 
@@ -153,7 +155,7 @@ func main() {
 	go func() {
 		lis, err := net.Listen("tcp", cfg.GRPCAddr)
 		if err != nil {
-			logger.Fatalf("Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
+			logger.Fatalf(ctx, "Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
 		}
 
 		grpcServer := grpc.NewServer(
@@ -162,24 +164,24 @@ func main() {
 		eastWestServer := NewEastWestServer(repo, streamHandler)
 		ledgerpb.RegisterLedgerServiceServer(grpcServer, eastWestServer)
 
-		logger.Infof("gRPC server listening on %s via eastwest gRPC", cfg.GRPCAddr)
+		logger.Infof(ctx, "gRPC server listening on %s via eastwest gRPC", cfg.GRPCAddr)
 		if err := grpcServer.Serve(lis); err != nil {
-			logger.Fatalf("Failed to serve gRPC via eastwest: %v", err)
+			logger.Fatalf(ctx, "Failed to serve gRPC via eastwest: %v", err)
 		}
 	}()
 
 	// Initialize and start northbound REST API
-	logger.Info("Initializing northbound REST API")
+	logger.Info(ctx, "Initializing northbound REST API")
 	northbound := NewNorthboundInterface(repo, cfg, streamHandler)
 
 	// Start northbound server in a goroutine
 	go func() {
-		if err := northbound.Start(cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("Failed to start northbound API server: %v", err)
+		if err := northbound.Start(ctx, cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf(ctx, "Failed to start northbound API server: %v", err)
 		}
 	}()
 
-	logger.InfoWithFields("Ledger Service HTTP listening via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Ledger Service HTTP listening via northbound REST", map[string]interface{}{
 		"listen_addr": cfg.ListenAddr,
 		"db_path":     cfg.DBPath,
 	})
@@ -189,15 +191,15 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	logger.Info("Shutting down ledger service")
+	logger.Info(ctx, "Shutting down ledger service")
 	cancel() // Cancel context to stop consumers
 
 	// Gracefully shutdown northbound server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := northbound.Stop(shutdownCtx); err != nil {
-		logger.Errorf("Error shutting down northbound server: %v", err)
+		logger.Errorf(shutdownCtx, "Error shutting down northbound server: %v", err)
 	}
 
-	logger.Info("Ledger service stopped")
+	logger.Info(ctx, "Ledger service stopped")
 }

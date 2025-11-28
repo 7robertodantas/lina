@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -10,15 +11,15 @@ import (
 
 // Device represents a registered IoT device
 type Device struct {
-	DeviceID            string    `json:"device_id"`
-	Unit                string    `json:"unit"`                 // e.g., "kWh"
-	UnitPrice           string    `json:"unit_price"`           // price as string
-	PricingUnit         string    `json:"pricing_unit"`         // e.g., "msat"
-	ReportingStrategy   string    `json:"reporting_strategy"`    // "interval" | "delta" | "total"
-	ReportingInterval   int       `json:"reporting_interval"`    // seconds between reports
-	HeartbeatInterval   int       `json:"heartbeat_interval"`    // expected heartbeat frequency (s)
-	AuthorizeRequestMsat int      `json:"authorize_request_msat"` // expected amount in each authorization request
-	Timestamp           time.Time `json:"timestamp"`            // when device was created
+	DeviceID             string    `json:"device_id"`
+	Unit                 string    `json:"unit"`                   // e.g., "kWh"
+	UnitPrice            string    `json:"unit_price"`             // price as string
+	PricingUnit          string    `json:"pricing_unit"`           // e.g., "msat"
+	ReportingStrategy    string    `json:"reporting_strategy"`     // "interval" | "delta" | "total"
+	ReportingInterval    int       `json:"reporting_interval"`     // seconds between reports
+	HeartbeatInterval    int       `json:"heartbeat_interval"`     // expected heartbeat frequency (s)
+	AuthorizeRequestMsat int       `json:"authorize_request_msat"` // expected amount in each authorization request
+	Timestamp            time.Time `json:"timestamp"`              // when device was created
 }
 
 // DeviceRepository manages database operations for devices
@@ -27,7 +28,7 @@ type DeviceRepository struct {
 }
 
 // NewDeviceRepository creates and initializes the SQLite database
-func NewDeviceRepository(dbPath string) (*DeviceRepository, error) {
+func NewDeviceRepository(ctx context.Context, dbPath string) (*DeviceRepository, error) {
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to SQLite: %w", err)
@@ -55,7 +56,7 @@ func NewDeviceRepository(dbPath string) (*DeviceRepository, error) {
 }
 
 // CreateDevice inserts a new device into the database
-func (r *DeviceRepository) CreateDevice(device *Device) error {
+func (r *DeviceRepository) CreateDevice(ctx context.Context, device *Device) error {
 	query := `
 	INSERT INTO devices (
 		device_id, unit, unit_price, pricing_unit, reporting_strategy,
@@ -79,12 +80,12 @@ func (r *DeviceRepository) CreateDevice(device *Device) error {
 	}
 
 	logger.WithDeviceID(device.DeviceID).
-		Info("Device created in database")
+		Info(ctx, "Device created in database")
 	return nil
 }
 
 // GetDevice retrieves a device by ID
-func (r *DeviceRepository) GetDevice(deviceID string) (*Device, error) {
+func (r *DeviceRepository) GetDevice(ctx context.Context, deviceID string) (*Device, error) {
 	query := `
 	SELECT device_id, unit, unit_price, pricing_unit, reporting_strategy,
 	       reporting_interval, heartbeat_interval, authorize_request_msat, timestamp
@@ -121,7 +122,7 @@ func (r *DeviceRepository) GetDevice(deviceID string) (*Device, error) {
 }
 
 // UpdateDevice updates an existing device in the database
-func (r *DeviceRepository) UpdateDevice(device *Device) error {
+func (r *DeviceRepository) UpdateDevice(ctx context.Context, device *Device) error {
 	query := `
 	UPDATE devices SET
 		unit = ?,
@@ -160,12 +161,12 @@ func (r *DeviceRepository) UpdateDevice(device *Device) error {
 	}
 
 	logger.WithDeviceID(device.DeviceID).
-		Info("Device updated in database")
+		Info(ctx, "Device updated in database")
 	return nil
 }
 
 // ListDevices retrieves all devices
-func (r *DeviceRepository) ListDevices() ([]*Device, error) {
+func (r *DeviceRepository) ListDevices(ctx context.Context) ([]*Device, error) {
 	query := `
 	SELECT device_id, unit, unit_price, pricing_unit, reporting_strategy,
 	       reporting_interval, heartbeat_interval, authorize_request_msat, timestamp
@@ -217,4 +218,3 @@ func (r *DeviceRepository) ListDevices() ([]*Device, error) {
 func (r *DeviceRepository) Close() error {
 	return r.db.Close()
 }
-

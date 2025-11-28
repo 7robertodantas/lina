@@ -272,10 +272,10 @@ func (nb *NorthboundInterface) postDeviceCredit(c *gin.Context) {
 	// Emit DeviceCreditedEvent to event.ledger
 	if nb.streamHandler != nil {
 		timestamp := time.Unix(out.CreatedAt, 0).UTC().Format(time.RFC3339)
-		if err := nb.streamHandler.PublishDeviceCredited(c.Request.Context(), out.DeviceID, out.AmountMsat, out.BalanceAfter, timestamp); err != nil {
+		if err := nb.streamHandler.PublishDeviceCredited(c, out.DeviceID, out.AmountMsat, out.BalanceAfter, timestamp); err != nil {
 			logger.WithDeviceID(out.DeviceID).
 				WithStream("event.ledger", "produce").
-				Error("Failed to publish DeviceCreditedEvent via northbound REST", err)
+				Error(c, "Failed to publish DeviceCreditedEvent via northbound REST", err)
 		}
 	}
 
@@ -293,7 +293,7 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 	var in DeviceDebitRequest
 	if err := c.ShouldBindJSON(&in); err != nil {
 		logger.WithDeviceID(deviceID).
-			Error("postDeviceDebit bind error via northbound REST", err)
+			Error(c, "postDeviceDebit bind error via northbound REST", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
 		return
 	}
@@ -345,7 +345,7 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 	if nb.streamHandler != nil {
 		timestamp := time.Unix(out.CreatedAt, 0).UTC().Format(time.RFC3339)
 		if err := nb.streamHandler.PublishDeviceDebited(
-			c.Request.Context(),
+			c,
 			out.DeviceID,
 			debitReq.CorrelationID,
 			out.AmountMsat,
@@ -354,7 +354,7 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 		); err != nil {
 			logger.WithDeviceID(out.DeviceID).
 				WithStream("event.ledger", "produce").
-				Error("Failed to publish DeviceDebitedEvent via northbound REST", err)
+				Error(c, "Failed to publish DeviceDebitedEvent via northbound REST", err)
 		}
 	}
 
@@ -362,20 +362,20 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 }
 
 // Start starts the HTTP server
-func (nb *NorthboundInterface) Start(addr string) error {
+func (nb *NorthboundInterface) Start(ctx context.Context, addr string) error {
 	nb.server = &http.Server{
 		Addr:    addr,
 		Handler: nb.router,
 	}
 
-	logger.Infof("Starting northbound REST API server on %s", addr)
+	logger.Infof(nil, "Starting northbound REST API server on %s", addr)
 	return nb.server.ListenAndServe()
 }
 
 // Stop gracefully stops the HTTP server
 func (nb *NorthboundInterface) Stop(ctx context.Context) error {
 	if nb.server != nil {
-		logger.Info("Stopping northbound REST API server")
+		logger.Info(ctx, "Stopping northbound REST API server")
 		return nb.server.Shutdown(ctx)
 	}
 	return nil

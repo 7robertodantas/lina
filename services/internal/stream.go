@@ -30,7 +30,7 @@ type StreamConfig struct {
 }
 
 // NewStreamClient creates a new Redis stream client with the provided configuration
-func NewStreamClient(config StreamConfig) (*StreamClient, error) {
+func NewStreamClient(ctx context.Context, config StreamConfig) (*StreamClient, error) {
 	addr := fmt.Sprintf("%s:%s", config.Host, config.Port)
 	// Note: This is in the internal package, so we can't use the logger here
 	// as it would create a circular dependency. We'll use a simple log for now.
@@ -45,7 +45,6 @@ func NewStreamClient(config StreamConfig) (*StreamClient, error) {
 	}
 
 	client := redis.NewClient(opts)
-	ctx := context.Background()
 
 	// Add OpenTelemetry metrics instrumentation
 	// Note: Tracing is handled by our custom span wrappers (XReadGroupWithSpan, XAddWithSpan, etc.)
@@ -66,7 +65,7 @@ func NewStreamClient(config StreamConfig) (*StreamClient, error) {
 }
 
 // NewStreamClientFromEnv creates a new Redis stream client reading configuration from environment variables
-func NewStreamClientFromEnv() (*StreamClient, error) {
+func NewStreamClientFromEnv(ctx context.Context) (*StreamClient, error) {
 	host := getEnv("REDIS_HOST", "redis")
 	port := getEnv("REDIS_PORT", "6379")
 	password := getEnv("REDIS_PASSWORD", "")
@@ -84,7 +83,7 @@ func NewStreamClientFromEnv() (*StreamClient, error) {
 		DB:       db,
 	}
 
-	return NewStreamClient(config)
+	return NewStreamClient(ctx, config)
 }
 
 // Client returns the underlying Redis client (useful for advanced operations)
@@ -288,6 +287,12 @@ func (sc *StreamClient) XGroupCreateMkStreamWithSpan(ctx context.Context, stream
 	client := sc.Client()
 	result := client.XGroupCreateMkStream(ctx, streamName, groupName, startID)
 	if result.Err() != nil {
+		// BUSYGROUP is not an error - it means the consumer group already exists (expected on restart)
+		if result.Err().Error() == "BUSYGROUP Consumer Group name already exists" {
+			span.SetAttributes(attribute.Bool("redis.stream.group.exists", true))
+			span.SetStatus(codes.Ok, "consumer group already exists")
+			return result.Err() // Still return the error so callers can handle it, but don't mark span as error
+		}
 		span.RecordError(result.Err())
 		span.SetStatus(codes.Error, result.Err().Error())
 		return result.Err()

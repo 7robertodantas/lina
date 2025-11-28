@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -122,6 +123,7 @@ func isMQTTAuthError(errMsg string) bool {
 }
 
 func (sb *SouthboundInterface) subscribeToTopics() {
+	ctx := context.Background()
 	deviceID := sb.meter.GetDeviceID()
 
 	// Define topics in a specific order - critical response topics first
@@ -143,7 +145,7 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 			if token.Error() != nil {
 				sb.meter.AddLog("Failed to subscribe to "+t.topic+": "+token.Error().Error(), "error")
 			} else {
-				logger.InfoWithFields("Subscribed to topic on southbound mqtt", map[string]interface{}{
+				logger.InfoWithFields(ctx, "Subscribed to topic on southbound mqtt", map[string]interface{}{
 					"topic": t.topic,
 				})
 			}
@@ -155,7 +157,7 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 	// Additional delay to ensure broker has fully processed all subscriptions
 	// This prevents race conditions where responses arrive before subscriptions are ready
 	time.Sleep(500 * time.Millisecond)
-	logger.Info("All subscriptions established, ready to send messages on southbound mqtt")
+	logger.Info(ctx, "All subscriptions established, ready to send messages on southbound mqtt")
 
 	// Signal that subscriptions are ready
 	select {
@@ -167,7 +169,8 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 
 // MQTT Message Handlers
 func (sb *SouthboundInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Message) {
-	logger.DebugWithFields("Raw config payload received on southbound mqtt", map[string]interface{}{
+	ctx := context.Background()
+	logger.DebugWithFields(ctx, "Raw config payload received on southbound mqtt", map[string]interface{}{
 		"payload": string(msg.Payload()),
 	})
 

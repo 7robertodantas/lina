@@ -18,6 +18,8 @@ import (
 var logger = internal.NewLogger("lightning")
 
 func main() {
+	ctx := context.Background()
+
 	// Load configuration
 	cfg := LoadConfig()
 
@@ -27,29 +29,29 @@ func main() {
 		ExporterOTLPEndpoint: cfg.OTELExporterOTLPEndpoint,
 	})
 	if err != nil {
-		logger.Warnf("Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
+		logger.Warnf(ctx, "Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
 	} else {
-		logger.Infof("OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
+		logger.Infof(ctx, "OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
 		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			if err := tracerShutdown(ctx); err != nil {
-				logger.Errorf("Error shutting down tracer: %v", err)
+			if err := tracerShutdown(shutdownCtx); err != nil {
+				logger.Errorf(shutdownCtx, "Error shutting down tracer: %v", err)
 			}
 		}()
 	}
 
 	// Connect to Redis stream
-	logger.Info("Connecting to Redis")
-	streamClient, err := internal.NewStreamClientFromEnv()
+	logger.Info(ctx, "Connecting to Redis")
+	streamClient, err := internal.NewStreamClientFromEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to create Redis stream client", err)
+		logger.Fatal(ctx, "Failed to create Redis stream client", err)
 	}
 	defer streamClient.Close()
-	logger.Info("Redis stream client connected successfully")
+	logger.Info(ctx, "Redis stream client connected successfully")
 
 	// Log configuration (masked for security)
-	logger.InfoWithFields("Configuration loaded", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Configuration loaded", map[string]interface{}{
 		"lnd_host": cfg.LNDHost,
 		"network":  cfg.Network,
 		"tls_cert": cfg.LNDTLSCertHex[:min(20, len(cfg.LNDTLSCertHex))] + "...",
@@ -57,22 +59,22 @@ func main() {
 	})
 
 	// Create LND client
-	lndClient, err := NewLNDClient(*cfg)
+	lndClient, err := NewLNDClient(ctx, *cfg)
 	if err != nil {
-		logger.Fatal("Failed to create LND client", err)
+		logger.Fatal(ctx, "Failed to create LND client", err)
 	}
 	defer lndClient.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	serviceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Get and display node info
-	info, err := lndClient.GetInfo(ctx)
+	info, err := lndClient.GetInfo(serviceCtx)
 	if err != nil {
-		logger.Fatal("Failed to get node info", err)
+		logger.Fatal(serviceCtx, "Failed to get node info", err)
 	}
 
-	logger.InfoWithFields("Node info via cloud LND node", map[string]interface{}{
+	logger.InfoWithFields(serviceCtx, "Node info via cloud LND node", map[string]interface{}{
 		"alias":           info.Alias,
 		"identity":        info.IdentityPubkey,
 		"version":         info.Version,
@@ -83,23 +85,23 @@ func main() {
 
 	// Create LND event stream
 	lndEventStream := NewLNDEventStream(lndClient)
-	if err := lndEventStream.Start(ctx); err != nil {
-		logger.Fatal("Failed to start LND event stream", err)
+	if err := lndEventStream.Start(serviceCtx); err != nil {
+		logger.Fatal(serviceCtx, "Failed to start LND event stream", err)
 	}
 
 	// Create stream publisher (publishes to Redis)
 	streamPublisher := NewStreamPublisher(streamClient, lndEventStream)
-	if err := streamPublisher.Start(ctx); err != nil {
-		logger.Fatal("Failed to start stream publisher", err)
+	if err := streamPublisher.Start(serviceCtx); err != nil {
+		logger.Fatal(serviceCtx, "Failed to start stream publisher", err)
 	}
 
 	// Create northbound REST interface
-	logger.Info("Initializing northbound REST API")
+	logger.Info(ctx, "Initializing northbound REST API")
 	northbound := NewNorthboundInterface(lndClient, cfg)
 	go func() {
-		logger.Infof("Lightning northbound REST listening on %s", cfg.ListenAddr)
-		if err := northbound.Start(cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf("Failed to start northbound server: %v", err)
+		logger.Infof(ctx, "Lightning northbound REST listening on %s", cfg.ListenAddr)
+		if err := northbound.Start(ctx, cfg.ListenAddr); err != nil && err != http.ErrServerClosed {
+			logger.Fatalf(ctx, "Failed to start northbound server: %v", err)
 		}
 	}()
 
@@ -107,7 +109,7 @@ func main() {
 	go func() {
 		lis, err := net.Listen("tcp", cfg.GRPCAddr)
 		if err != nil {
-			logger.Fatalf("Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
+			logger.Fatalf(ctx, "Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
 		}
 
 		grpcServer := grpc.NewServer(
@@ -116,9 +118,9 @@ func main() {
 		eastWestServer := NewEastWestServer(lndClient, streamPublisher)
 		lightningpb.RegisterLightningServiceServer(grpcServer, eastWestServer)
 
-		logger.Infof("gRPC server listening on %s via eastwest gRPC", cfg.GRPCAddr)
+		logger.Infof(ctx, "gRPC server listening on %s via eastwest gRPC", cfg.GRPCAddr)
 		if err := grpcServer.Serve(lis); err != nil {
-			logger.Fatalf("Failed to serve gRPC via eastwest: %v", err)
+			logger.Fatalf(ctx, "Failed to serve gRPC via eastwest: %v", err)
 		}
 	}()
 
@@ -127,15 +129,15 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	logger.Info("Shutting down lightning service")
+	logger.Info(ctx, "Shutting down lightning service")
 	cancel() // Cancel context to stop consumers
 
 	// Gracefully shutdown northbound server
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()
 	if err := northbound.Stop(shutdownCtx); err != nil {
-		logger.Errorf("Error shutting down northbound server: %v", err)
+		logger.Errorf(shutdownCtx, "Error shutting down northbound server: %v", err)
 	}
 
-	logger.Info("Lightning service stopped")
+	logger.Info(ctx, "Lightning service stopped")
 }

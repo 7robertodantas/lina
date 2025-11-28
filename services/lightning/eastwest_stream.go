@@ -31,7 +31,7 @@ func (sp *StreamPublisher) Start(ctx context.Context) error {
 	eventChan := sp.lndStream.Subscribe()
 
 	logger.WithStream(LightningEventsStream, "produce").
-		Info("Stream publisher started, forwarding events to Redis")
+		Info(ctx, "Stream publisher started, forwarding events to Redis")
 
 	go func() {
 		defer sp.lndStream.Unsubscribe(eventChan)
@@ -40,12 +40,12 @@ func (sp *StreamPublisher) Start(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				logger.WithStream(LightningEventsStream, "produce").
-					Info("Stream publisher stopped")
+					Info(ctx, "Stream publisher stopped")
 				return
 			case event := <-eventChan:
 				if err := sp.publishEvent(ctx, event); err != nil {
 					logger.WithStream(LightningEventsStream, "produce").
-						Error("Failed to publish lightning event", err)
+						Error(ctx, "Failed to publish lightning event", err)
 				}
 			}
 		}
@@ -86,7 +86,7 @@ func (sp *StreamPublisher) publishEvent(ctx context.Context, event *lightningmod
 	if deviceID != "" {
 		logEntry = logEntry.WithDeviceID(deviceID)
 	}
-	logEntry.InfoWithFields("Published event to Redis stream", map[string]interface{}{
+	logEntry.InfoWithFields(ctx, "Published event to Redis stream", map[string]interface{}{
 		"stream_id":  result.Val(),
 		"event_type": event.GetType().String(),
 	})

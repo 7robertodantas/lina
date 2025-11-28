@@ -112,7 +112,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 
 	// Create debit ledger entry for the authorization
 	logger.WithDeviceID(req.DeviceId).
-		InfoWithFields("Creating authorization hold debit via eastwest gRPC", map[string]interface{}{
+		InfoWithFields(ctx, "Creating authorization hold debit via eastwest gRPC", map[string]interface{}{
 			"authorization_id": authID,
 			"amount_msat":      req.RequestMsat,
 			"reason":           req.Reason,
@@ -140,7 +140,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		if err := s.streamHandler.PublishDeviceDebited(ctx, req.DeviceId, authID, entry.AmountMsat, entry.BalanceAfter, timestamp); err != nil {
 			logger.WithDeviceID(req.DeviceId).
 				WithStream("event.ledger", "produce").
-				Errorf("Failed to publish DeviceDebitedEvent for authorization %s via eastwest gRPC: %v", authID, err)
+				Errorf(ctx, "Failed to publish DeviceDebitedEvent for authorization %s via eastwest gRPC: %v", authID, err)
 		}
 	}
 

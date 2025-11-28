@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"math/rand"
@@ -104,6 +105,8 @@ func (m *SmartMeter) GetStateJSON() json.RawMessage {
 
 // AddLog adds a log entry
 func (m *SmartMeter) AddLog(message, logType string) {
+	ctx := context.Background()
+
 	m.mu.Lock()
 	entry := LogEntry{
 		ID:        generateID(),
@@ -123,13 +126,13 @@ func (m *SmartMeter) AddLog(message, logType string) {
 
 	switch logType {
 	case "error":
-		logEntry.Error(message, nil)
+		logEntry.Error(ctx, message, nil)
 	case "warning", "warn":
-		logEntry.Warn(message)
+		logEntry.Warn(ctx, message)
 	case "success":
-		logEntry.Info(message)
+		logEntry.Info(ctx, message)
 	default:
-		logEntry.Info(message)
+		logEntry.Info(ctx, message)
 	}
 
 	// Call log callback if set
@@ -188,6 +191,7 @@ func (m *SmartMeter) Start() {
 }
 
 func (m *SmartMeter) completeStartupSequence() {
+	ctx := context.Background()
 	const timeout = 15 * time.Second
 	if err := m.waitForMQTTConnection(timeout); err != nil {
 		if errors.Is(err, errMQTTWaitTimeout) {
@@ -203,7 +207,7 @@ func (m *SmartMeter) completeStartupSequence() {
 	select {
 	case <-m.southbound.GetSubscriptionsReady():
 		logger.WithDeviceID(m.deviceID).
-			Info("Subscriptions ready, proceeding with startup sequence on southbound mqtt")
+			Info(ctx, "Subscriptions ready, proceeding with startup sequence on southbound mqtt")
 	case <-time.After(10 * time.Second):
 		m.AddLog("Timeout waiting for subscriptions - reverting to OFFLINE", "error")
 		m.Shutdown()

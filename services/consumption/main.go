@@ -13,7 +13,9 @@ import (
 var logger = internal.NewLogger("consumption")
 
 func main() {
-	logger.Info("Starting consumption service")
+	ctx := context.Background()
+
+	logger.Info(ctx, "Starting consumption service")
 
 	cfg := LoadConfig()
 
@@ -23,60 +25,60 @@ func main() {
 		ExporterOTLPEndpoint: cfg.OTELExporterOTLPEndpoint,
 	})
 	if err != nil {
-		logger.Warnf("Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
+		logger.Warnf(ctx, "Failed to initialize OpenTelemetry: %v. Continuing without tracing.", err)
 	} else {
-		logger.Infof("OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
+		logger.Infof(ctx, "OpenTelemetry initialized with OTLP exporter at %s", cfg.OTELExporterOTLPEndpoint)
 		defer func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
-			if err := tracerShutdown(ctx); err != nil {
-				logger.Errorf("Error shutting down tracer: %v", err)
+			if err := tracerShutdown(shutdownCtx); err != nil {
+				logger.Errorf(shutdownCtx, "Error shutting down tracer: %v", err)
 			}
 		}()
 	}
 
 	repository, err := NewConsumptionRepository(cfg.DBPath, cfg.BusyTimeoutMS)
 	if err != nil {
-		logger.Fatal("Failed to create consumption repository", err)
+		logger.Fatal(ctx, "Failed to create consumption repository", err)
 	}
 	defer repository.Close()
 
 	// Connect to Redis stream
-	logger.Info("Connecting to Redis")
-	streamClient, err := internal.NewStreamClientFromEnv()
+	logger.Info(ctx, "Connecting to Redis")
+	streamClient, err := internal.NewStreamClientFromEnv(ctx)
 	if err != nil {
-		logger.Fatal("Failed to create Redis stream client", err)
+		logger.Fatal(ctx, "Failed to create Redis stream client", err)
 	}
 	defer streamClient.Close()
-	logger.Info("Redis stream client connected successfully")
+	logger.Info(ctx, "Redis stream client connected successfully")
 
 	// Create stream handler
 	streamHandler := NewStreamHandler(streamClient, cfg, repository)
 
 	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
+	serviceCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	// Start device event consumer (consumes from event.device stream)
 	go func() {
-		if err := streamHandler.StartDeviceConsumer(ctx); err != nil && err != context.Canceled {
+		if err := streamHandler.StartDeviceConsumer(serviceCtx); err != nil && err != context.Canceled {
 			logger.WithStream("event.device", "consume").
-				Error("Device consumer error", err)
+				Error(serviceCtx, "Device consumer error", err)
 		}
 	}()
 
 	// Start outbox publisher (publishes to event.consumption stream)
 	go func() {
-		if err := streamHandler.StartOutboxPublisher(ctx); err != nil && err != context.Canceled {
+		if err := streamHandler.StartOutboxPublisher(serviceCtx); err != nil && err != context.Canceled {
 			logger.WithStream("event.consumption", "produce").
-				Error("Outbox publisher error", err)
+				Error(serviceCtx, "Outbox publisher error", err)
 		}
 	}()
 
 	// Start outbox cleanup (removes old published records after retention period)
 	go func() {
-		if err := streamHandler.StartOutboxCleanup(ctx); err != nil && err != context.Canceled {
-			logger.Error("Outbox cleanup error", err)
+		if err := streamHandler.StartOutboxCleanup(serviceCtx); err != nil && err != context.Canceled {
+			logger.Error(serviceCtx, "Outbox cleanup error", err)
 		}
 	}()
 
@@ -85,7 +87,7 @@ func main() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	<-sigChan
 
-	logger.Info("Shutting down consumption service")
+	logger.Info(ctx, "Shutting down consumption service")
 	cancel() // Cancel context to stop consumers
-	logger.Info("Consumption service stopped")
+	logger.Info(ctx, "Consumption service stopped")
 }

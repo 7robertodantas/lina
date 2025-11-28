@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"sync"
@@ -56,9 +57,11 @@ func NewWebSocketHandler(meter *SmartMeter) *WebSocketHandler {
 
 // HandleWebSocket handles WebSocket connections
 func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		logger.Error("WebSocket upgrade error via northbound REST", err)
+		logger.Error(ctx, "WebSocket upgrade error via northbound REST", err)
 		return
 	}
 	defer conn.Close()
@@ -68,13 +71,13 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 	h.clients[conn] = &sync.Mutex{}
 	h.clientsMu.Unlock()
 
-	logger.InfoWithFields("WebSocket client connected via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(ctx, "WebSocket client connected via northbound REST", map[string]interface{}{
 		"total_clients": len(h.clients),
 	})
 
 	// Send initial state
 	state := h.meter.GetState()
-	logger.InfoWithFields("Sending initial state via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Sending initial state via northbound REST", map[string]interface{}{
 		"appliance_count": len(state.Appliances),
 		"device_status":   state.DeviceStatus,
 	})
@@ -88,7 +91,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		h.clientsMu.Lock()
 		delete(h.clients, conn)
 		h.clientsMu.Unlock()
-		logger.InfoWithFields("WebSocket client disconnected via northbound REST", map[string]interface{}{
+		logger.InfoWithFields(ctx, "WebSocket client disconnected via northbound REST", map[string]interface{}{
 			"total_clients": len(h.clients),
 		})
 	}()
@@ -99,18 +102,18 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		err := conn.ReadJSON(&cmd)
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				logger.Error("WebSocket error via northbound REST", err)
+				logger.Error(ctx, "WebSocket error via northbound REST", err)
 			}
 			break
 		}
 
-		h.handleCommand(cmd)
+		h.handleCommand(ctx, cmd)
 	}
 }
 
 // handleCommand processes commands from WebSocket clients
-func (h *WebSocketHandler) handleCommand(cmd WSCommand) {
-	logger.InfoWithFields("Received command via northbound REST", map[string]interface{}{
+func (h *WebSocketHandler) handleCommand(ctx context.Context, cmd WSCommand) {
+	logger.InfoWithFields(ctx, "Received command via northbound REST", map[string]interface{}{
 		"action": cmd.Action,
 	})
 
@@ -128,7 +131,7 @@ func (h *WebSocketHandler) handleCommand(cmd WSCommand) {
 		if err := json.Unmarshal(cmd.Data, &data); err == nil {
 			h.meter.ToggleAppliance(data.ApplianceID)
 		} else {
-			logger.Errorf("Error unmarshaling toggle_appliance data via northbound REST: %v", err)
+			logger.Errorf(ctx, "Error unmarshaling toggle_appliance data via northbound REST: %v", err)
 		}
 
 	case "request_topup":
@@ -148,7 +151,7 @@ func (h *WebSocketHandler) handleCommand(cmd WSCommand) {
 		h.meter.ClearInvoice()
 
 	default:
-		logger.WarnWithFields("Unknown command via northbound REST", map[string]interface{}{
+		logger.WarnWithFields(ctx, "Unknown command via northbound REST", map[string]interface{}{
 			"action": cmd.Action,
 		})
 	}
@@ -156,6 +159,8 @@ func (h *WebSocketHandler) handleCommand(cmd WSCommand) {
 
 // broadcastLoop sends state updates to all connected clients
 func (h *WebSocketHandler) broadcastLoop() {
+	ctx := context.Background()
+
 	for msg := range h.broadcast {
 		// Take a snapshot of current clients to avoid locking upgrades on write errors
 		h.clientsMu.RLock()
@@ -175,7 +180,7 @@ func (h *WebSocketHandler) broadcastLoop() {
 			client.mu.Unlock()
 
 			if err != nil {
-				logger.Error("WebSocket write error via northbound REST", err)
+				logger.Error(ctx, "WebSocket write error via northbound REST", err)
 				client.conn.Close()
 
 				h.clientsMu.Lock()
@@ -188,6 +193,8 @@ func (h *WebSocketHandler) broadcastLoop() {
 
 // sendToClient sends a message to a specific client
 func (h *WebSocketHandler) sendToClient(conn *websocket.Conn, msg WSMessage) {
+	ctx := context.Background()
+
 	h.clientsMu.RLock()
 	writeMu, ok := h.clients[conn]
 	h.clientsMu.RUnlock()
@@ -200,7 +207,7 @@ func (h *WebSocketHandler) sendToClient(conn *websocket.Conn, msg WSMessage) {
 	writeMu.Unlock()
 
 	if err != nil {
-		logger.Error("Error sending to client via northbound REST", err)
+		logger.Error(ctx, "Error sending to client via northbound REST", err)
 	}
 }
 

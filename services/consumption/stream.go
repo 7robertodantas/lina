@@ -42,18 +42,18 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 	err := sh.streamClient.XGroupCreateMkStreamWithSpan(streamCtx, streamName, sh.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
-			Warnf("Failed to create consumer group: %v", err)
+			Warnf(streamCtx, "Failed to create consumer group: %v", err)
 		// Continue anyway, group might already exist
 	}
 
 	logger.WithStream(streamName, "consume").
-		Info("Starting device event consumer")
+		Info(streamCtx, "Starting device event consumer")
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.WithStream(streamName, "consume").
-				Info("Stopping device event consumer")
+				Info(streamCtx, "Stopping device event consumer")
 			return ctx.Err()
 		default:
 			// Read from stream with blocking read (wait up to 5 seconds)
@@ -71,7 +71,7 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Error("Error reading from stream", err)
+					Error(streamCtx, "Error reading from stream", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -81,7 +81,7 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 				for _, msg := range stream.Messages {
 					if err := sh.handleDeviceEvent(streamCtx, msg); err != nil {
 						logger.WithStream(streamName, "consume").
-							Errorf("Error handling device event %s: %v", msg.ID, err)
+							Errorf(streamCtx, "Error handling device event %s: %v", msg.ID, err)
 						// Continue processing other messages
 					} else {
 						// Acknowledge the message
@@ -111,7 +111,7 @@ func (sh *StreamHandler) handleDeviceEvent(ctx context.Context, msg redis.XMessa
 	// Check event type
 	if deviceEvent.GetType() != devicepb.DeviceEventType_DEVICE_EVENT_TYPE_USAGE_REPORTED {
 		logger.WithStream("event.device", "consume").
-			Debugf("Skipping event type: %v", deviceEvent.GetType())
+			Debugf(ctx, "Skipping event type: %v", deviceEvent.GetType())
 		return nil
 	}
 
@@ -123,7 +123,7 @@ func (sh *StreamHandler) handleDeviceEvent(ctx context.Context, msg redis.XMessa
 	usage := usageReported.GetUsage()
 	logger.WithStream("event.device", "consume").
 		WithDeviceID(usage.GetDeviceId()).
-		InfoWithFields("Device event received", map[string]interface{}{
+		InfoWithFields(ctx, "Device event received", map[string]interface{}{
 			"report_id":           usage.GetReportId(),
 			"measure":             usage.GetMeasure(),
 			"unit":                usage.GetUnit(),
@@ -159,7 +159,7 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	if exists {
 		// Report already processed, skip (idempotency)
 		logger.WithDeviceID(deviceID).
-			DebugWithFields("Report already processed, skipping (idempotency)", map[string]interface{}{
+			DebugWithFields(ctx, "Report already processed, skipping (idempotency)", map[string]interface{}{
 				"report_id": reportID,
 			})
 		if err := tx.Commit(); err != nil {
@@ -175,7 +175,7 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	}
 
 	logger.WithDeviceID(deviceID).
-		InfoWithFields("Processing report", map[string]interface{}{
+		InfoWithFields(ctx, "Processing report", map[string]interface{}{
 			"report_id":        reportID,
 			"measure":          measure,
 			"unit":             usage.GetUnit(),
@@ -202,7 +202,7 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 		return err
 	}
 	logger.WithDeviceID(deviceID).
-		DebugWithFields("Ledger: added amount", map[string]interface{}{
+		DebugWithFields(ctx, "Ledger: added amount", map[string]interface{}{
 			"amount_msat":  usageDebitMsat,
 			"balance_msat": balanceAfterAdd,
 		})
@@ -216,7 +216,7 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 			return err
 		}
 		logger.WithDeviceID(deviceID).
-			DebugWithFields("Ledger: consumed amount", map[string]interface{}{
+			DebugWithFields(ctx, "Ledger: consumed amount", map[string]interface{}{
 				"consumed_msat": consumedMsat,
 				"balance_msat":  balanceAfterConsume,
 			})
@@ -235,14 +235,14 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 
 	if actualDebitMsat >= 1 {
 		logger.WithDeviceID(deviceID).
-			InfoWithFields("Consumption recorded", map[string]interface{}{
+			InfoWithFields(ctx, "Consumption recorded", map[string]interface{}{
 				"report_id":                 reportID,
 				"debit_msat":                actualDebitMsat,
 				"remaining_fractional_msat": remainingFractionalMsat,
 			})
 	} else {
 		logger.WithDeviceID(deviceID).
-			InfoWithFields("Consumption accumulated", map[string]interface{}{
+			InfoWithFields(ctx, "Consumption accumulated", map[string]interface{}{
 				"report_id":              reportID,
 				"usage_msat":             usageDebitMsat,
 				"total_accumulated_msat": totalMsat,
@@ -255,7 +255,7 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 // StartOutboxPublisher starts publishing events from outbox to event.consumption stream
 func (sh *StreamHandler) StartOutboxPublisher(ctx context.Context) error {
 	logger.WithStream("event.consumption", "produce").
-		Info("Starting outbox publisher")
+		Info(ctx, "Starting outbox publisher")
 
 	ticker := time.NewTicker(1 * time.Second) // Check every second
 	defer ticker.Stop()
@@ -264,12 +264,12 @@ func (sh *StreamHandler) StartOutboxPublisher(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			logger.WithStream("event.consumption", "produce").
-				Info("Stopping outbox publisher")
+				Info(ctx, "Stopping outbox publisher")
 			return ctx.Err()
 		case <-ticker.C:
 			if err := sh.publishOutboxEvents(ctx); err != nil {
 				logger.WithStream("event.consumption", "produce").
-					Error("Error publishing outbox events", err)
+					Error(ctx, "Error publishing outbox events", err)
 			}
 		}
 	}
@@ -293,21 +293,21 @@ func (sh *StreamHandler) publishOutboxEvents(ctx context.Context) error {
 		if err := sh.publishConsumptionEvent(ctx, e.ReportID, e.DeviceID, e.DebitMsat, e.Timestamp); err != nil {
 			logger.WithDeviceID(e.DeviceID).
 				WithStream("event.consumption", "produce").
-				Errorf("Failed to publish event for report %s: %v", e.ReportID, err)
+				Errorf(ctx, "Failed to publish event for report %s: %v", e.ReportID, err)
 			continue
 		}
 
 		// Mark as published
 		if err := sh.repository.MarkOutboxAsPublished(ctx, e.ReportID); err != nil {
 			logger.WithDeviceID(e.DeviceID).
-				Errorf("Failed to mark report %s as published: %v", e.ReportID, err)
+				Errorf(ctx, "Failed to mark report %s as published: %v", e.ReportID, err)
 			// Continue anyway, we'll retry on next run
 		}
 	}
 
 	if len(events) > 0 {
 		logger.WithStream("event.consumption", "produce").
-			InfoWithFields("Published events from outbox", map[string]interface{}{
+			InfoWithFields(ctx, "Published events from outbox", map[string]interface{}{
 				"count": len(events),
 			})
 	}
@@ -364,7 +364,7 @@ func (sh *StreamHandler) publishConsumptionEvent(ctx context.Context, reportID, 
 
 	logger.WithDeviceID(deviceID).
 		WithStream(streamName, "produce").
-		InfoWithFields("Published DeviceConsumptionRecorded event", map[string]interface{}{
+		InfoWithFields(ctx, "Published DeviceConsumptionRecorded event", map[string]interface{}{
 			"report_id":  reportID,
 			"debit_msat": debitMsat,
 			"stream_id":  streamID,
@@ -375,7 +375,7 @@ func (sh *StreamHandler) publishConsumptionEvent(ctx context.Context, reportID, 
 // StartOutboxCleanup periodically removes old published records from outbox
 // This keeps the outbox table small and only contains recent unpublished events
 func (sh *StreamHandler) StartOutboxCleanup(ctx context.Context) error {
-	logger.Info("Starting outbox cleanup")
+	logger.Info(ctx, "Starting outbox cleanup")
 
 	ticker := time.NewTicker(1 * time.Hour) // Run cleanup every hour
 	defer ticker.Stop()
@@ -383,11 +383,11 @@ func (sh *StreamHandler) StartOutboxCleanup(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Info("Stopping outbox cleanup")
+			logger.Info(ctx, "Stopping outbox cleanup")
 			return ctx.Err()
 		case <-ticker.C:
 			if err := sh.cleanupOutbox(ctx); err != nil {
-				logger.Error("Error cleaning up outbox", err)
+				logger.Error(ctx, "Error cleaning up outbox", err)
 			}
 		}
 	}
@@ -404,7 +404,7 @@ func (sh *StreamHandler) cleanupOutbox(ctx context.Context) error {
 	}
 
 	if rowsAffected > 0 {
-		logger.InfoWithFields("Cleaned up old published records from outbox", map[string]interface{}{
+		logger.InfoWithFields(ctx, "Cleaned up old published records from outbox", map[string]interface{}{
 			"rows_affected":  rowsAffected,
 			"retention_days": retentionDays,
 		})
