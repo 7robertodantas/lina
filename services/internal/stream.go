@@ -12,12 +12,14 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/trace"
 )
 
 var (
 	streamTracer = otel.Tracer("redis.stream")
 	eventTracer  = otel.Tracer("event.processor")
+	propagator   = otel.GetTextMapPropagator() // Get the global propagator
 )
 
 // StreamClient wraps the Redis client for stream operations
@@ -137,6 +139,7 @@ func (sc *StreamClient) XReadGroupWithSpan(ctx context.Context, streamName, grou
 
 // XAddWithSpan performs XAdd with a meaningful OpenTelemetry span
 // eventType is optional and will be included in the span name if provided (e.g., "AUTHORIZATION_DEBITED")
+// This method automatically injects trace context into the message
 func (sc *StreamClient) XAddWithSpan(ctx context.Context, streamName string, args *redis.XAddArgs, eventType ...string) (string, error) {
 	spanName := fmt.Sprintf("[stream] %s publish", streamName)
 	if len(eventType) > 0 && eventType[0] != "" {
@@ -152,6 +155,26 @@ func (sc *StreamClient) XAddWithSpan(ctx context.Context, streamName string, arg
 		span.SetAttributes(attribute.String("redis.event.type", eventType[0]))
 	}
 	defer span.End()
+
+	// Inject trace context into the message values
+	carrier := make(propagation.MapCarrier)
+	propagator.Inject(ctx, carrier)
+
+	// Ensure Values is a map
+	if args.Values == nil {
+		args.Values = make(map[string]interface{})
+	}
+	valuesMap, ok := args.Values.(map[string]interface{})
+	if !ok {
+		// If Values is not a map, create a new map and copy existing values
+		valuesMap = make(map[string]interface{})
+		args.Values = valuesMap
+	}
+
+	// Add trace context to the message under a special key
+	for k, v := range carrier {
+		valuesMap["_trace_"+k] = v
+	}
 
 	client := sc.Client()
 	result := client.XAdd(ctx, args)
@@ -265,8 +288,25 @@ func (sc *StreamClient) XGroupCreateMkStreamWithSpan(ctx context.Context, stream
 
 // TraceEventProcessing wraps event processing with an OpenTelemetry span
 // It extracts event metadata from the Redis message and creates a meaningful span
+// This method automatically extracts trace context from the message to create proper parent-child relationships
 // If ackFn is provided, it will be called within the same span after successful processing
 func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMessage, fn func(context.Context, redis.XMessage) error, ackFn func(context.Context, redis.XMessage) error) error {
+	// Extract trace context from the message
+	carrier := make(propagation.MapCarrier)
+	for k, v := range msg.Values {
+		// Look for trace context keys (prefixed with _trace_)
+		if len(k) > 7 && k[:7] == "_trace_" {
+			key := k[7:] // Remove _trace_ prefix
+			if strVal, ok := v.(string); ok {
+				carrier[key] = strVal
+			}
+		}
+	}
+
+	// Extract the parent context from the carrier
+	// This creates a proper parent-child relationship with the original publish span
+	parentCtx := propagator.Extract(ctx, carrier)
+
 	// Extract event type from message
 	eventType := extractEventTypeFromMessage(msg)
 
@@ -275,7 +315,8 @@ func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMes
 		spanName = fmt.Sprintf("[%s] processing [%s]", streamName, eventType)
 	}
 
-	ctx, span := eventTracer.Start(ctx, spanName,
+	// Create span as a child of the extracted parent context
+	parentCtx, span := eventTracer.Start(parentCtx, spanName,
 		trace.WithAttributes(
 			attribute.String("event.stream", streamName),
 			attribute.String("event.message.id", msg.ID),
@@ -287,8 +328,8 @@ func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMes
 	}
 	defer span.End()
 
-	// Call the actual processing function
-	err := fn(ctx, msg)
+	// Call the actual processing function with the parent context
+	err := fn(parentCtx, msg)
 
 	if err != nil {
 		span.RecordError(err)
@@ -298,7 +339,7 @@ func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMes
 
 	// If acknowledgment function provided, call it within the same span context
 	if ackFn != nil {
-		if ackErr := ackFn(ctx, msg); ackErr != nil {
+		if ackErr := ackFn(parentCtx, msg); ackErr != nil {
 			span.RecordError(ackErr)
 			span.SetStatus(codes.Error, fmt.Sprintf("ack failed: %v", ackErr))
 			return ackErr
