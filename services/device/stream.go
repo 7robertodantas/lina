@@ -110,25 +110,24 @@ func (sc *StreamClient) PublishDeviceUsageReportedEvent(ctx context.Context, pay
 	// Publish to Redis stream "event.device"
 	streamName := "event.device"
 	values := map[string]interface{}{
-		"event": string(jsonBytes),
-		// Add timestamp for stream ordering
+		"event":     string(jsonBytes),
 		"timestamp": time.Now().UnixMilli(),
 	}
 
-	// Use XADD to add entry to stream
-	result := sc.Client().XAdd(sc.Context(), &redis.XAddArgs{
+	// Use XAddWithSpan to add entry to stream with tracing
+	streamID, err := sc.XAddWithSpan(ctx, streamName, &redis.XAddArgs{
 		Stream: streamName,
 		Values: values,
-	})
+	}, "USAGE_REPORTED")
 
-	if result.Err() != nil {
-		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, result.Err())
+	if err != nil {
+		return fmt.Errorf("failed to publish to Redis stream %s: %w", streamName, err)
 	}
 
 	logger.WithDeviceID(payload.GetDeviceId()).
 		WithStream(streamName, "produce").
 		InfoWithFields(ctx, "Published DeviceEvent (usage reported) on southbound mqtt", map[string]interface{}{
-			"stream_id": result.Val(),
+			"stream_id": streamID,
 			"report_id": payload.GetReportId(),
 		})
 	return nil

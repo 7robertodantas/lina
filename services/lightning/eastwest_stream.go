@@ -75,8 +75,15 @@ func (sp *StreamPublisher) publishEvent(ctx context.Context, event *lightningmod
 		Values: values,
 	}
 
-	result := sp.streamClient.Client().XAdd(ctx, args)
-	if err := result.Err(); err != nil {
+	// Extract event type for span naming
+	eventTypeFull := event.GetType().String()
+	eventType := eventTypeFull
+	if len(eventTypeFull) > len("LIGHTNING_EVENT_TYPE_") && eventTypeFull[:len("LIGHTNING_EVENT_TYPE_")] == "LIGHTNING_EVENT_TYPE_" {
+		eventType = eventTypeFull[len("LIGHTNING_EVENT_TYPE_"):]
+	}
+
+	streamID, err := sp.streamClient.XAddWithSpan(ctx, LightningEventsStream, args, eventType)
+	if err != nil {
 		return fmt.Errorf("failed to publish lightning event: %w", err)
 	}
 
@@ -87,7 +94,7 @@ func (sp *StreamPublisher) publishEvent(ctx context.Context, event *lightningmod
 		logEntry = logEntry.WithDeviceID(deviceID)
 	}
 	logEntry.InfoWithFields(ctx, "Published event to Redis stream", map[string]interface{}{
-		"stream_id":  result.Val(),
+		"stream_id":  streamID,
 		"event_type": event.GetType().String(),
 	})
 	return nil
