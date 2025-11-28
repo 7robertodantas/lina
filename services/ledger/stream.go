@@ -80,12 +80,14 @@ func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					// Wrap event processing with tracing
-					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleLightningEvent); err != nil {
+					// Create ack function
+					ackFn := func(ctx context.Context, msg redis.XMessage) error {
+						return sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
+					}
+					
+					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleLightningEvent, ackFn); err != nil {
 						logger.WithStream(streamName, "consume").
 							Errorf(ctx, "Error handling lightning event %s: %v", msg.ID, err)
-					} else {
-						sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -162,12 +164,15 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 			// Process messages with the context that has the read span
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					// TraceEventProcessing will create a child span of the read operation
-					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleConsumptionEvent); err != nil {
+					// Create ack function that will be called within the processing span
+					ackFn := func(ctx context.Context, msg redis.XMessage) error {
+						return sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
+					}
+					
+					// TraceEventProcessing now handles both processing and ack within same span
+					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleConsumptionEvent, ackFn); err != nil {
 						logger.WithStream(streamName, "consume").
 							Errorf(ctx, "Error handling consumption event %s: %v", msg.ID, err)
-					} else {
-						sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
@@ -737,8 +742,8 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 	if processed > 0 {
 		logger.InfoWithFields(ctx, "Marked authorizations as expired", map[string]interface{}{
 			"count": processed,
-		})
-	}
+		})	return nil
 
-	return nil
-}
+
+
+	}}

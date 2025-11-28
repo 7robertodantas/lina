@@ -284,7 +284,8 @@ func (sc *StreamClient) XGroupCreateMkStreamWithSpan(ctx context.Context, stream
 
 // TraceEventProcessing wraps event processing with an OpenTelemetry span
 // It extracts event metadata from the Redis message and creates a meaningful span
-func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMessage, fn func(context.Context, redis.XMessage) error) error {
+// If ackFn is provided, it will be called within the same span after successful processing
+func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMessage, fn func(context.Context, redis.XMessage) error, ackFn func(context.Context, redis.XMessage) error) error {
 	// Extract event type from message
 	eventType := extractEventTypeFromMessage(msg)
 
@@ -312,6 +313,15 @@ func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMes
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return err
+	}
+
+	// If acknowledgment function provided, call it within the same span context
+	if ackFn != nil {
+		if ackErr := ackFn(ctx, msg); ackErr != nil {
+			span.RecordError(ackErr)
+			span.SetStatus(codes.Error, fmt.Sprintf("ack failed: %v", ackErr))
+			return ackErr
+		}
 	}
 
 	span.SetStatus(codes.Ok, "success")

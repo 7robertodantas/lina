@@ -79,14 +79,14 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 			// Process messages
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
-					// Wrap event processing with tracing
-					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleDeviceEvent); err != nil {
+					// Create ack function
+					ackFn := func(ctx context.Context, msg redis.XMessage) error {
+						return sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
+					}
+
+					if err := internal.TraceEventProcessing(streamCtx, streamName, msg, sh.handleDeviceEvent, ackFn); err != nil {
 						logger.WithStream(streamName, "consume").
 							Errorf(streamCtx, "Error handling device event %s: %v", msg.ID, err)
-						// Continue processing other messages
-					} else {
-						// Acknowledge the message
-						sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
 					}
 				}
 			}
