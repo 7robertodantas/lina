@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -40,6 +41,16 @@ func NewStreamClient(config StreamConfig) (*StreamClient, error) {
 
 	client := redis.NewClient(opts)
 	ctx := context.Background()
+
+	// Add OpenTelemetry instrumentation
+	if err := redisotel.InstrumentTracing(client); err != nil {
+		return nil, fmt.Errorf("failed to instrument Redis with OpenTelemetry: %w", err)
+	}
+
+	// Add OpenTelemetry instrumentation
+	if err := redisotel.InstrumentMetrics(client); err != nil {
+		return nil, fmt.Errorf("failed to instrument Redis with OpenTelemetry: %w", err)
+	}
 
 	// Test connection
 	if err := client.Ping(ctx).Err(); err != nil {
@@ -100,4 +111,3 @@ func getEnv(key, defaultValue string) string {
 	}
 	return defaultValue
 }
-

@@ -29,6 +29,10 @@ github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 h1:8Tjv8EJ+pM1xP8mK6egEbD1OgnV
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2/go.mod h1:pkJQ2tZHJ0aFOVEEot6oZmaVEZcRme73eIFmhiVuRWs=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
+github.com/redis/go-redis/extra/rediscmd/v9 v9.17.0 h1:ZOh9XWr5CFKfLcxnboJv76e8IbZJUPk6vPqKi604PBg=
+github.com/redis/go-redis/extra/rediscmd/v9 v9.17.0/go.mod h1:wUvaymPZe9f81/s7OfUP7yzZSkWldJZRtcxLFHZVQho=
+github.com/redis/go-redis/extra/redisotel/v9 v9.17.0 h1:4THYns6jRztgNk3+qtthK/wDs7eAMjxNk8AZEygfIi8=
+github.com/redis/go-redis/extra/redisotel/v9 v9.17.0/go.mod h1:ZGbqRWgfv2ze3EIWPe7gTp6YcKHiVk8QZzEA4nlmvys=
 github.com/redis/go-redis/v9 v9.17.0 h1:K6E+ZlYN95KSMmZeEQPbU/c++wfmEvfFB17yEAq/VhM=
 github.com/redis/go-redis/v9 v9.17.0/go.mod h1:u410H11HMLoB+TP67dz8rL9s6QW2j76l0//kSOd3370=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=

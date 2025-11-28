@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/redis/go-redis/extra/redisotel/v9"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -26,16 +25,6 @@ func NewStreamClient() (*StreamClient, error) {
 	libClient, err := internal.NewStreamClientFromEnv()
 	if err != nil {
 		return nil, err
-	}
-
-	// Enable tracing instrumentation.
-	if err := redisotel.InstrumentTracing(libClient.Client()); err != nil {
-		return nil, fmt.Errorf("failed to instrument tracing: %w", err)
-	}
-
-	// Enable metrics instrumentation.
-	if err := redisotel.InstrumentMetrics(libClient.Client()); err != nil {
-		return nil, fmt.Errorf("failed to instrument metrics: %w", err)
 	}
 
 	return &StreamClient{

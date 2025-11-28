@@ -13,6 +13,7 @@ import (
 
 	"github.com/robertodantas/lnpay/internal"
 	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 )
 
@@ -155,7 +156,9 @@ func main() {
 			logger.Fatalf("Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
 		}
 
-		grpcServer := grpc.NewServer()
+		grpcServer := grpc.NewServer(
+			grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		)
 		eastWestServer := NewEastWestServer(repo, streamHandler)
 		ledgerpb.RegisterLedgerServiceServer(grpcServer, eastWestServer)
 

@@ -8,6 +8,7 @@ require (
 	github.com/redis/go-redis/v9 v9.17.0
 	github.com/robertodantas/lnpay/internal v0.0.0-00010101000000-000000000000
 	github.com/robertodantas/lnpay/proto v0.0.0-00010101000000-000000000000
+	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.46.0
 	google.golang.org/grpc v1.75.0
 	google.golang.org/protobuf v1.36.9
 )
@@ -147,6 +148,8 @@ require (
 	github.com/prometheus/procfs v0.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.54.0 // indirect
+	github.com/redis/go-redis/extra/rediscmd/v9 v9.17.0 // indirect
+	github.com/redis/go-redis/extra/redisotel/v9 v9.17.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/fastuuid v1.2.0 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
@@ -172,7 +175,6 @@ require (
 	go.etcd.io/etcd/raft/v3 v3.5.12 // indirect
 	go.etcd.io/etcd/server/v3 v3.5.12 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.46.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.60.0 // indirect
 	go.opentelemetry.io/otel v1.38.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.38.0 // indirect
