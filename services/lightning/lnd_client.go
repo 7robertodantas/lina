@@ -12,6 +12,7 @@ import (
 	"github.com/lightningnetwork/lnd/lnrpc/invoicesrpc"
 	internalpkg "github.com/robertodantas/lnpay/internal"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
@@ -58,7 +59,9 @@ func NewLNDClient(ctx context.Context, cfg Config) (*LNDClient, error) {
 		cfg.LNDHost,
 		grpc.WithTransportCredentials(creds),
 		grpc.WithPerRPCCredentials(mac),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler(
+			otelgrpc.WithPropagators(otel.GetTextMapPropagator()),
+		)),
 		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("lightning-service")),
 	)
 	if err != nil {
