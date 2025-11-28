@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -60,8 +59,8 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 			report_id TEXT PRIMARY KEY,
 			published INTEGER NOT NULL DEFAULT 0,
 			published_at INTEGER,
-			created_at INTEGER NOT NULL,
-			trace_context TEXT
+			traceparent TEXT,
+			created_at INTEGER NOT NULL
 		)`,
 		// Indexes for consumption_records
 		`CREATE INDEX IF NOT EXISTS idx_device_id ON consumption_records (device_id)`,
@@ -126,20 +125,17 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 	// Only insert into outbox if there's an actual debit to publish (>= 1 msat)
 	// If debitMsat is 0, the fractional amount was accumulated but not debited yet
 	if debitMsat >= 1 {
-		// Serialize trace context to JSON
-		traceContextJSON := ""
-		if traceContext != nil && len(traceContext) > 0 {
-			bytes, err := json.Marshal(traceContext)
-			if err != nil {
-				return fmt.Errorf("failed to serialize trace context: %w", err)
-			}
-			traceContextJSON = string(bytes)
+		// Extract W3C traceparent from trace context (single string, not JSON)
+		traceparent := ""
+		if traceContext != nil {
+			// W3C Trace Context uses "traceparent" key
+			traceparent = traceContext["traceparent"]
 		}
 
 		_, err := tx.ExecContext(ctx, `
-			INSERT INTO consumption_outbox (report_id, published, trace_context, created_at)
+			INSERT INTO consumption_outbox (report_id, published, traceparent, created_at)
 			VALUES (?, 0, ?, ?)`,
-			reportID, traceContextJSON, now,
+			reportID, traceparent, now,
 		)
 		if err != nil {
 			return fmt.Errorf("failed to insert into outbox: %w", err)
@@ -152,12 +148,12 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 // GetUnpublishedOutboxEvents retrieves unpublished events from the outbox
 func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	query := `
-		SELECT o.report_id, c.device_id, c.debit_msat, c.timestamp, o.trace_context
+		SELECT o.report_id, c.device_id, c.debit_msat, c.timestamp, o.traceparent
 		FROM consumption_outbox o
 		INNER JOIN consumption_records c ON o.report_id = c.report_id
-		WHERE o.published = FALSE
+		WHERE o.published = 0
 		ORDER BY c.created_at ASC
-		LIMIT $1
+		LIMIT ?
 	`
 
 	rows, err := r.db.QueryContext(ctx, query, limit)
@@ -169,16 +165,15 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 	var events []OutboxEvent
 	for rows.Next() {
 		var e OutboxEvent
-		var traceContextJSON sql.NullString
-		if err := rows.Scan(&e.ReportID, &e.DeviceID, &e.DebitMsat, &e.Timestamp, &traceContextJSON); err != nil {
+		var traceparent sql.NullString
+		if err := rows.Scan(&e.ReportID, &e.DeviceID, &e.DebitMsat, &e.Timestamp, &traceparent); err != nil {
 			return nil, fmt.Errorf("failed to scan outbox event: %w", err)
 		}
 
-		// Deserialize trace context if present
-		if traceContextJSON.Valid && traceContextJSON.String != "" {
-			if err := json.Unmarshal([]byte(traceContextJSON.String), &e.TraceContext); err != nil {
-				// Log error but don't fail - trace context is optional
-				e.TraceContext = nil
+		// Reconstruct trace context map from W3C traceparent
+		if traceparent.Valid && traceparent.String != "" {
+			e.TraceContext = map[string]string{
+				"traceparent": traceparent.String,
 			}
 		}
 
