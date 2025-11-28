@@ -15,6 +15,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var (
+	streamTracer = otel.Tracer("redis.stream")
+)
+
 // StreamClient wraps the Redis client for stream operations
 type StreamClient struct {
 	client *redis.Client
@@ -107,9 +111,8 @@ func (sc *StreamClient) Close() error {
 
 // XReadGroupWithSpan performs XReadGroup with a meaningful OpenTelemetry span
 func (sc *StreamClient) XReadGroupWithSpan(ctx context.Context, streamName, groupName, consumerName string, args *redis.XReadGroupArgs) ([]redis.XStream, error) {
-	tracer := otel.Tracer("redis.stream")
 	spanName := fmt.Sprintf("[stream] %s read", streamName)
-	ctx, span := tracer.Start(ctx, spanName,
+	ctx, span := streamTracer.Start(ctx, spanName,
 		trace.WithAttributes(
 			attribute.String("redis.stream.name", streamName),
 			attribute.String("redis.stream.group", groupName),
@@ -154,12 +157,11 @@ func (sc *StreamClient) XReadGroupWithSpan(ctx context.Context, streamName, grou
 // XAddWithSpan performs XAdd with a meaningful OpenTelemetry span
 // eventType is optional and will be included in the span name if provided (e.g., "AUTHORIZATION_DEBITED")
 func (sc *StreamClient) XAddWithSpan(ctx context.Context, streamName string, args *redis.XAddArgs, eventType ...string) (string, error) {
-	tracer := otel.Tracer("redis.stream")
 	spanName := fmt.Sprintf("[stream] %s publish", streamName)
 	if len(eventType) > 0 && eventType[0] != "" {
 		spanName = fmt.Sprintf("[stream] %s publish [%s]", streamName, eventType[0])
 	}
-	ctx, span := tracer.Start(ctx, spanName,
+	ctx, span := streamTracer.Start(ctx, spanName,
 		trace.WithAttributes(
 			attribute.String("redis.stream.name", streamName),
 			attribute.String("redis.operation", "XADD"),
@@ -197,12 +199,11 @@ func (sc *StreamClient) XAckWithSpan(ctx context.Context, streamName, groupName,
 	if len(eventType) > 0 && eventType[0] != "" {
 		finalEventType = eventType[0]
 	}
-	tracer := otel.Tracer("redis.stream")
 	spanName := fmt.Sprintf("[stream] %s ack", streamName)
 	if finalEventType != "" {
 		spanName = fmt.Sprintf("[stream] %s ack [%s]", streamName, finalEventType)
 	}
-	ctx, span := tracer.Start(ctx, spanName,
+	ctx, span := streamTracer.Start(ctx, spanName,
 		trace.WithAttributes(
 			attribute.String("redis.stream.name", streamName),
 			attribute.String("redis.stream.group", groupName),
@@ -229,9 +230,8 @@ func (sc *StreamClient) XAckWithSpan(ctx context.Context, streamName, groupName,
 
 // XReadWithSpan performs XRead with a meaningful OpenTelemetry span
 func (sc *StreamClient) XReadWithSpan(ctx context.Context, streamName string, args *redis.XReadArgs) ([]redis.XStream, error) {
-	tracer := otel.Tracer("redis.stream")
 	spanName := fmt.Sprintf("[stream] %s read", streamName)
-	ctx, span := tracer.Start(ctx, spanName,
+	ctx, span := streamTracer.Start(ctx, spanName,
 		trace.WithAttributes(
 			attribute.String("redis.stream.name", streamName),
 			attribute.String("redis.operation", "XREAD"),
@@ -273,9 +273,8 @@ func (sc *StreamClient) XReadWithSpan(ctx context.Context, streamName string, ar
 
 // XGroupCreateMkStreamWithSpan performs XGroupCreateMkStream with a meaningful OpenTelemetry span
 func (sc *StreamClient) XGroupCreateMkStreamWithSpan(ctx context.Context, streamName, groupName, startID string) error {
-	tracer := otel.Tracer("redis.stream")
 	spanName := fmt.Sprintf("[stream] %s group.create", streamName)
-	ctx, span := tracer.Start(ctx, spanName,
+	ctx, span := streamTracer.Start(ctx, spanName,
 		trace.WithAttributes(
 			attribute.String("redis.stream.name", streamName),
 			attribute.String("redis.stream.group", groupName),

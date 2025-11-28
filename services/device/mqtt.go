@@ -9,6 +9,14 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+)
+
+var (
+	mqttPublishTracer = otel.Tracer("mqtt.publish")
 )
 
 // MQTTClient wraps the MQTT client and connection logic
@@ -219,44 +227,82 @@ func NewMQTTClient(ctx context.Context, cfg Config) (*MQTTClient, error) {
 
 // Publish publishes a message to the specified topic
 func (m *MQTTClient) Publish(ctx context.Context, topic string, qos byte, retained bool, payload []byte) error {
+	spanName := fmt.Sprintf("[mqtt] %s publish", topic)
+	ctx, span := mqttPublishTracer.Start(ctx, spanName,
+		trace.WithAttributes(
+			attribute.String("mqtt.topic", topic),
+			attribute.Int("mqtt.qos", int(qos)),
+			attribute.Bool("mqtt.retained", retained),
+			attribute.Int("mqtt.payload.size", len(payload)),
+			attribute.String("mqtt.operation", "PUBLISH"),
+		),
+	)
+	defer span.End()
+
 	// Check if client is connected before attempting to publish
 	if !m.client.IsConnected() {
-		return fmt.Errorf("MQTT client is not connected")
+		err := fmt.Errorf("MQTT client is not connected")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "client not connected")
+		return err
 	}
 
 	token := m.client.Publish(topic, qos, retained, payload)
 
 	// Wait for publish to complete with timeout (important for QoS 1/2 to get PUBACK/PUBREC)
 	if !token.WaitTimeout(10 * time.Second) {
-		return fmt.Errorf("timeout waiting for publish acknowledgment")
+		err := fmt.Errorf("timeout waiting for publish acknowledgment")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "publish timeout")
+		return err
 	}
 
 	// Check for errors after waiting
 	if token.Error() != nil {
+		span.RecordError(token.Error())
+		span.SetStatus(codes.Error, token.Error().Error())
 		return fmt.Errorf("failed to publish message: %w", token.Error())
 	}
 
 	// For QoS 1, verify client is still connected (broker might disconnect on denial)
 	if qos >= 1 && !m.client.IsConnected() {
-		return fmt.Errorf("client disconnected after publish - broker may have denied the publish")
+		err := fmt.Errorf("client disconnected after publish - broker may have denied the publish")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "client disconnected after publish")
+		return err
 	}
 
 	logger.InfoWithFields(ctx, "Published message on southbound mqtt", map[string]interface{}{
 		"topic": topic,
 	})
+	span.SetStatus(codes.Ok, "success")
 	return nil
 }
 
 // Subscribe subscribes to a topic with a message handler
 func (m *MQTTClient) Subscribe(ctx context.Context, topic string, qos byte, handler mqtt.MessageHandler) error {
+	spanName := fmt.Sprintf("[mqtt] %s subscribe", topic)
+	ctx, span := mqttPublishTracer.Start(ctx, spanName,
+		trace.WithAttributes(
+			attribute.String("mqtt.topic", topic),
+			attribute.Int("mqtt.qos", int(qos)),
+			attribute.String("mqtt.operation", "SUBSCRIBE"),
+		),
+	)
+	defer span.End()
+
 	token := m.client.Subscribe(topic, qos, handler)
 	if token.Wait() && token.Error() != nil {
+		span.RecordError(token.Error())
+		span.SetStatus(codes.Error, token.Error().Error())
 		return fmt.Errorf("failed to subscribe to topic: %w", token.Error())
 	}
+
 	logger.InfoWithFields(ctx, "Subscribed to topic on southbound mqtt", map[string]interface{}{
 		"topic": topic,
 		"qos":   qos,
 	})
+	span.SetStatus(codes.Ok, "success")
 	return nil
 }
 
