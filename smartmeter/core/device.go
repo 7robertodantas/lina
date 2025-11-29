@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
 	"time"
-
-	"errors"
 
 	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
 )
@@ -41,13 +41,14 @@ func NewSmartMeter(deviceID, deviceSecret string, cfg *Config) *SmartMeter {
 	copy(appliances, defaultAppliances)
 
 	// Default DeviceConfig values (will be overwritten by retained MQTT config)
+	// Default heartbeat interval is 5 minutes (300 seconds) if not set
 	defaultDeviceConfig := &DeviceConfig{
 		DeviceId:             deviceID,
 		MeasurementUnit:      "kWh",
 		UnitPriceMsat:        10,
 		ReportingStrategy:    mqttmodel.ReportingStrategy_REPORTING_STRATEGY_INTERVAL,
 		ReportingInterval:    30,
-		HeartbeatInterval:    10,
+		HeartbeatInterval:    300, // 5 minutes default
 		AuthorizeRequestMsat: 1000,
 		Timestamp:            time.Now().Format(time.RFC3339),
 	}
@@ -258,11 +259,64 @@ func (m *SmartMeter) GetDeviceConfig() *DeviceConfig {
 	return m.state.Config
 }
 
+// getHeartbeatInterval returns the heartbeat interval with a default of 5 minutes (300 seconds) if not set
+func (m *SmartMeter) getHeartbeatInterval() int32 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.state.Config == nil || m.state.Config.HeartbeatInterval <= 0 {
+		return 300 // Default to 5 minutes
+	}
+	return m.state.Config.HeartbeatInterval
+}
+
+// restartHeartbeatTicker restarts the heartbeat ticker with the current interval
+func (m *SmartMeter) restartHeartbeatTicker() {
+	m.mu.Lock()
+	// Stop existing ticker if running
+	if m.heartbeatTicker != nil {
+		m.heartbeatTicker.Stop()
+		m.heartbeatTicker = nil
+	}
+	// Get the current heartbeat interval (with default)
+	var hbInterval int32
+	if m.state.Config == nil || m.state.Config.HeartbeatInterval <= 0 {
+		hbInterval = 300 // Default to 5 minutes
+	} else {
+		hbInterval = m.state.Config.HeartbeatInterval
+	}
+	m.mu.Unlock()
+
+	// Create new ticker with updated interval
+	hb := time.Duration(hbInterval) * time.Second
+	m.heartbeatTicker = time.NewTicker(hb)
+	go func() {
+		for range m.heartbeatTicker.C {
+			m.southbound.PublishHeartbeat(mqttmodel.DeviceStatus_DEVICE_STATUS_ONLINE)
+		}
+	}()
+	m.AddLog(fmt.Sprintf("Heartbeat interval updated to %d seconds", hbInterval), "info")
+}
+
 // UpdateConfig updates the device configuration
 func (m *SmartMeter) UpdateDeviceConfig(config *DeviceConfig) {
 	m.mu.Lock()
+	oldInterval := int32(0)
+	if m.state.Config != nil {
+		oldInterval = m.state.Config.HeartbeatInterval
+	}
 	m.state.Config = config
+	// Ensure heartbeat interval has a default if not set
+	if config.HeartbeatInterval <= 0 {
+		config.HeartbeatInterval = 300 // Default to 5 minutes
+	}
+	newInterval := config.HeartbeatInterval
 	m.mu.Unlock()
+
+	// Restart heartbeat ticker if interval changed
+	if oldInterval != newInterval {
+		m.restartHeartbeatTicker()
+	}
+
 	m.AddLog("Configuration updated", "info")
 	m.notifyStateChange()
 }
@@ -540,10 +594,9 @@ func (m *SmartMeter) startSimulationLoops() {
 		}
 	}()
 
-	// Heartbeat ticker
-	m.mu.RLock()
-	hb := time.Duration(m.state.Config.HeartbeatInterval) * time.Second
-	m.mu.RUnlock()
+	// Heartbeat ticker - use helper to get interval with default
+	hbInterval := m.getHeartbeatInterval()
+	hb := time.Duration(hbInterval) * time.Second
 	m.heartbeatTicker = time.NewTicker(hb)
 	go func() {
 		for range m.heartbeatTicker.C {
