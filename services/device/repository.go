@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/robertodantas/lnpay/internal"
+	"go.opentelemetry.io/otel/attribute"
 	_ "modernc.org/sqlite"
 )
 
@@ -13,7 +15,7 @@ import (
 type Device struct {
 	DeviceID             string    `json:"device_id"`
 	MeasurementUnit      string    `json:"measurement_unit"`       // e.g., "kWh"
-	UnitPriceMsat        int64     `json:"unit_price_msat"`         // price per unit in millisatoshis
+	UnitPriceMsat        int64     `json:"unit_price_msat"`        // price per unit in millisatoshis
 	ReportingStrategy    string    `json:"reporting_strategy"`     // "interval" | "delta" | "total"
 	ReportingInterval    int       `json:"reporting_interval"`     // seconds between reports
 	HeartbeatInterval    int       `json:"heartbeat_interval"`     // expected heartbeat frequency (s)
@@ -23,7 +25,8 @@ type Device struct {
 
 // DeviceRepository manages database operations for devices
 type DeviceRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	sqlTracer *internal.SQLTracer
 }
 
 // NewDeviceRepository creates and initializes the SQLite database
@@ -46,11 +49,19 @@ func NewDeviceRepository(ctx context.Context, dbPath string) (*DeviceRepository,
 		timestamp TEXT NOT NULL
 	);`
 
-	if _, err := db.Exec(createTable); err != nil {
+	repo := &DeviceRepository{
+		db:        db,
+		sqlTracer: internal.NewSQLTracer("repository.device"),
+	}
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "CREATE TABLE"),
+		attribute.String("db.table", "devices"),
+	}
+	if _, err := repo.sqlTracer.ExecWithSpan(ctx, "[repository] create table", attrs, db, createTable); err != nil {
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
-	return &DeviceRepository{db: db}, nil
+	return repo, nil
 }
 
 // CreateDevice inserts a new device into the database
@@ -61,8 +72,12 @@ func (r *DeviceRepository) CreateDevice(ctx context.Context, device *Device) err
 		reporting_interval, heartbeat_interval, authorize_request_msat, timestamp
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
-	_, err := r.db.Exec(
-		query,
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "devices"),
+		attribute.String("device.id", device.DeviceID),
+	}
+	if _, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create device", attrs, r.db, query,
 		device.DeviceID,
 		device.MeasurementUnit,
 		device.UnitPriceMsat,
@@ -71,8 +86,7 @@ func (r *DeviceRepository) CreateDevice(ctx context.Context, device *Device) err
 		device.HeartbeatInterval,
 		device.AuthorizeRequestMsat,
 		device.Timestamp.Format(time.RFC3339),
-	)
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to insert device: %w", err)
 	}
 
@@ -89,10 +103,16 @@ func (r *DeviceRepository) GetDevice(ctx context.Context, deviceID string) (*Dev
 	FROM devices
 	WHERE device_id = ?`
 
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "devices"),
+		attribute.String("device.id", deviceID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get device", attrs, r.db, query, deviceID)
+
 	var device Device
 	var timestampStr string
-
-	err := r.db.QueryRow(query, deviceID).Scan(
+	err := row.Scan(
 		&device.DeviceID,
 		&device.MeasurementUnit,
 		&device.UnitPriceMsat,
@@ -130,8 +150,12 @@ func (r *DeviceRepository) UpdateDevice(ctx context.Context, device *Device) err
 		timestamp = ?
 	WHERE device_id = ?`
 
-	result, err := r.db.Exec(
-		query,
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "devices"),
+		attribute.String("device.id", device.DeviceID),
+	}
+	result, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] update device", attrs, r.db, query,
 		device.MeasurementUnit,
 		device.UnitPriceMsat,
 		device.ReportingStrategy,
@@ -167,7 +191,11 @@ func (r *DeviceRepository) ListDevices(ctx context.Context) ([]*Device, error) {
 	FROM devices
 	ORDER BY timestamp DESC`
 
-	rows, err := r.db.Query(query)
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "devices"),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list devices", attrs, r.db, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query devices: %w", err)
 	}

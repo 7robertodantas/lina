@@ -9,13 +9,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/robertodantas/lnpay/internal"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	"go.opentelemetry.io/otel/attribute"
 	_ "modernc.org/sqlite"
 )
 
 // LedgerRepository manages database operations for the ledger
 type LedgerRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	sqlTracer *internal.SQLTracer
 }
 
 // NewLedgerRepository creates and initializes the SQLite database with schema
@@ -75,13 +78,22 @@ func NewLedgerRepository(dbPath string, busyTimeoutMS int) (*LedgerRepository, e
 		`CREATE INDEX IF NOT EXISTS idx_auth_request_id ON authorizations(request_id);`,
 	}
 
+	repo := &LedgerRepository{
+		db:        db,
+		sqlTracer: internal.NewSQLTracer("repository.ledger"),
+	}
+
+	ctx := context.Background()
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "CREATE TABLE/INDEX"),
+	}
 	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := repo.sqlTracer.ExecWithSpan(ctx, "[repository] create schema", attrs, db, s); err != nil {
 			return nil, fmt.Errorf("failed to create schema: %w", err)
 		}
 	}
 
-	return &LedgerRepository{db: db}, nil
+	return repo, nil
 }
 
 // now returns the current Unix timestamp
@@ -95,20 +107,31 @@ func now() int64 { return time.Now().Unix() }
 
 // EnsureBalanceRow ensures a balance row exists for a device
 func (r *LedgerRepository) EnsureBalanceRow(ctx context.Context, tx *sql.Tx, deviceID string) error {
-	_, err := tx.ExecContext(ctx,
-		`INSERT INTO balances(device_id, balance_msat, updated_at)
+	query := `INSERT INTO balances(device_id, balance_msat, updated_at)
 		 VALUES(?,?,?)
-		 ON CONFLICT(device_id) DO NOTHING`,
-		deviceID, 0, now(),
-	)
+		 ON CONFLICT(device_id) DO NOTHING`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "balances"),
+		attribute.String("device.id", deviceID),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] ensure balance row", attrs, tx, query, deviceID, 0, now())
 	return err
 }
 
 // GetBalance retrieves the balance for a device
 func (r *LedgerRepository) GetBalance(ctx context.Context, tx *sql.Tx, deviceID string) (int64, error) {
+	query := `SELECT balance_msat FROM balances WHERE device_id=?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "balances"),
+		attribute.String("device.id", deviceID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get balance", attrs, tx, query, deviceID)
+
 	var bal int64
-	row := tx.QueryRowContext(ctx, `SELECT balance_msat FROM balances WHERE device_id=?`, deviceID)
-	switch err := row.Scan(&bal); err {
+	err := row.Scan(&bal)
+	switch err {
 	case nil:
 		return bal, nil
 	case sql.ErrNoRows:
@@ -120,9 +143,14 @@ func (r *LedgerRepository) GetBalance(ctx context.Context, tx *sql.Tx, deviceID 
 
 // UpdateBalance adds or subtracts from a device's balance
 func (r *LedgerRepository) UpdateBalance(ctx context.Context, tx *sql.Tx, deviceID string, amountMsat int64) error {
-	_, err := tx.ExecContext(ctx, `
-		UPDATE balances SET balance_msat = balance_msat + ?, updated_at=?
-		 WHERE device_id=?`, amountMsat, now(), deviceID)
+	query := `UPDATE balances SET balance_msat = balance_msat + ?, updated_at=? WHERE device_id=?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "balances"),
+		attribute.String("device.id", deviceID),
+		attribute.Int64("amount_msat", amountMsat),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] update balance", attrs, tx, query, amountMsat, now(), deviceID)
 	return err
 }
 
@@ -134,9 +162,17 @@ func (r *LedgerRepository) UpdateBalance(ctx context.Context, tx *sql.Tx, device
 
 // CreateLedgerEntry creates a new ledger entry
 func (r *LedgerRepository) CreateLedgerEntry(ctx context.Context, tx *sql.Tx, entry EntryResponse) error {
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
-		VALUES(?,?,?,?,?,?,?,?)`,
+	query := `INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
+		VALUES(?,?,?,?,?,?,?,?)`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "ledger_entries"),
+		attribute.String("entry.id", entry.EntryID),
+		attribute.String("device.id", entry.DeviceID),
+		attribute.String("entry.type", entry.EntryType),
+		attribute.Int64("amount_msat", entry.AmountMsat),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create ledger entry", attrs, tx, query,
 		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountMsat, entry.BalanceAfter, entry.Reason, entry.CorrelationID, entry.CreatedAt,
 	)
 	return err
@@ -144,13 +180,20 @@ func (r *LedgerRepository) CreateLedgerEntry(ctx context.Context, tx *sql.Tx, en
 
 // ListLedgerEntries retrieves ledger entries for a device with pagination
 func (r *LedgerRepository) ListLedgerEntries(ctx context.Context, deviceID string, cursorCreated int64, cursorID string, limit int) ([]EntryResponse, error) {
-	rows, err := r.db.Query(`
+	query := `
 		SELECT id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at
 		  FROM ledger_entries
 		 WHERE device_id = ?
 		   AND (created_at < ? OR (created_at = ? AND id < ?))
 		 ORDER BY created_at DESC, id DESC
-		 LIMIT ?`,
+		 LIMIT ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "ledger_entries"),
+		attribute.String("device.id", deviceID),
+		attribute.Int("limit", limit),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list ledger entries", attrs, r.db, query,
 		deviceID, cursorCreated, cursorCreated, cursorID, limit,
 	)
 	if err != nil {
@@ -268,7 +311,13 @@ func (r *LedgerRepository) ApplyDebit(ctx context.Context, tx *sql.Tx, in DebitR
 
 // GetCachedIdem retrieves a cached idempotency response
 func (r *LedgerRepository) GetCachedIdem(ctx context.Context, key string) (kind string, resp []byte, ok bool, err error) {
-	row := r.db.QueryRowContext(ctx, `SELECT kind, response_json FROM idempotency WHERE idempotency_key=?`, key)
+	query := `SELECT kind, response_json FROM idempotency WHERE idempotency_key=?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "idempotency"),
+		attribute.String("idempotency.key", key),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get cached idempotency", attrs, r.db, query, key)
 	var k string
 	var rStr string
 	if e := row.Scan(&k, &rStr); e == sql.ErrNoRows {
@@ -282,11 +331,15 @@ func (r *LedgerRepository) GetCachedIdem(ctx context.Context, key string) (kind 
 // SaveIdem saves an idempotency response
 func (r *LedgerRepository) SaveIdem(ctx context.Context, tx *sql.Tx, key, kind, reqHash string, response any) error {
 	js, _ := json.Marshal(response)
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO idempotency(idempotency_key, kind, request_hash, response_json, created_at)
-		VALUES(?,?,?,?,?)`,
-		key, kind, reqHash, string(js), now(),
-	)
+	query := `INSERT INTO idempotency(idempotency_key, kind, request_hash, response_json, created_at)
+		VALUES(?,?,?,?,?)`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "idempotency"),
+		attribute.String("idempotency.key", key),
+		attribute.String("idempotency.kind", kind),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] save idempotency", attrs, tx, query, key, kind, reqHash, string(js), now())
 	return err
 }
 
@@ -298,11 +351,20 @@ func (r *LedgerRepository) SaveIdem(ctx context.Context, tx *sql.Tx, key, kind, 
 
 // CreateAuthorization creates a new authorization
 func (r *LedgerRepository) CreateAuthorization(ctx context.Context, tx *sql.Tx, authID, deviceID, requestID string, grantedMsat int64, issuedAt, expiresAt string) error {
-	_, err := tx.ExecContext(ctx, `
+	query := `
 		INSERT INTO authorizations(
 			authorization_id, device_id, request_id, granted_msat, remaining_msat,
 			consumed_msat, overflow_msat, issued_at, expires_at, status, created_at
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("authorization.id", authID),
+		attribute.String("device.id", deviceID),
+		attribute.String("request.id", requestID),
+		attribute.Int64("granted_msat", grantedMsat),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create authorization", attrs, tx, query,
 		authID, deviceID, requestID, grantedMsat, grantedMsat,
 		0, 0, issuedAt, expiresAt, "active", time.Now().Unix(),
 	)
@@ -311,17 +373,21 @@ func (r *LedgerRepository) CreateAuthorization(ctx context.Context, tx *sql.Tx, 
 
 // GetAuthorizationByRequestID retrieves an authorization by request_id
 func (r *LedgerRepository) GetAuthorizationByRequestID(ctx context.Context, tx *sql.Tx, requestID string) (*ledgermodel.Authorization, string, error) {
-	var authID, deviceID, issuedAt, expiresAt, authStatus string
-	var grantedMsat, remainingMsat int64
-
-	row := tx.QueryRowContext(ctx, `
+	query := `
 		SELECT authorization_id, device_id, granted_msat, remaining_msat, issued_at, expires_at, status
 		FROM authorizations
 		WHERE request_id = ?
 		ORDER BY created_at DESC
-		LIMIT 1`,
-		requestID,
-	)
+		LIMIT 1`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("request.id", requestID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get authorization by request id", attrs, tx, query, requestID)
+
+	var authID, deviceID, issuedAt, expiresAt, authStatus string
+	var grantedMsat, remainingMsat int64
 
 	err := row.Scan(&authID, &deviceID, &grantedMsat, &remainingMsat, &issuedAt, &expiresAt, &authStatus)
 	if err != nil {
@@ -342,21 +408,25 @@ func (r *LedgerRepository) GetAuthorizationByRequestID(ctx context.Context, tx *
 
 // GetActiveAuthorization retrieves the most recent active authorization for a device
 func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.Tx, deviceID string, expiresAfter string) (string, int64, int64, int64, string, string, error) {
+	query := `
+		SELECT authorization_id, remaining_msat, granted_msat, overflow_msat, expires_at, status
+		FROM authorizations
+		WHERE device_id = ? AND status = 'active' AND expires_at > ?
+		ORDER BY created_at DESC
+		LIMIT 1`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("device.id", deviceID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get active authorization", attrs, tx, query, deviceID, expiresAfter)
+
 	var authorizationID string
 	var remainingMsat int64
 	var grantedMsat int64
 	var overflowMsat int64
 	var expiresAt string
 	var status string
-
-	row := tx.QueryRowContext(ctx, `
-		SELECT authorization_id, remaining_msat, granted_msat, overflow_msat, expires_at, status
-		FROM authorizations
-		WHERE device_id = ? AND status = 'active' AND expires_at > ?
-		ORDER BY created_at DESC
-		LIMIT 1`,
-		deviceID, expiresAfter,
-	)
 
 	err := row.Scan(&authorizationID, &remainingMsat, &grantedMsat, &overflowMsat, &expiresAt, &status)
 	if err != nil {
@@ -368,10 +438,18 @@ func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.T
 
 // UpdateAuthorization updates an authorization's remaining amount, consumed amount, overflow amount, and status
 func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, remainingMsat int64, consumedMsat int64, overflowMsat int64, status string) error {
-	_, err := tx.ExecContext(ctx, `
+	query := `
 		UPDATE authorizations
 		SET remaining_msat = ?, consumed_msat = ?, overflow_msat = ?, status = ?
-		WHERE authorization_id = ?`,
+		WHERE authorization_id = ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("authorization.id", authorizationID),
+		attribute.String("authorization.status", status),
+		attribute.Int64("remaining_msat", remainingMsat),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] update authorization", attrs, tx, query,
 		remainingMsat, consumedMsat, overflowMsat, status, authorizationID,
 	)
 	return err
@@ -386,12 +464,15 @@ type ExpiredAuthorization struct {
 
 // GetExpiredAuthorizations retrieves all expired active authorizations
 func (r *LedgerRepository) GetExpiredAuthorizations(ctx context.Context, expiresBefore string) ([]ExpiredAuthorization, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	query := `
 		SELECT authorization_id, device_id, expires_at
 		FROM authorizations
-		WHERE status = 'active' AND expires_at < ?`,
-		expiresBefore,
-	)
+		WHERE status = 'active' AND expires_at < ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "authorizations"),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] get expired authorizations", attrs, r.db, query, expiresBefore)
 	if err != nil {
 		return nil, err
 	}
@@ -411,12 +492,16 @@ func (r *LedgerRepository) GetExpiredAuthorizations(ctx context.Context, expires
 
 // GetActiveAuthorizationByID retrieves an active authorization's device ID and remaining amount
 func (r *LedgerRepository) GetActiveAuthorizationByID(ctx context.Context, tx *sql.Tx, authorizationID string) (deviceID string, remainingMsat int64, err error) {
-	row := tx.QueryRowContext(ctx, `
+	query := `
 		SELECT device_id, remaining_msat
 		FROM authorizations
-		WHERE authorization_id = ? AND status = 'active'`,
-		authorizationID,
-	)
+		WHERE authorization_id = ? AND status = 'active'`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("authorization.id", authorizationID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get active authorization by id", attrs, tx, query, authorizationID)
 
 	if err := row.Scan(&deviceID, &remainingMsat); err != nil {
 		return "", 0, err
@@ -427,13 +512,17 @@ func (r *LedgerRepository) GetActiveAuthorizationByID(ctx context.Context, tx *s
 
 // MarkAuthorizationExpired marks an authorization as expired
 func (r *LedgerRepository) MarkAuthorizationExpired(ctx context.Context, tx *sql.Tx, authorizationID string) error {
-	_, err := tx.ExecContext(ctx, `
+	query := `
 		UPDATE authorizations
 		SET status = 'expired',
 		    remaining_msat = 0
-		WHERE authorization_id = ?`,
-		authorizationID,
-	)
+		WHERE authorization_id = ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("authorization.id", authorizationID),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] mark authorization expired", attrs, tx, query, authorizationID)
 	return err
 }
 
@@ -469,7 +558,13 @@ func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID stri
 		args = []interface{}{deviceID}
 	}
 
-	rows, err := r.db.Query(query, args...)
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "authorizations"),
+		attribute.String("device.id", deviceID),
+		attribute.String("status.filter", statusFilter),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list authorizations", attrs, r.db, query, args...)
 	if err != nil {
 		return nil, err
 	}

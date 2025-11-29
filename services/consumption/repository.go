@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/robertodantas/lnpay/internal"
+	"go.opentelemetry.io/otel/attribute"
 	_ "modernc.org/sqlite"
 )
 
 // ConsumptionRepository manages database operations for consumption records
 type ConsumptionRepository struct {
-	db *sql.DB
+	db        *sql.DB
+	sqlTracer *internal.SQLTracer
 }
 
 // NewConsumptionRepository creates and initializes the SQLite database with schema
@@ -70,13 +73,22 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 		`CREATE INDEX IF NOT EXISTS idx_device_ledger ON device_accumulation_ledger (device_id, created_at)`,
 	}
 
+	repo := &ConsumptionRepository{
+		db:        db,
+		sqlTracer: internal.NewSQLTracer("repository.consumption"),
+	}
+
+	ctx := context.Background()
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "CREATE TABLE/INDEX"),
+	}
 	for _, s := range stmts {
-		if _, err := db.Exec(s); err != nil {
+		if _, err := repo.sqlTracer.ExecWithSpan(ctx, "[repository] create schema", attrs, db, s); err != nil {
 			return nil, fmt.Errorf("failed to create schema: %w", err)
 		}
 	}
 
-	return &ConsumptionRepository{db: db}, nil
+	return repo, nil
 }
 
 // OutboxEvent represents an event stored in the outbox
@@ -90,11 +102,16 @@ type OutboxEvent struct {
 
 // CheckReportExists checks if a report_id already exists (for idempotency)
 func (r *ConsumptionRepository) CheckReportExists(ctx context.Context, tx *sql.Tx, reportID string) (bool, error) {
+	query := `SELECT report_id FROM consumption_records WHERE report_id = ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "consumption_records"),
+		attribute.String("report.id", reportID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] check report exists", attrs, tx, query, reportID)
+
 	var existingReportID string
-	err := tx.QueryRowContext(ctx, `
-		SELECT report_id FROM consumption_records WHERE report_id = ?`,
-		reportID,
-	).Scan(&existingReportID)
+	err := row.Scan(&existingReportID)
 
 	if err == nil {
 		return true, nil
@@ -110,7 +127,14 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 	now := time.Now().Unix()
 
 	// Insert into consumption_records
-	_, err := tx.ExecContext(ctx, `
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "consumption_records"),
+		attribute.String("report.id", reportID),
+		attribute.String("device.id", deviceID),
+		attribute.Int64("debit_msat", debitMsat),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create consumption record", attrs, tx, `
 		INSERT INTO consumption_records (
 			report_id, device_id, debit_msat,
 			measure, price_per_unit_msat, unit, timestamp, created_at
@@ -132,7 +156,12 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 			traceparent = traceContext["traceparent"]
 		}
 
-		_, err := tx.ExecContext(ctx, `
+		outboxAttrs := []attribute.KeyValue{
+			attribute.String("db.operation", "INSERT"),
+			attribute.String("db.table", "consumption_outbox"),
+			attribute.String("report.id", reportID),
+		}
+		_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create outbox entry", outboxAttrs, tx, `
 			INSERT INTO consumption_outbox (report_id, published, traceparent, created_at)
 			VALUES (?, 0, ?, ?)`,
 			reportID, traceparent, now,
@@ -156,7 +185,12 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, limit)
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "consumption_outbox"),
+		attribute.Int("limit", limit),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] get unpublished outbox events", attrs, r.db, query, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query unpublished outbox events: %w", err)
 	}
@@ -189,13 +223,16 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 
 // MarkOutboxAsPublished marks an outbox entry as published
 func (r *ConsumptionRepository) MarkOutboxAsPublished(ctx context.Context, reportID string) error {
-	_, err := r.db.ExecContext(ctx, `
+	query := `
 		UPDATE consumption_outbox
 		SET published = 1, published_at = ?
-		WHERE report_id = ?`,
-		time.Now().Unix(), reportID,
-	)
-	if err != nil {
+		WHERE report_id = ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "consumption_outbox"),
+		attribute.String("report.id", reportID),
+	}
+	if _, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] mark outbox as published", attrs, r.db, query, time.Now().Unix(), reportID); err != nil {
 		return fmt.Errorf("failed to mark report %s as published: %w", reportID, err)
 	}
 	return nil
@@ -206,11 +243,15 @@ func (r *ConsumptionRepository) CleanupOutbox(ctx context.Context, retentionDays
 	retentionSeconds := int64(retentionDays * 24 * 60 * 60)
 	cutoffTime := time.Now().Unix() - retentionSeconds
 
-	result, err := r.db.ExecContext(ctx, `
+	query := `
 		DELETE FROM consumption_outbox
-		WHERE published = 1 AND published_at < ?`,
-		cutoffTime,
-	)
+		WHERE published = 1 AND published_at < ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "DELETE"),
+		attribute.String("db.table", "consumption_outbox"),
+		attribute.Int("retention_days", retentionDays),
+	}
+	result, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] cleanup outbox", attrs, r.db, query, cutoffTime)
 	if err != nil {
 		return 0, fmt.Errorf("failed to cleanup outbox: %w", err)
 	}
@@ -226,15 +267,21 @@ func (r *ConsumptionRepository) CleanupOutbox(ctx context.Context, retentionDays
 // GetDeviceAccumulatedAmount retrieves the current accumulated fractional msat for a device
 // by reading the most recent ledger entry's balance (O(1) lookup)
 func (r *ConsumptionRepository) GetDeviceAccumulatedAmount(ctx context.Context, tx *sql.Tx, deviceID string) (float64, error) {
-	var balance sql.NullFloat64
-	err := tx.QueryRowContext(ctx, `
+	query := `
 		SELECT accumulated_balance_msat
 		FROM device_accumulation_ledger
 		WHERE device_id = ?
 		ORDER BY id DESC
-		LIMIT 1`,
-		deviceID,
-	).Scan(&balance)
+		LIMIT 1`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "device_accumulation_ledger"),
+		attribute.String("device.id", deviceID),
+	}
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get device accumulated amount", attrs, tx, query, deviceID)
+
+	var balance sql.NullFloat64
+	err := row.Scan(&balance)
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -268,13 +315,21 @@ func (r *ConsumptionRepository) AppendAccumulationLedger(ctx context.Context, tx
 	}
 
 	now := time.Now().Unix()
-	_, err := tx.ExecContext(ctx, `
+	query := `
 		INSERT INTO device_accumulation_ledger (device_id, report_id, type, amount_msat, accumulated_balance_msat, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?)`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.table", "device_accumulation_ledger"),
+		attribute.String("device.id", deviceID),
+		attribute.String("report.id", reportID),
+		attribute.String("entry.type", entryType),
+		attribute.Float64("amount_msat", amountMsat),
+		attribute.Float64("new_balance_msat", newBalance),
+	}
+	if _, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] append accumulation ledger", attrs, tx, query,
 		deviceID, reportID, entryType, amountMsat, newBalance, now,
-	)
-
-	if err != nil {
+	); err != nil {
 		return fmt.Errorf("failed to append to accumulation ledger: %w", err)
 	}
 
@@ -312,7 +367,13 @@ func (r *ConsumptionRepository) ListDeviceConsumptions(ctx context.Context, devi
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, deviceID, limit)
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "consumption_records"),
+		attribute.String("device.id", deviceID),
+		attribute.Int("limit", limit),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list device consumptions", attrs, r.db, query, deviceID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query device consumptions: %w", err)
 	}
@@ -371,7 +432,13 @@ func (r *ConsumptionRepository) ListDeviceAccumulations(ctx context.Context, dev
 		LIMIT ?
 	`
 
-	rows, err := r.db.QueryContext(ctx, query, deviceID, limit)
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "device_accumulation_ledger"),
+		attribute.String("device.id", deviceID),
+		attribute.Int("limit", limit),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list device accumulations", attrs, r.db, query, deviceID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query device accumulations: %w", err)
 	}
