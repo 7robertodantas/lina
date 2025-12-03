@@ -75,15 +75,6 @@ export function QRPayment({ invoice, onSimulatePayment, onClose }: QRPaymentProp
               </>
             )}
           </Button>
-
-          <Button
-            size="sm"
-            className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-            onClick={onSimulatePayment}
-          >
-            <Zap className="mr-2 h-4 w-4" />
-            Simulate Payment
-          </Button>
         </div>
 
         <p className="text-center text-xs text-muted-foreground">

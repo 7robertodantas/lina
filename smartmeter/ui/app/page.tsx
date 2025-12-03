@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import { useSmartMeter } from "@/hooks/use-smart-meter"
 import { MeterControl } from "@/components/meter-control"
 import { MainMeter } from "@/components/main-meter"
@@ -33,6 +34,13 @@ export default function SmartMeterPage() {
   const isBackendConnected = backendStatus === "connected"
   const hasActiveAuthorization = currentAuthorization?.status === "ACTIVE"
   const canToggleAppliances = true; //isOnline && ((balance?.available_msat ?? 0) > 0 || hasActiveAuthorization)
+
+  // Automatically close the invoice card when it's paid or settled
+  useEffect(() => {
+    if (invoice && invoice.status === "PAID") {
+      clearInvoice()
+    }
+  }, [invoice, clearInvoice])
 
   return (
     <main className="min-h-screen bg-background p-4 md:p-6 lg:p-8">

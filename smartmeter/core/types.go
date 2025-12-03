@@ -73,3 +73,46 @@ var (
 	protoMarshalOpts   = protojson.MarshalOptions{UseProtoNames: true}
 	protoUnmarshalOpts = protojson.UnmarshalOptions{DiscardUnknown: true}
 )
+
+// InvoiceResponseJSON is a JSON-friendly representation of InvoiceResponse with string status
+type InvoiceResponseJSON struct {
+	DeviceID   string `json:"device_id"`
+	RequestID  string `json:"request_id"`
+	Status     string `json:"status"`
+	InvoiceID  string `json:"invoice_id"`
+	Bolt11     string `json:"bolt11"`
+	AmountMsat int64  `json:"amount_msat"`
+	ExpiresAt  string `json:"expires_at"`
+}
+
+// ConvertInvoiceStatusToString converts protobuf InvoiceStatus enum to string
+func ConvertInvoiceStatusToString(status mqttmodel.InvoiceStatus) string {
+	switch status {
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_CREATED:
+		return "CREATED"
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_SETTLED:
+		return "PAID" // Frontend expects "PAID" not "SETTLED"
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_EXPIRED:
+		return "EXPIRED"
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_FAILED:
+		return "ERROR" // Frontend expects "ERROR" not "FAILED"
+	default:
+		return "CREATED"
+	}
+}
+
+// ConvertInvoiceResponseToJSON converts InvoiceResponse to JSON-friendly format
+func ConvertInvoiceResponseToJSON(invoice *InvoiceResponse) *InvoiceResponseJSON {
+	if invoice == nil {
+		return nil
+	}
+	return &InvoiceResponseJSON{
+		DeviceID:   invoice.DeviceId,
+		RequestID:  invoice.RequestId,
+		Status:     ConvertInvoiceStatusToString(invoice.Status),
+		InvoiceID:  invoice.InvoiceId,
+		Bolt11:     invoice.Bolt11,
+		AmountMsat: invoice.AmountMsat,
+		ExpiresAt:  invoice.ExpiresAt,
+	}
+}

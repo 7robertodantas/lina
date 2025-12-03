@@ -95,11 +95,42 @@ func (m *SmartMeter) GetState() DeviceState {
 	return m.state
 }
 
-// GetStateJSON returns the state as JSON
+// DeviceStateJSON is a JSON-friendly representation of DeviceState with converted invoice
+type DeviceStateJSON struct {
+	DeviceID             string               `json:"deviceId"`
+	DeviceStatus         string               `json:"deviceStatus"`
+	Appliances           []Appliance          `json:"appliances"`
+	Balance              *BalanceMessage      `json:"balance"`
+	Config               *DeviceConfig        `json:"config"`
+	TotalConsumption     float64              `json:"totalConsumption"`
+	InstantPower         int                  `json:"instantPower"`
+	Invoice              *InvoiceResponseJSON `json:"invoice"`
+	CurrentAuthorization *Authorization       `json:"currentAuthorization"`
+	Logs                 []LogEntry           `json:"logs"`
+	MQTTStatus           string               `json:"mqttStatus"`
+}
+
+// GetStateJSON returns the state as JSON with invoice status converted to string
 func (m *SmartMeter) GetStateJSON() json.RawMessage {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	data, _ := json.Marshal(&m.state)
+
+	// Convert to JSON-friendly format
+	stateJSON := DeviceStateJSON{
+		DeviceID:             m.state.DeviceID,
+		DeviceStatus:         m.state.DeviceStatus,
+		Appliances:           m.state.Appliances,
+		Balance:              m.state.Balance,
+		Config:               m.state.Config,
+		TotalConsumption:     m.state.TotalConsumption,
+		InstantPower:         m.state.InstantPower,
+		Invoice:              ConvertInvoiceResponseToJSON(m.state.Invoice),
+		CurrentAuthorization: m.state.CurrentAuthorization,
+		Logs:                 m.state.Logs,
+		MQTTStatus:           m.state.MQTTStatus,
+	}
+
+	data, _ := json.Marshal(&stateJSON)
 	return data
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/robertodantas/lnpay/internal"
 	devicepb "github.com/robertodantas/lnpay/proto/gen/model/device"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
 	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
 )
 
@@ -291,6 +292,144 @@ func (sc *StreamClient) publishAuthorizationControl(ctx context.Context, mqttCli
 		InfoWithFields(ctx, "Published AUTHORIZATION control on southbound mqtt", map[string]interface{}{
 			"authorization_id": authorizationID,
 			"reason":           reason,
+		})
+	return nil
+}
+
+// StartLightningInvoiceSubscriber listens for lightning invoice events and forwards updates via MQTT
+func (sc *StreamClient) StartLightningInvoiceSubscriber(ctx context.Context, mqttClient *MQTTClient) {
+	go sc.consumeLightningInvoiceEvents(ctx, mqttClient)
+}
+
+func (sc *StreamClient) consumeLightningInvoiceEvents(ctx context.Context, mqttClient *MQTTClient) {
+	streamName := "event.lightning"
+	lastID := "$"
+
+	logger.WithStream(streamName, "consume").
+		Info(ctx, "Starting lightning invoice subscriber")
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.WithStream(streamName, "consume").
+				Info(ctx, "Stopping lightning invoice subscriber")
+			return
+		default:
+		}
+
+		streams, err := sc.XReadWithSpan(ctx, streamName, &redis.XReadArgs{
+			Streams: []string{streamName, lastID},
+			Count:   20,
+			Block:   5 * time.Second,
+		})
+		if err != nil {
+			if err == redis.Nil {
+				continue
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			logger.WithStream(streamName, "consume").
+				Error(ctx, "Lightning invoice subscriber read error", err)
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		for _, stream := range streams {
+			for _, msg := range stream.Messages {
+				lastID = msg.ID
+
+				// Wrap message handling with tracing
+				if err := internal.TraceEventProcessing(ctx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
+					opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+					return sc.handleLightningMessage(ctx, mqttClient, msg, opts)
+				}, nil); err != nil {
+					logger.WithStream(streamName, "consume").
+						Errorf(ctx, "Failed to handle lightning message %s: %v", msg.ID, err)
+				}
+			}
+		}
+	}
+}
+
+func (sc *StreamClient) handleLightningMessage(ctx context.Context, mqttClient *MQTTClient, msg redis.XMessage, opts protojson.UnmarshalOptions) error {
+	raw, ok := msg.Values["event"].(string)
+	if !ok {
+		return fmt.Errorf("lightning message missing event field")
+	}
+
+	var lightningEvent lightningmodel.LightningEvent
+	if err := opts.Unmarshal([]byte(raw), &lightningEvent); err != nil {
+		return fmt.Errorf("failed to unmarshal lightning event: %w", err)
+	}
+
+	switch lightningEvent.GetType() {
+	case lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_SETTLED:
+		payload := lightningEvent.GetInvoiceSettled()
+		if payload == nil {
+			return fmt.Errorf("lightning event missing InvoiceSettled payload")
+		}
+		logger.WithDeviceID(payload.GetDeviceId()).
+			InfoWithFields(ctx, "Processing InvoiceSettled event from lightning stream", map[string]interface{}{
+				"invoice_id": payload.GetInvoiceId(),
+				"amount_msat": payload.GetAmountReceivedMsat(),
+			})
+		return sc.publishInvoiceEvent(ctx, mqttClient, payload.GetDeviceId(), payload.GetInvoiceId(), mqttpb.InvoiceStatus_INVOICE_STATUS_SETTLED, payload.GetAmountReceivedMsat(), payload.GetNewBalanceMsat(), payload.GetTimestamp())
+	case lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED:
+		payload := lightningEvent.GetInvoiceExpired()
+		if payload == nil {
+			return fmt.Errorf("lightning event missing InvoiceExpired payload")
+		}
+		logger.WithDeviceID(payload.GetDeviceId()).
+			InfoWithFields(ctx, "Processing InvoiceExpired event from lightning stream", map[string]interface{}{
+				"invoice_id": payload.GetInvoiceId(),
+			})
+		return sc.publishInvoiceEvent(ctx, mqttClient, payload.GetDeviceId(), payload.GetInvoiceId(), mqttpb.InvoiceStatus_INVOICE_STATUS_EXPIRED, 0, 0, payload.GetTimestamp())
+	default:
+		logger.WithStream("event.lightning", "consume").
+			DebugWithFields(ctx, "Ignoring lightning event type", map[string]interface{}{
+				"type": lightningEvent.GetType().String(),
+			})
+		return nil
+	}
+}
+
+func (sc *StreamClient) publishInvoiceEvent(ctx context.Context, mqttClient *MQTTClient, deviceID string, invoiceID string, status mqttpb.InvoiceStatus, amountReceivedMsat int64, balanceMsat int64, timestamp string) error {
+	if deviceID == "" {
+		return fmt.Errorf("lightning event missing device_id")
+	}
+	if timestamp == "" {
+		timestamp = time.Now().UTC().Format(time.RFC3339)
+	}
+
+	payload := &mqttpb.InvoiceEventPayload{
+		DeviceId:  deviceID,
+		InvoiceId: invoiceID,
+		Status:    status,
+		Timestamp: timestamp,
+	}
+
+	// Only set amount and balance for settled invoices
+	if status == mqttpb.InvoiceStatus_INVOICE_STATUS_SETTLED {
+		payload.AmountReceivedMsat = amountReceivedMsat
+		payload.BalanceMsat = balanceMsat
+	}
+
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	msgBytes, err := marshalOpts.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal invoice event payload: %w", err)
+	}
+
+	topic := fmt.Sprintf("/devices/%s/events/invoice", deviceID)
+	if err := mqttClient.Publish(ctx, topic, 1, false, msgBytes); err != nil {
+		return fmt.Errorf("failed to publish invoice event to MQTT: %w", err)
+	}
+
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Published invoice event on southbound mqtt", map[string]interface{}{
+			"invoice_id": invoiceID,
+			"status":     status.String(),
 		})
 	return nil
 }

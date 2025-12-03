@@ -220,6 +220,9 @@ func main() {
 	// Start ledger balance subscriber to fan-out balance updates via MQTT
 	streamClient.StartLedgerBalanceSubscriber(serviceCtx, mqttClient)
 
+	// Start lightning invoice event subscriber to fan-out invoice updates via MQTT
+	streamClient.StartLightningInvoiceSubscriber(serviceCtx, mqttClient)
+
 	logger.Info(ctx, "Device service is running. Press Ctrl+C to stop")
 	logger.Infof(ctx, "Northbound REST API available at http://localhost%s", cfg.APIAddr)
 

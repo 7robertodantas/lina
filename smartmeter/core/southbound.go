@@ -133,6 +133,7 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 	}{
 		{"/devices/" + deviceID + "/response/authorize", sb.handleAuthorizeResponse},
 		{"/devices/" + deviceID + "/response/invoice", sb.handleInvoiceResponse},
+		{"/devices/" + deviceID + "/events/invoice", sb.handleInvoiceEvent},
 		{"/devices/" + deviceID + "/balance", sb.handleBalanceMessage},
 		{"/devices/" + deviceID + "/config", sb.handleConfigMessage},
 		{"/devices/" + deviceID + "/control", sb.handleControlMessage},
@@ -148,6 +149,10 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 				logger.InfoWithFields(ctx, "Subscribed to topic on southbound mqtt", map[string]interface{}{
 					"topic": t.topic,
 				})
+				// Log subscription success for invoice events topic
+				if strings.Contains(t.topic, "/events/invoice") {
+					sb.meter.AddLog("Subscribed to invoice events: "+t.topic, "info")
+				}
 			}
 		} else {
 			sb.meter.AddLog("Timeout subscribing to "+t.topic, "error")
@@ -169,61 +174,70 @@ func (sb *SouthboundInterface) subscribeToTopics() {
 
 // MQTT Message Handlers
 func (sb *SouthboundInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Message) {
-	ctx := context.Background()
-	logger.DebugWithFields(ctx, "Raw config payload received on southbound mqtt", map[string]interface{}{
-		"payload": string(msg.Payload()),
-	})
-
-	var config DeviceConfig
+	// Deserialize using proto model first
+	var config mqttmodel.ConfigPayload
 	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &config); err != nil {
 		sb.meter.AddLog("Failed to parse config message: "+err.Error(), "error")
 		return
 	}
 
-	sb.meter.UpdateDeviceConfig(&config)
+	// Convert to domain type (type alias, so this is just a pointer conversion)
+	domainConfig := (*DeviceConfig)(&config)
+	sb.meter.UpdateDeviceConfig(domainConfig)
 }
 
 func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.Message) {
-	var response AuthorizeResponse
+	// Deserialize using proto model first
+	var response mqttmodel.AuthorizationResponsePayload
 	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &response); err != nil {
 		sb.meter.AddLog("Failed to parse authorize response: "+err.Error(), "error")
 		return
 	}
 
+	// Convert to domain type (type alias, so this is just a pointer conversion)
+	domainResponse := (*AuthorizeResponse)(&response)
+
 	switch response.Status {
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_GRANTED:
-		sb.meter.HandleAuthorizationGranted(&response)
+		sb.meter.HandleAuthorizationGranted(domainResponse)
 
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED:
-		sb.meter.HandleAuthorizationRejected(&response)
+		sb.meter.HandleAuthorizationRejected(domainResponse)
 		// Device service will send STOP control command, so no need to halt here
 	}
 }
 
 func (sb *SouthboundInterface) handleBalanceMessage(client mqtt.Client, msg mqtt.Message) {
-	var balance BalanceMessage
+	// Deserialize using proto model first
+	var balance mqttmodel.BalancePayload
 	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &balance); err != nil {
 		sb.meter.AddLog("Failed to parse balance message: "+err.Error(), "error")
 		return
 	}
 
-	shouldRequestAuth, reason := sb.meter.UpdateBalance(&balance)
+	// Convert to domain type (type alias, so this is just a pointer conversion)
+	domainBalance := (*BalanceMessage)(&balance)
+
+	shouldRequestAuth, reason := sb.meter.UpdateBalance(domainBalance)
 	if shouldRequestAuth {
-		sb.meter.AddLog("New funds detected requesting authorization", "info")
 		sb.PublishAuthorizeRequest(reason)
 	}
 }
 
 func (sb *SouthboundInterface) handleInvoiceResponse(client mqtt.Client, msg mqtt.Message) {
-	var response InvoiceResponse
+	// Deserialize using proto model first
+	var response mqttmodel.InvoiceResponsePayload
 	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &response); err != nil {
 		sb.meter.AddLog("Failed to parse invoice response: "+err.Error(), "error")
 		return
 	}
 
+	// Convert to domain type (type alias, so this is just a pointer conversion)
+	domainResponse := (*InvoiceResponse)(&response)
+
 	switch response.Status {
 	case mqttmodel.InvoiceStatus_INVOICE_STATUS_CREATED:
-		sb.meter.SetInvoice(&response)
+		sb.meter.SetInvoice(domainResponse)
 		sb.meter.AddLog("Invoice created: "+response.InvoiceId, "success")
 	case mqttmodel.InvoiceStatus_INVOICE_STATUS_EXPIRED:
 		sb.meter.AddLog("Invoice expired: "+response.InvoiceId, "error")
@@ -234,6 +248,34 @@ func (sb *SouthboundInterface) handleInvoiceResponse(client mqtt.Client, msg mqt
 	case mqttmodel.InvoiceStatus_INVOICE_STATUS_SETTLED:
 		sb.meter.ClearInvoice()
 		sb.meter.AddLog("Payment received: "+formatMsat(response.AmountMsat)+" msa for invoice "+response.InvoiceId, "success")
+	}
+}
+
+func (sb *SouthboundInterface) handleInvoiceEvent(client mqtt.Client, msg mqtt.Message) {
+	// Deserialize using proto model first
+	var event mqttmodel.InvoiceEventPayload
+	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &event); err != nil {
+		sb.meter.AddLog("Failed to parse invoice event: "+err.Error(), "error")
+		return
+	}
+
+	// Get current invoice to check if this event is for the active invoice
+	currentInvoice := sb.meter.GetState().Invoice
+	if currentInvoice != nil && currentInvoice.InvoiceId != event.InvoiceId {
+		sb.meter.AddLog("Invoice event received for different invoice: "+event.InvoiceId+" (expected: "+currentInvoice.InvoiceId+")", "error")
+		return
+	}
+
+	switch event.Status {
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_SETTLED:
+		sb.meter.ClearInvoice()
+		amountMsg := formatMsat(event.AmountReceivedMsat)
+		sb.meter.AddLog(fmt.Sprintf("Invoice settled: %s (%s msats received)", event.InvoiceId, amountMsg), "success")
+	case mqttmodel.InvoiceStatus_INVOICE_STATUS_EXPIRED:
+		sb.meter.ClearInvoice()
+		sb.meter.AddLog("Invoice expired: "+event.InvoiceId, "error")
+	default:
+		sb.meter.AddLog("Unhandled invoice event status: "+event.Status.String()+" for invoice "+event.InvoiceId, "error")
 	}
 }
 

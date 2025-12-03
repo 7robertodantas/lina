@@ -712,6 +712,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 	publishTopics := []string{
 		"/devices/+/response/authorize",
 		"/devices/+/response/invoice",
+		"/devices/+/events/invoice",
 		"/devices/+/config",
 		"/devices/+/control",
 		"/devices/+/balance",
