@@ -195,10 +195,8 @@ func (sb *SouthboundInterface) handleAuthorizeResponse(client mqtt.Client, msg m
 		sb.meter.HandleAuthorizationGranted(&response)
 
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED:
-		shouldHalt, haltReason := sb.meter.HandleAuthorizationRejected(&response)
-		if shouldHalt {
-			sb.meter.HaltConsumption(haltReason)
-		}
+		sb.meter.HandleAuthorizationRejected(&response)
+		// Device service will send STOP control command, so no need to halt here
 	}
 }
 

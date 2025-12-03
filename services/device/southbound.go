@@ -194,6 +194,11 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(ctx context.Context, c
 			logger.WithDeviceID(deviceID).
 				Error(ctx, "Error publishing error response to device on southbound mqtt", err)
 		}
+		// Publish STOP control command when authorization is rejected due to error
+		if err := sb.publishControlCommand(ctx, deviceID, mqttpb.ControlCommand_CONTROL_COMMAND_STOP, fmt.Sprintf("Failed to process authorization: %v", err)); err != nil {
+			logger.WithDeviceID(deviceID).
+				Error(ctx, "Error publishing STOP control command after authorization error on southbound mqtt", err)
+		}
 		return
 	}
 
@@ -242,6 +247,61 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(ctx context.Context, c
 			"topic":  responseTopic,
 			"status": response.Status.String(),
 		})
+
+	// If authorization was granted or is active, publish RESUME control command
+	if response.Status == mqttpb.AuthorizationStatus_AUTHORIZATION_STATUS_GRANTED ||
+		response.Status == mqttpb.AuthorizationStatus_AUTHORIZATION_STATUS_ACTIVE {
+		reason := response.Reason
+		if reason == "" {
+			reason = "AUTHORIZATION_GRANTED"
+		}
+		if err := sb.publishControlCommand(ctx, deviceID, mqttpb.ControlCommand_CONTROL_COMMAND_RESUME, reason); err != nil {
+			logger.WithDeviceID(deviceID).
+				Error(ctx, "Error publishing RESUME control command after authorization grant on southbound mqtt", err)
+		}
+	}
+
+	// If authorization was rejected, publish STOP control command to halt the device
+	if response.Status == mqttpb.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED {
+		reason := response.Reason
+		if reason == "" {
+			reason = "AUTHORIZATION_REJECTED"
+		}
+		if err := sb.publishControlCommand(ctx, deviceID, mqttpb.ControlCommand_CONTROL_COMMAND_STOP, reason); err != nil {
+			logger.WithDeviceID(deviceID).
+				Error(ctx, "Error publishing STOP control command after authorization rejection on southbound mqtt", err)
+		}
+	}
+}
+
+// publishControlCommand publishes a control command to the device
+func (sb *SouthboundInterface) publishControlCommand(ctx context.Context, deviceID string, command mqttpb.ControlCommand, reason string) error {
+	if deviceID == "" {
+		return fmt.Errorf("device ID is required")
+	}
+
+	payload := &mqttpb.ControlPayload{
+		Command: command,
+		Reason:  reason,
+	}
+
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	msgBytes, err := marshalOpts.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal control payload: %w", err)
+	}
+
+	topic := fmt.Sprintf("/devices/%s/control", deviceID)
+	if err := sb.mqttClient.Publish(ctx, topic, 1, false, msgBytes); err != nil {
+		return fmt.Errorf("failed to publish control command to MQTT: %w", err)
+	}
+
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Published control command on southbound mqtt", map[string]interface{}{
+			"command": command.String(),
+			"reason":  reason,
+		})
+	return nil
 }
 
 // handleInvoiceRequest processes invoice requests from devices

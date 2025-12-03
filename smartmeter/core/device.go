@@ -364,12 +364,11 @@ func (m *SmartMeter) HandleAuthorizationGranted(response *AuthorizeResponse) {
 	m.AddLog("Authorization granted: "+formatMsat(response.GrantedMsat)+" msat (reserved)", "success")
 	m.notifyStateChange()
 
-	// Restore previous appliance states
-	m.restoreApplianceStates()
+	// Device service will send RESUME control command to restore appliances
 }
 
 // HandleAuthorizationRejected processes a rejected authorization
-func (m *SmartMeter) HandleAuthorizationRejected(response *AuthorizeResponse) (shouldHalt bool, haltReason string) {
+func (m *SmartMeter) HandleAuthorizationRejected(response *AuthorizeResponse) {
 	m.AddLog("Authorization rejected: "+response.RequestId, "error")
 
 	m.mu.Lock()
@@ -392,7 +391,8 @@ func (m *SmartMeter) HandleAuthorizationRejected(response *AuthorizeResponse) (s
 	}
 	m.mu.Unlock()
 
-	return true, response.Reason
+	// Device service will send STOP control command to halt consumption
+	// No need to halt here - the device will handle the STOP command
 }
 
 // SetInvoice updates the invoice state
@@ -464,6 +464,9 @@ func (m *SmartMeter) HandleControlResume() {
 	m.mu.Unlock()
 
 	m.notifyStateChange()
+
+	// Restore previous appliance states that were saved when consumption was halted
+	m.restoreApplianceStates()
 }
 
 // ToggleAppliance toggles an appliance on or off
