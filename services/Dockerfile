@@ -1,7 +1,7 @@
 # Build Stage
 FROM golang:1.25-alpine AS builder
 
-    # ARG for service folder (e.g. consumption, registry, ledger)
+    # ARG for service folder (e.g. consumption, device, ledger)
     ARG SERVICE
     WORKDIR /workspace
 
@@ -9,7 +9,7 @@ FROM golang:1.25-alpine AS builder
     COPY services/proto/go.mod ./services/proto/
     COPY services/proto/gen ./services/proto/gen
     
-    # Copy a shared library for common utilities
+    # Copy shared library for common utilities
     COPY services/internal/go.mod ./services/internal/
     COPY services/internal/*.go ./services/internal/
 
