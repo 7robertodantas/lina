@@ -63,6 +63,8 @@ services:
     container_name: device
     environment:
       - MQTT_BROKER=mosquitto
+      - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
+      - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
       - REDIS_HOST=redis
       - LEDGER_GRPC_HOST=ledger
       - LEDGER_GRPC_PORT=${GRPC_PORT}
