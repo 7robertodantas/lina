@@ -23,6 +23,8 @@ services:
     container_name: redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -37,23 +39,15 @@ services:
       dockerfile: Dockerfile
     container_name: mosquitto
     ports:
-      - "${MQTT_PORT:-1883}:1883"   # Non-TLS port
-      - "${MQTT_TLS_PORT:-8883}:8883" # TLS port
-      - "${MQTT_WS_PORT:-9001}:9001" # WebSocket port (non-TLS for local dev)
-      - "${MQTT_WSS_PORT:-9002}:9002" # WebSocket Secure port (TLS)
-    # volumes:
-      # Only persist data directory (dynamic-security.json and mosquitto.db)
-      # - ./mosquitto/data:/mosquitto/data
+      - "${MQTT_TLS_PORT:-8883}:8883"
+    volumes:
+      - mosquitto-data:/mosquitto/data
     environment:
       - MQTT_USERNAME=${MQTT_USERNAME:-}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-}
       - MQTT_DYNSEC_ADMIN_USER=${MQTT_DYNSEC_ADMIN_USER:-}
       - MQTT_DYNSEC_ADMIN_PASSWORD=${MQTT_DYNSEC_ADMIN_PASSWORD:-}
     healthcheck:
-      # Test MQTT broker by attempting a TLS connection on port 8883 with credentials
-      # If connection is refused, broker is not ready (exit 1)
-      # If connection succeeds or auth error occurs, broker is ready (exit 0)
-      # Uses credentials from environment variables if allow_anonymous is false
       test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
       interval: 10s
       timeout: 5s
@@ -95,6 +89,7 @@ services:
       - LIGHTNING_GRPC_HOST=${LIGHTNING_GRPC_HOST:-lightning}
       - LIGHTNING_GRPC_PORT=${LIGHTNING_GRPC_PORT:-9090}
       - LIGHTNING_RPC_TIMEOUT_SECONDS=${LIGHTNING_RPC_TIMEOUT_SECONDS:-30}
+      - DB_PATH=${DEVICE_DB_PATH:-/data/devices.db}
       - GIN_MODE=release
       - OTEL_RESOURCE_ATTRIBUTES=${OTEL_RESOURCE_ATTRIBUTES:-service.name=device-service}
       - OTEL_TRACES_EXPORTER=${OTEL_TRACES_EXPORTER:-otlp}
@@ -104,6 +99,7 @@ services:
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-device-service}
     volumes:
       - ./mosquitto/certs:/certs:ro
+      - device-data:/data
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -124,7 +120,7 @@ services:
     expose:
       - "8080"
     environment:
-      - DB_PATH=${LEDGER_DB_PATH:-ledger.db}
+      - DB_PATH=${LEDGER_DB_PATH:-/data/ledger.db}
       - SERVICE_TOKEN=${LEDGER_SERVICE_TOKEN:-dev-token}
       - LISTEN_ADDR=${LEDGER_LISTEN_ADDR:-:8080}
       - GRPC_ADDR=${LEDGER_GRPC_ADDR:-:9090}
@@ -138,6 +134,8 @@ services:
       - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-ledger-service}
+    volumes:
+      - ledger-data:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -153,7 +151,7 @@ services:
     expose:
       - "8080"
     environment:
-      - DB_PATH=${CONSUMPTION_DB_PATH:-consumption.db}
+      - DB_PATH=${CONSUMPTION_DB_PATH:-/data/consumption.db}
       - SERVICE_TOKEN=${CONSUMPTION_SERVICE_TOKEN:-dev-token}
       - LISTEN_ADDR=${CONSUMPTION_LISTEN_ADDR:-:8080}
       - GRPC_ADDR=${CONSUMPTION_GRPC_ADDR:-:9090}
@@ -167,6 +165,8 @@ services:
       - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-consumption-service}
+    volumes:
+      - consumption-data:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -185,7 +185,7 @@ services:
       - LND_HOST=host.docker.internal:10001
       - LND_MACAROON_HEX=${LND_MACAROON_HEX:-}
       - LND_TLS_CERT_HEX=${LND_TLS_CERT_HEX:-}
-      - DB_PATH=${LIGHTNING_DB_PATH:-lightning.db}
+      - DB_PATH=${LIGHTNING_DB_PATH:-/data/lightning.db}
       - SERVICE_TOKEN=${LIGHTNING_SERVICE_TOKEN:-dev-token}
       - LISTEN_ADDR=${LIGHTNING_LISTEN_ADDR:-:8080}
       - GRPC_ADDR=${LIGHTNING_GRPC_ADDR:-:9090}
@@ -199,6 +199,8 @@ services:
       - OTEL_EXPORTER_OTLP_PROTOCOL=${OTEL_EXPORTER_OTLP_PROTOCOL:-grpc}
       - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-jaeger:4317}
       - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-lightning-service}
+    volumes:
+      - lightning-data:/data
     depends_on:
       redis:
         condition: service_healthy      
@@ -242,3 +244,11 @@ services:
       - "16686:16686"  # UI
       - "4317:4317"    # OTLP gRPC receiver
       - "4318:4318"    # OTLP HTTP receiver
+
+volumes:
+  mosquitto-data:
+  redis-data:
+  device-data:
+  ledger-data:
+  consumption-data:
+  lightning-data:

@@ -33,6 +33,9 @@ FROM alpine:latest
 
     COPY --from=builder /workspace/services/${SERVICE}/${SERVICE} .
 
+    # Create data directory for SQLite databases
+    RUN mkdir -p /data
+
     EXPOSE 8080
 
     CMD ./${APP}
