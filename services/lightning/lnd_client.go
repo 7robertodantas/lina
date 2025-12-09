@@ -39,8 +39,12 @@ func NewLNDClient(ctx context.Context, cfg Config) (*LNDClient, error) {
 	}
 
 	// Create TLS credentials
+	// When connecting via IP address, we need to set ServerName to match
+	// the certificate's expected hostname (typically "localhost" for LND)
+	// This can be overridden via LND_TLS_SERVER_NAME environment variable
 	tlsConfig := &tls.Config{
-		RootCAs: certPool,
+		RootCAs:    certPool,
+		ServerName: cfg.LNDTLSServerName,
 	}
 	creds := credentials.NewTLS(tlsConfig)
 
