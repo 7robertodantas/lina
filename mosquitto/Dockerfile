@@ -8,16 +8,18 @@ COPY config/mosquitto.conf /mosquitto/config/mosquitto.conf
 COPY config/entrypoint.sh /mosquitto/config/entrypoint.sh
 COPY config/healthcheck.sh /mosquitto/config/healthcheck.sh
 COPY generate-dynsec.sh /mosquitto/generate-dynsec.sh
-COPY generate-passwd-container.sh /mosquitto/generate-passwd.sh
 
-# Copy certificates directory (should exist with certificates before building)
-COPY certs/ /mosquitto/certs/
+# Note: Certificates should NOT be copied into the image for production
+# They should be mounted as volumes at runtime for security and flexibility
+# This allows:
+# - Different certificates per environment (dev/staging/prod)
+# - Certificate rotation without rebuilding images
+# - Keeping sensitive keys out of image layers
 
 # Make scripts executable
 RUN chmod +x /mosquitto/config/entrypoint.sh \
     && chmod +x /mosquitto/config/healthcheck.sh \
-    && chmod +x /mosquitto/generate-dynsec.sh \
-    && chmod +x /mosquitto/generate-passwd.sh
+    && chmod +x /mosquitto/generate-dynsec.sh
 
 # Set entrypoint
 ENTRYPOINT ["/mosquitto/config/entrypoint.sh"]

@@ -38,6 +38,7 @@ services:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
       - mosquitto-data:/mosquitto/data
+      - ./certs:/mosquitto/certs:ro
     env_file:
       - .env
     healthcheck:
@@ -64,7 +65,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./mosquitto/certs:/certs:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
       - device-data:/data
     depends_on:
       mosquitto:
@@ -131,7 +132,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./mosquitto/certs:/certs:ro
+      - ./certs/ca.crt:/certs/ca.crt:ro
     depends_on:    
       mosquitto:
         condition: service_healthy

@@ -1,23 +1,30 @@
 #!/bin/bash
-# Generate TLS certificates for Mosquitto MQTT broker
-# Only generates certificates if they don't already exist
+# Generate TLS certificates for LNPay services
+# Generates CA and server certificates for use across services (MQTT, gRPC, etc.)
 
 set -e
 
-CERT_DIR="$(cd "$(dirname "$0")" && pwd)/certs"
+# Certificate directory - defaults to script location
+if [ -z "$CERT_DIR" ]; then
+    CERT_DIR="$(cd "$(dirname "$0")" && pwd)"
+fi
+
+# Certificate validity periods (in days)
+CA_VALIDITY_DAYS="${CA_VALIDITY_DAYS:-3650}"      # Default: 10 years
+SERVER_VALIDITY_DAYS="${SERVER_VALIDITY_DAYS:-365}" # Default: 1 year
 
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo "Certificate generation script for Mosquitto MQTT broker"
-echo "======================================================"
+echo "TLS Certificate Generation for LNPay"
+echo "====================================="
 echo ""
 
 # Check if certs directory exists, create if not
 if [ ! -d "$CERT_DIR" ]; then
-    echo "Creating certs directory: $CERT_DIR"
+    echo "Creating certificate directory: $CERT_DIR"
     mkdir -p "$CERT_DIR"
 fi
 
@@ -37,12 +44,12 @@ generate_ca() {
         return 0
     fi
     
-    echo "Generating CA certificate..."
+    echo "Generating CA certificate (valid for ${CA_VALIDITY_DAYS} days)..."
     openssl genrsa -out "$CERT_DIR/ca.key" 2048
-    openssl req -new -x509 -days 365 -key "$CERT_DIR/ca.key" \
+    openssl req -new -x509 -days "$CA_VALIDITY_DAYS" -key "$CERT_DIR/ca.key" \
         -out "$CERT_DIR/ca.crt" \
-        -subj "/CN=MQTT-CA/O=LNPay/C=US"
-    echo -e "${GREEN}✓${NC} CA certificate generated"
+        -subj "/CN=LNPay-CA/O=LNPay/C=US"
+    echo -e "${GREEN}✓${NC} CA certificate generated (valid for ${CA_VALIDITY_DAYS} days)"
 }
 
 # Function to generate server certificate with SANs
@@ -62,22 +69,21 @@ req_extensions = v3_req
 prompt = no
 
 [req_distinguished_name]
-CN = mosquitto
+CN = lnpay-server
 O = LNPay
 C = US
 
 [v3_req]
 keyUsage = digitalSignature, keyEncipherment, dataEncipherment
-extendedKeyUsage = serverAuth
+extendedKeyUsage = serverAuth, clientAuth
 subjectAltName = @alt_names
 
 [alt_names]
-DNS.1 = mosquitto
-DNS.2 = localhost
+DNS.1 = localhost
+DNS.2 = mosquitto
 DNS.3 = *.mosquitto
 IP.1 = 127.0.0.1
 IP.2 = ::1
-IP.3 = 192.168.65.1
 EOF
     
     openssl genrsa -out "$CERT_DIR/server.key" 2048
@@ -89,66 +95,14 @@ EOF
         -CAkey "$CERT_DIR/ca.key" \
         -CAcreateserial \
         -out "$CERT_DIR/server.crt" \
-        -days 365 \
+        -days "$SERVER_VALIDITY_DAYS" \
         -extensions v3_req \
         -extfile "$SERVER_CONF"
     
     # Clean up config file
     rm -f "$SERVER_CONF"
     
-    echo -e "${GREEN}✓${NC} Server certificate generated with SANs (mosquitto, localhost)"
-}
-
-# Function to generate edge node certificate with SANs
-generate_edge() {
-    if check_cert "$CERT_DIR/edge.crt"; then
-        return 0
-    fi
-    
-    echo "Generating edge node certificate with Subject Alternative Names (SANs)..."
-    
-    # Create OpenSSL config file for edge certificate with SANs
-    EDGE_CONF="$CERT_DIR/edge.conf"
-    cat > "$EDGE_CONF" <<EOF
-[req]
-distinguished_name = req_distinguished_name
-req_extensions = v3_req
-prompt = no
-
-[req_distinguished_name]
-CN = edge-node
-O = LNPay
-C = US
-
-[v3_req]
-keyUsage = keyEncipherment, dataEncipherment
-extendedKeyUsage = clientAuth
-subjectAltName = @alt_names
-
-[alt_names]
-DNS.1 = edge-node
-DNS.2 = localhost
-IP.1 = 127.0.0.1
-IP.2 = ::1
-EOF
-    
-    openssl genrsa -out "$CERT_DIR/edge.key" 2048
-    openssl req -new -key "$CERT_DIR/edge.key" \
-        -out "$CERT_DIR/edge.csr" \
-        -config "$EDGE_CONF"
-    openssl x509 -req -in "$CERT_DIR/edge.csr" \
-        -CA "$CERT_DIR/ca.crt" \
-        -CAkey "$CERT_DIR/ca.key" \
-        -CAcreateserial \
-        -out "$CERT_DIR/edge.crt" \
-        -days 365 \
-        -extensions v3_req \
-        -extfile "$EDGE_CONF"
-    
-    # Clean up config file
-    rm -f "$EDGE_CONF"
-    
-    echo -e "${GREEN}✓${NC} Edge node certificate generated with SANs"
+    echo -e "${GREEN}✓${NC} Server certificate generated with SANs (valid for ${SERVER_VALIDITY_DAYS} days)"
 }
 
 # Check if OpenSSL is available
@@ -163,7 +117,6 @@ echo ""
 
 generate_ca
 generate_server
-generate_edge
 
 # Clean up CSR, serial, and config files
 echo ""
@@ -171,14 +124,15 @@ echo "Cleaning up temporary files..."
 rm -f "$CERT_DIR"/*.csr "$CERT_DIR"/*.srl "$CERT_DIR"/*.conf 2>/dev/null || true
 
 echo ""
-echo "======================================================"
+echo "====================================="
 echo -e "${GREEN}Certificate generation complete!${NC}"
 echo ""
 echo "Generated certificates:"
-echo "  - ca.crt, ca.key (Certificate Authority)"
-echo "  - server.crt, server.key (Mosquitto broker)"
-echo "  - edge.crt, edge.key (Edge node service)"
+echo "  - ca.crt, ca.key (Certificate Authority, valid for ${CA_VALIDITY_DAYS} days)"
+echo "  - server.crt, server.key (Server certificate, valid for ${SERVER_VALIDITY_DAYS} days)"
 echo ""
 echo "Certificate location: $CERT_DIR"
 echo ""
+echo "Note: Only ca.crt should be shared with client services."
+echo "      Private keys (ca.key, server.key) should be kept secure."
 

@@ -1,14 +1,25 @@
 #!/bin/sh
 # Entrypoint script for Mosquitto MQTT broker
 
-# Generate password file (optional - only needed if password_file is enabled in mosquitto.conf)
-# Uncomment the lines below if you need password_file authentication:
-# /mosquitto/generate-passwd.sh
-# if [ $? -ne 0 ]; then
-#     echo "Failed to generate password file"
-#     exit 1
-# fi
-# echo "Password file generated successfully"
+# Certificate validation - certificates must be provided
+CERT_DIR="/mosquitto/certs"
+
+# Check if certificates exist
+if [ ! -f "$CERT_DIR/ca.crt" ] || [ ! -f "$CERT_DIR/server.crt" ] || [ ! -f "$CERT_DIR/server.key" ]; then
+    echo "ERROR: Required certificates not found in $CERT_DIR"
+    echo ""
+    echo "Missing certificates:"
+    [ ! -f "$CERT_DIR/ca.crt" ] && echo "  - ca.crt"
+    [ ! -f "$CERT_DIR/server.crt" ] && echo "  - server.crt"
+    [ ! -f "$CERT_DIR/server.key" ] && echo "  - server.key"
+    echo ""
+    echo "Please provide certificates via volume mount."
+    echo "Generate certificates using: ./certs/generate-certs.sh"
+    echo ""
+    exit 1
+fi
+
+echo "Certificates found, using provided certificates"
 
 # Runs generate-dynsec.sh on first startup if dynamic-security.json doesn't exist
 
