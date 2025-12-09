@@ -91,7 +91,7 @@ docker build -t docker.io/username/lnpay-device:latest -f ./services/Dockerfile 
 docker build -t docker.io/username/lnpay-ledger:latest -f ./services/Dockerfile --build-arg SERVICE=ledger .
 docker build -t docker.io/username/lnpay-consumption:latest -f ./services/Dockerfile --build-arg SERVICE=consumption .
 docker build -t docker.io/username/lnpay-lightning:latest -f ./services/Dockerfile --build-arg SERVICE=lightning .
-docker build -t docker.io/username/lnpay-smartmeter:latest -f ./smartmeter/Dockerfile --build-arg NEXT_PUBLIC_BACKEND_WS_URL=ws://localhost:3001/ws .
+docker build -t docker.io/username/lnpay-smartmeter:latest -f ./smartmeter/Dockerfile .
 
 # Push images
 docker push docker.io/username/lnpay-caddy:latest
@@ -156,7 +156,6 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t docker.io/username/lnpay-smartmeter:latest \
   -f ./smartmeter/Dockerfile \
-  --build-arg NEXT_PUBLIC_BACKEND_WS_URL=ws://localhost:3001/ws \
   --push .
 ```
 

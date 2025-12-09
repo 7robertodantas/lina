@@ -89,8 +89,8 @@ build_and_push "lightning" "./services/Dockerfile" "." "--build-arg" "SERVICE=li
 
 echo -e "${BLUE}=== Building smartmeter ===${NC}\n"
 
-# Smartmeter needs a build arg for NEXT_PUBLIC_BACKEND_WS_URL
-build_and_push "smartmeter" "./smartmeter/Dockerfile" "." "--build-arg" "NEXT_PUBLIC_BACKEND_WS_URL=ws://localhost:3001/ws"
+# Smartmeter WebSocket URL is now dynamically determined from browser location
+build_and_push "smartmeter" "./smartmeter/Dockerfile" "."
 
 echo -e "${GREEN}=== All images built and pushed successfully! ===${NC}"
 echo -e "${BLUE}You can now use docker-compose.prod.yml to pull and run these images${NC}"

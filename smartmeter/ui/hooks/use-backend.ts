@@ -60,7 +60,20 @@ export function useBackend() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
   const connect = useCallback(() => {
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_WS_URL || "ws://localhost:8080/ws"
+    // Dynamically construct WebSocket URL from current browser location
+    // Convert http://host:port to ws://host:port/ws
+    const getWebSocketUrl = (): string => {
+      if (typeof window === "undefined") {
+        // Fallback for SSR
+        return process.env.NEXT_PUBLIC_BACKEND_WS_URL || "ws://localhost:8080/ws"
+      }
+      
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+      const host = window.location.host
+      return `${protocol}//${host}/ws`
+    }
+    
+    const backendUrl = getWebSocketUrl()
     
     setConnectionStatus("connecting")
     const ws = new WebSocket(backendUrl)

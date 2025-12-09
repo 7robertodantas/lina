@@ -1,11 +1,9 @@
 # Build Smart Meter UI
 FROM node:22-alpine AS ui-build
     WORKDIR /app/ui
-    ARG NEXT_PUBLIC_BACKEND_WS_URL=ws://localhost:8080/ws
     COPY smartmeter/ui/package.json smartmeter/ui/package-lock.json* ./
     RUN npm install
     COPY smartmeter/ui .
-    ENV NEXT_PUBLIC_BACKEND_WS_URL=${NEXT_PUBLIC_BACKEND_WS_URL}
     RUN npm run build
 
 # Build Smart Meter Core

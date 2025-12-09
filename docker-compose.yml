@@ -149,8 +149,6 @@ services:
     build:
       context: .
       dockerfile: ./smartmeter/Dockerfile
-      args:
-        NEXT_PUBLIC_BACKEND_WS_URL: ws://localhost:3001/ws
     container_name: smartmeter
     ports:
       - "3001:8080" # UI
