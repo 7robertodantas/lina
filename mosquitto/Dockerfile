@@ -21,8 +21,11 @@ RUN chmod +x /mosquitto/config/entrypoint.sh \
     && chmod +x /mosquitto/config/healthcheck.sh \
     && chmod +x /mosquitto/generate-dynsec.sh
 
-# Set entrypoint
+# Note: Entrypoint will run as whatever user the base image uses
+# If permissions are set correctly on the host (644), the entrypoint will work
+# If running as root, the entrypoint can fix permissions automatically
+# Set entrypoint (will fix permissions if running as root, otherwise relies on host permissions)
 ENTRYPOINT ["/mosquitto/config/entrypoint.sh"]
 
-# Default command
+# Default command (mosquitto will run as mosquitto user as per base image)
 CMD ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]

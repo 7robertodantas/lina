@@ -291,9 +291,12 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     fi
     
     # Set permissions on remote
+    # Note: server.key needs to be readable by mosquitto user (UID 1883 typically)
+    # We use 644 (readable by all) to ensure mosquitto can read it, even if UID doesn't match
     echo "Setting certificate permissions..."
     run_cmd "chmod 644 $REMOTE_DIR/certs/*.crt 2>/dev/null || true"
-    run_cmd "chmod 600 $REMOTE_DIR/certs/*.key 2>/dev/null || true"
+    run_cmd "chmod 644 $REMOTE_DIR/certs/*.key 2>/dev/null || true"
+    echo -e "${YELLOW}Note: Using 644 permissions for server.key to ensure mosquitto can read it${NC}"
     
     echo -e "${GREEN}✓ Certificates ready on remote machine${NC}"
     
@@ -314,6 +317,13 @@ else
             exit 1
         fi
     fi
+    # Set permissions on local certificates
+    # Note: server.key needs to be readable by mosquitto user (UID 1883 typically)
+    # We use 644 (readable by all) to ensure mosquitto can read it, even if UID doesn't match
+    echo "Setting certificate permissions..."
+    chmod 644 "$CERTS_DIR"/*.crt 2>/dev/null || true
+    chmod 644 "$CERTS_DIR"/*.key 2>/dev/null || true
+    echo -e "${YELLOW}Note: Using 644 permissions for server.key to ensure mosquitto can read it${NC}"
 fi
 
 # Verify certificates on target

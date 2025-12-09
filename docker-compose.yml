@@ -44,7 +44,7 @@ services:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
       - mosquitto-data:/mosquitto/data
-      - ./certs:/mosquitto/certs:ro
+      - ./certs:/mosquitto/certs:rw
     env_file:
       - .env
     healthcheck:
@@ -133,7 +133,7 @@ services:
         SERVICE: lightning
     container_name: lightning
     environment:
-      - LND_HOST=host.docker.internal:10001
+      - LND_HOST=${LND_HOST}
       - REDIS_HOST=redis
       - DB_PATH=/data/lightning.db
     env_file:

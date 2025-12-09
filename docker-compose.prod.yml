@@ -38,7 +38,7 @@ services:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
       - mosquitto-data:/mosquitto/data
-      - ./certs:/mosquitto/certs:ro
+      - ./certs:/mosquitto/certs:rw
     env_file:
       - .env
     healthcheck:
