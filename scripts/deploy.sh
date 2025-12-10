@@ -28,7 +28,6 @@ cd "$PROJECT_ROOT"
 
 COMPOSE_FILE="docker-compose.prod.yml"
 CERTS_DIR="./certs"
-MONITORING_DIR="./monitoring"
 REMOTE_DIR="~/lnpay"
 
 # Show usage/help
@@ -51,7 +50,6 @@ show_usage() {
     echo ""
     echo "Remote deployment will:"
     echo "  - Copy docker-compose.prod.yml and certs/ to ~/lnpay on remote"
-    echo "  - Copy monitoring scripts to ~/lnpay on remote"
     echo "  - Verify prerequisites (Docker, docker-compose)"
     echo "  - Pull Docker images"
     echo "  - Provide instructions to start services"
@@ -263,18 +261,6 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     # Copy docker-compose.prod.yml
     echo "Copying docker-compose.prod.yml..."
     scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/"
-    
-    # Copy measurement scripts
-    if [ -f "$MONITORING_DIR/start-measurement.sh" ]; then
-        echo "Copying start-measurement.sh..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$MONITORING_DIR/start-measurement.sh" "$SSH_TARGET:$REMOTE_DIR/"
-        run_cmd "chmod +x $REMOTE_DIR/start-measurement.sh"
-    fi
-    if [ -f "$MONITORING_DIR/stop-measurement.sh" ]; then
-        echo "Copying stop-measurement.sh..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$MONITORING_DIR/stop-measurement.sh" "$SSH_TARGET:$REMOTE_DIR/"
-        run_cmd "chmod +x $REMOTE_DIR/stop-measurement.sh"
-    fi
     
     # Copy .env.example if .env doesn't exist on remote
     if [ -f ".env.example" ]; then

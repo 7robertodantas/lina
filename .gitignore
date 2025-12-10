@@ -85,3 +85,10 @@ yarn-error.log*
 
 measurements/
 *.log
+
+venv/
+
+# Measurement output files
+measurement/docker_stats.csv
+measurement/graphs/*.png
+graphs/
