@@ -1,0 +1,152 @@
+version: '3.9'
+services:
+  caddy:
+    image: 7robertodantas/lnpay-caddy:latest
+    container_name: caddy
+    ports:
+      - "8080:80" # Northbound
+    depends_on:
+      device:
+        condition: service_started
+      ledger:
+        condition: service_started
+      consumption:
+        condition: service_started
+    restart: unless-stopped
+
+  redis:
+    image: 7robertodantas/lnpay-redis:latest
+    container_name: redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    env_file:
+      - .env
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  mosquitto:
+    image: 7robertodantas/lnpay-mosquitto:latest
+    container_name: mosquitto
+    ports:
+      - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
+    volumes:
+      - mosquitto-data:/mosquitto/data
+      - ./certs:/mosquitto/certs:rw
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  device:
+    image: 7robertodantas/lnpay-device:latest
+    container_name: device
+    environment:
+      - MQTT_BROKER=mosquitto
+      - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
+      - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
+      - REDIS_HOST=redis
+      - LEDGER_GRPC_HOST=ledger
+      - LEDGER_GRPC_PORT=${GRPC_PORT}
+      - LIGHTNING_GRPC_HOST=lightning
+      - LIGHTNING_GRPC_PORT=${GRPC_PORT}
+      - DB_PATH=/data/devices.db
+      # Disable OpenTelemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - OTEL_SERVICE_NAME=device-service
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
+    env_file:
+      - .env
+    volumes:
+      - ./certs/ca.crt:/certs/ca.crt:ro
+      - device-data:/data
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ledger:
+        condition: service_started
+      lightning:
+        condition: service_started
+
+  ledger:
+    image: 7robertodantas/lnpay-ledger:latest
+    container_name: ledger
+    environment:
+      - REDIS_HOST=redis
+      - DB_PATH=/data/ledger.db
+      # Disable OpenTelemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - OTEL_SERVICE_NAME=ledger-service
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
+    env_file:
+      - .env
+    volumes:
+      - ledger-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  consumption:
+    image: 7robertodantas/lnpay-consumption:latest
+    container_name: consumption
+    environment:
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - DB_PATH=/data/consumption.db
+      # Disable OpenTelemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - OTEL_SERVICE_NAME=consumption-service
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
+    env_file:
+      - .env
+    volumes:
+      - consumption-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  lightning:
+    image: 7robertodantas/lnpay-lightning:latest
+    container_name: lightning
+    environment:
+      - REDIS_HOST=redis
+      - DB_PATH=/data/lightning.db
+      # Disable OpenTelemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=
+      - OTEL_SERVICE_NAME=lightning-service
+      - OTEL_TRACES_EXPORTER=none
+      - OTEL_METRICS_EXPORTER=none
+    env_file:
+      - .env
+    volumes:
+      - lightning-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy      
+    restart: unless-stopped
+
+volumes:
+  mosquitto-data:
+  redis-data:
+  device-data:
+  ledger-data:
+  consumption-data:
+  lightning-data:
+

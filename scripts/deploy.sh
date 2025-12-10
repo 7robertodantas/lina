@@ -27,6 +27,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 COMPOSE_FILE="docker-compose.prod.yml"
+COMPOSE_MEAS_FILE="docker-compose.meas.yml"
 CERTS_DIR="./certs"
 REMOTE_DIR="~/lnpay"
 
@@ -49,7 +50,7 @@ show_usage() {
     echo "  ./deploy.sh remote user@hostname -p 2222"
     echo ""
     echo "Remote deployment will:"
-    echo "  - Copy docker-compose.prod.yml and certs/ to ~/lnpay on remote"
+    echo "  - Copy docker-compose.prod.yml, docker-compose.meas.yml and certs/ to ~/lnpay on remote"
     echo "  - Verify prerequisites (Docker, docker-compose)"
     echo "  - Pull Docker images"
     echo "  - Provide instructions to start services"
@@ -195,6 +196,11 @@ if [ ! -f "$COMPOSE_FILE" ]; then
     exit 1
 fi
 
+# Check if docker-compose.meas.yml exists locally (optional, just warn if missing)
+if [ ! -f "$COMPOSE_MEAS_FILE" ]; then
+    echo -e "${YELLOW}Note: $COMPOSE_MEAS_FILE not found (optional file)${NC}"
+fi
+
 # Check Docker and docker-compose on target
 echo -e "${BLUE}Step 1: Verifying Prerequisites${NC}"
 echo "--------------------------------"
@@ -261,6 +267,14 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     # Copy docker-compose.prod.yml
     echo "Copying docker-compose.prod.yml..."
     scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/"
+    
+    # Copy docker-compose.meas.yml if it exists
+    if [ -f "$COMPOSE_MEAS_FILE" ]; then
+        echo "Copying docker-compose.meas.yml..."
+        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/"
+    else
+        echo -e "${YELLOW}Note: docker-compose.meas.yml not found locally, skipping${NC}"
+    fi
     
     # Copy .env.example if .env doesn't exist on remote
     if [ -f ".env.example" ]; then
