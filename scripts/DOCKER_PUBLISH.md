@@ -29,24 +29,24 @@ Use the provided script to build and push all images:
 
 ```bash
 # Make the script executable
-chmod +x build-and-push.sh
+chmod +x scripts/build-and-push.sh
 
 # Build and push to Docker Hub (replace 'username' with your Docker Hub username)
 # By default, builds for both amd64 and arm64
-./build-and-push.sh docker.io/username/lnpay latest
+./scripts/build-and-push.sh docker.io/username/lnpay latest
 
 # Or use a specific tag
-./build-and-push.sh docker.io/username/lnpay v1.0.0
+./scripts/build-and-push.sh docker.io/username/lnpay v1.0.0
 
 # For a private registry
-./build-and-push.sh registry.example.com/lnpay latest
+./scripts/build-and-push.sh registry.example.com/lnpay latest
 
 # Custom platforms (optional third parameter)
 # Build only for amd64
-./build-and-push.sh docker.io/username/lnpay latest linux/amd64
+./scripts/build-and-push.sh docker.io/username/lnpay latest linux/amd64
 
 # Build for specific platforms
-./build-and-push.sh docker.io/username/lnpay latest linux/amd64,linux/arm64,linux/arm/v7
+./scripts/build-and-push.sh docker.io/username/lnpay latest linux/amd64,linux/arm64,linux/arm/v7
 ```
 
 ### 2. Using Published Images
@@ -164,19 +164,19 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Docker Hub
 
 ```bash
-./build-and-push.sh docker.io/username/lnpay latest
+./scripts/build-and-push.sh docker.io/username/lnpay latest
 ```
 
 ### GitHub Container Registry
 
 ```bash
-./build-and-push.sh ghcr.io/username/lnpay latest
+./scripts/build-and-push.sh ghcr.io/username/lnpay latest
 ```
 
 ### Private Registry
 
 ```bash
-./build-and-push.sh registry.example.com/lnpay latest
+./scripts/build-and-push.sh registry.example.com/lnpay latest
 ```
 
 ## Image Naming Convention
@@ -205,7 +205,7 @@ When you make changes to your code:
 
 1. Rebuild and push:
    ```bash
-   ./build-and-push.sh docker.io/username/lnpay v1.1.0
+   ./scripts/build-and-push.sh docker.io/username/lnpay v1.1.0
    ```
 
 2. On other machines, pull the new version:
@@ -224,6 +224,6 @@ You can integrate the build script into your CI/CD pipeline:
 - name: Build and push Docker images
   run: |
     docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-    ./build-and-push.sh docker.io/${{ secrets.DOCKER_USERNAME }}/lnpay ${{ github.ref_name }}
+    ./scripts/build-and-push.sh docker.io/${{ secrets.DOCKER_USERNAME }}/lnpay ${{ github.ref_name }}
 ```
 

@@ -1,77 +1,106 @@
-# Monitoring Stack
+# Monitoring Scripts
 
-This directory contains the configuration for Prometheus and Grafana to monitor the LNPay production deployment.
+This directory contains scripts for collecting and analyzing system performance measurements.
 
-## Architecture
+## Scripts
 
-- **Production Server**: Runs `docker-compose.prod.yml` with cAdvisor and node-exporter
-- **Monitoring Server**: Runs `docker-compose.monitoring.yml` with Prometheus and Grafana
+### `start-measurement.sh`
+Starts collecting system performance metrics:
+- Docker container statistics (CPU, memory, network, I/O)
+- CPU statistics (mpstat)
+- Process statistics (pidstat)
+- Virtual memory statistics (vmstat)
+- I/O statistics (iostat)
 
-## Setup
+**Usage:**
+```bash
+./monitoring/start-measurement.sh
+```
 
-### On Production Server
+The script will run in the background and collect data for the configured duration (default: 5 minutes).
 
-1. Deploy the production stack with monitoring exporters:
+### `stop-measurement.sh`
+Stops all running measurement processes.
+
+**Usage:**
+```bash
+./monitoring/stop-measurement.sh
+```
+
+### `copy-measurements.sh`
+Copies measurement log files from a remote environment to the local `./measurements/` directory.
+
+**Usage:**
+```bash
+./monitoring/copy-measurements.sh user@hostname
+./monitoring/copy-measurements.sh user@hostname -p 2222
+```
+
+### `convert-measurements.sh`
+Converts raw log files to CSV format for easier analysis.
+
+**Usage:**
+```bash
+./monitoring/convert-measurements.sh [measurements_directory]
+# Default: ./measurements
+```
+
+### `plot-measurements.py`
+Creates visualizations from CSV measurement data.
+
+**Usage:**
+```bash
+python3 monitoring/plot-measurements.py [measurements_directory]
+# Default: ./measurements
+```
+
+**Requirements:**
+```bash
+pip install pandas matplotlib
+```
+
+## Output Files
+
+All measurement data is saved in CSV format:
+- `docker_stats.csv` - Docker container statistics
+- `mpstat.csv` - CPU statistics
+- `pidstat.csv` - Process statistics
+- `vmstat.csv` - Virtual memory statistics
+- `iostat.csv` - I/O statistics
+- `measurement_stdout.log` - Standard output from measurement processes
+- `measurement_stderr.log` - Standard error (warnings, errors)
+
+## Workflow
+
+1. **Start measurements on remote machine:**
    ```bash
-   docker-compose -f docker-compose.prod.yml up -d
+   ssh user@hostname "cd ~/lnpay && ./start-measurement.sh"
    ```
 
-2. Verify exporters are running:
-   - cAdvisor: `http://production-server:8081/metrics`
-   - node-exporter: `http://production-server:9100/metrics`
-
-3. Ensure ports 8081 and 9100 are accessible from the monitoring server (firewall rules).
-
-### On Monitoring Server
-
-1. Set the `TARGET_HOST` environment variable to your production server IP address or hostname:
+2. **Wait for measurements to complete, then copy:**
    ```bash
-   export TARGET_HOST=192.168.1.100
-   # or
-   export TARGET_HOST=production.example.com
+   ./monitoring/copy-measurements.sh user@hostname
    ```
 
-   Alternatively, you can create a `.env` file in the project root:
-   ```
-   TARGET_HOST=192.168.1.100
-   ```
-
-2. Start the monitoring stack:
+3. **Convert any remaining logs to CSV (if needed):**
    ```bash
-   docker-compose -f docker-compose.monitoring.yml up -d
+   ./monitoring/convert-measurements.sh
    ```
 
-3. Access the services:
-   - Grafana: `http://monitoring-server:3000` (default: admin/admin)
-   - Prometheus: `http://monitoring-server:9090`
+4. **Plot the data:**
+   ```bash
+   python3 monitoring/plot-measurements.py
+   ```
 
 ## Configuration
 
-### Prometheus
+Edit `start-measurement.sh` to adjust:
+- `DURATION_MINUTES` - How long to collect data (default: 5 minutes)
+- `INTERVAL` - Seconds between each measurement (default: 5 seconds)
 
-Edit `monitoring/prometheus/prometheus.yml` to:
-- Adjust scrape intervals
-- Add more targets
-- Configure alerting rules
+## Notes
 
-### Grafana
-
-- Default admin credentials: `admin` / `admin` (change via environment variables)
-- Prometheus datasource is auto-provisioned
-- Add dashboards via the UI or place JSON files in `monitoring/grafana/dashboards/`
-
-## Recommended Dashboards
-
-Import these Grafana dashboards for comprehensive monitoring:
-
-1. **Node Exporter Full** (ID: 1860) - Host metrics
-2. **Docker Container & Host Metrics** (ID: 10619) - Container metrics from cAdvisor
-3. **Kubernetes / Docker Container Metrics** (ID: 8588) - Alternative container dashboard
-
-## Security Considerations
-
-- Change default Grafana admin password
-- Use reverse proxy (e.g., Caddy) with TLS for production access
-- Restrict network access to monitoring ports
-- Consider using authentication for Prometheus if exposing it
+- Measurement data is stored in `./measurements/` (gitignored)
+- All scripts are copied to remote machines during deployment via `scripts/deploy.sh`
+- CSV files can be analyzed with Python, R, Excel, or any data analysis tool
 

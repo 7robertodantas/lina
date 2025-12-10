@@ -8,7 +8,7 @@ This guide explains how to deploy the LNPay system to a new machine.
 - `docker-compose.prod.yml`
 - `certs/generate-certs.sh` ← **Required**
 - `.env` (or create one)
-- `deploy.sh` (optional, for automated deployment)
+- `scripts/deploy.sh` (optional, for automated deployment)
 
 **To use pre-generated certificates:**
 - `docker-compose.prod.yml`
@@ -28,11 +28,11 @@ This guide explains how to deploy the LNPay system to a new machine.
 ```bash
 # 1. Copy these files to the new machine:
 #    - docker-compose.prod.yml
-#    - deploy.sh
+#    - scripts/deploy.sh
 #    - certs/generate-certs.sh (required to generate certificates)
 #    - .env (or create one)
 # 2. Run:
-./deploy.sh
+./scripts/deploy.sh
 ```
 
 The script will:
@@ -107,7 +107,7 @@ The script will:
 ```
 docker-compose.prod.yml
 .env (or create one with your configuration)
-deploy.sh (optional, for automated deployment)
+scripts/deploy.sh (optional, for automated deployment)
 certs/generate-certs.sh (required to generate certificates)
 ```
 
@@ -126,7 +126,7 @@ certs/server.key (pre-generated)
 
 **Option A: Use deploy.sh (Automated)**
 ```bash
-./deploy.sh
+./scripts/deploy.sh
 ```
 
 **Option B: Manual Setup**
