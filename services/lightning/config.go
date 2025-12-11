@@ -7,16 +7,16 @@ import (
 )
 
 type Config struct {
-	LNDHost         string
-	LNDTLSCertHex   string
+	LNDHost          string
+	LNDTLSCertHex    string
 	LNDTLSServerName string
-	LNDMacaroonHex  string
-	Network         string
-	ListenAddr      string
-	GRPCAddr        string
-	ServiceToken    string
-	RedisAddr       string
-	RedisPassword   string
+	LNDMacaroonHex   string
+	Network          string
+	ListenAddr       string
+	GRPCAddr         string
+	ServiceToken     string
+	RedisAddr        string
+	RedisPassword    string
 
 	// OpenTelemetry / Jaeger
 	OTELExporterOTLPEndpoint string
@@ -37,7 +37,7 @@ func LoadConfig() *Config {
 		RedisPassword:    internal.GetEnv("REDIS_PASSWORD", ""),
 
 		// OpenTelemetry / Jaeger
-		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "jaeger:4317"),
+		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELServiceName:          internal.GetEnv("OTEL_SERVICE_NAME", "lightning-service"),
 	}
 

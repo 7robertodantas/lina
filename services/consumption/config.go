@@ -27,8 +27,7 @@ func LoadConfig() Config {
 		BusyTimeoutMS: internal.IntEnv("BUSY_TIMEOUT_MS", 5000),
 
 		// OpenTelemetry / Jaeger
-		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "jaeger:4317"),
+		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELServiceName:          internal.GetEnv("OTEL_SERVICE_NAME", "consumption-service"),
 	}
 }
-

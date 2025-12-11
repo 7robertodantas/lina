@@ -87,7 +87,7 @@ func LoadConfig() Config {
 		LightningRPCTimeoutSeconds: internal.IntEnv("LIGHTNING_RPC_TIMEOUT_SECONDS", 30),
 
 		// OpenTelemetry / Jaeger
-		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", "jaeger:4317"),
+		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELServiceName:          internal.GetEnv("OTEL_SERVICE_NAME", "device-service"),
 	}
 }

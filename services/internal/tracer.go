@@ -3,14 +3,17 @@ package internal
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
-	autosdk "go.opentelemetry.io/auto/sdk"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // TracerConfig holds configuration for initializing OpenTelemetry tracer
@@ -19,18 +22,19 @@ type TracerConfig struct {
 	ExporterOTLPEndpoint string
 }
 
-// InitTracer initializes OpenTelemetry with OTLP exporter
+// InitTracer initializes OpenTelemetry with OTLP exporter or noop (no span processor)
 // Returns a shutdown function that should be called on service shutdown
+// If ExporterOTLPEndpoint is empty, creates a TracerProvider without span processors (noop)
 func InitTracer(cfg TracerConfig) (func(context.Context) error, error) {
+	logger := NewLogger("internal")
 	ctx := context.Background()
 
-	// Create OTLP exporter
-	exporter, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(cfg.ExporterOTLPEndpoint),
-		otlptracegrpc.WithInsecure(), // Use insecure for local development
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+	// Check if tracing is explicitly disabled via OTEL_TRACES_EXPORTER=none
+	otelTracesExporter := strings.ToLower(strings.TrimSpace(os.Getenv("OTEL_TRACES_EXPORTER")))
+	if otelTracesExporter == "none" {
+		// Return a no-op shutdown function that does nothing
+		logger.Info(ctx, "Tracing is explicitly disabled via OTEL_TRACES_EXPORTER=none")
+		return func(context.Context) error { return nil }, nil
 	}
 
 	// Create resource with service name
@@ -43,19 +47,32 @@ func InitTracer(cfg TracerConfig) (func(context.Context) error, error) {
 		return nil, fmt.Errorf("failed to create resource: %w", err)
 	}
 
-	// Create tracer provider with auto SDK and OTLP exporter
-	autoTp := autosdk.TracerProvider()
+	var tp trace.TracerProvider
 
-	// Create a batch span processor with the OTLP exporter
-	bsp := sdktrace.NewBatchSpanProcessor(exporter)
+	// If endpoint is empty, create TracerProvider without span processors (noop)
+	// This creates traces but doesn't export them, while keeping propagation active
+	if cfg.ExporterOTLPEndpoint == "" {
+		tp = noop.NewTracerProvider()
+	} else {
+		// Create OTLP exporter
+		exporter, err := otlptracegrpc.New(ctx,
+			otlptracegrpc.WithEndpoint(cfg.ExporterOTLPEndpoint),
+			otlptracegrpc.WithInsecure(), // Use insecure for local development
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
+		}
 
-	// Create a new tracer provider that combines auto SDK with OTLP export
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithResource(res),
-		sdktrace.WithSpanProcessor(bsp),
-		// Use the auto SDK's sampler if available
-		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0))),
-	)
+		// Create a batch span processor with the OTLP exporter
+		bsp := sdktrace.NewBatchSpanProcessor(exporter)
+
+		// Create a new tracer provider with OTLP exporter
+		tp = sdktrace.NewTracerProvider(
+			sdktrace.WithResource(res),
+			sdktrace.WithSpanProcessor(bsp),
+			sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(1.0))),
+		)
+	}
 
 	// Set global tracer provider
 	otel.SetTracerProvider(tp)
@@ -68,12 +85,13 @@ func InitTracer(cfg TracerConfig) (func(context.Context) error, error) {
 
 	// Shutdown function
 	shutdown := func(ctx context.Context) error {
-		// Shutdown the custom tracer provider
-		if err := tp.Shutdown(ctx); err != nil {
-			return fmt.Errorf("failed to shutdown tracer provider: %w", err)
+		// Shutdown the tracer provider if it's an SDK tracer provider
+		if sdkTp, ok := tp.(*sdktrace.TracerProvider); ok {
+			if err := sdkTp.Shutdown(ctx); err != nil {
+				return fmt.Errorf("failed to shutdown tracer provider: %w", err)
+			}
 		}
-		// Note: auto SDK tracer provider shutdown is handled internally
-		_ = autoTp
+		// noop.TracerProvider doesn't need shutdown
 		return nil
 	}
 
