@@ -586,9 +586,24 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 			})
 	} else {
 		logger.WithDeviceID(deviceID).
-			DebugWithFields(ctx, "Client already exists, skipping creation on southbound mqtt", map[string]interface{}{
+			InfoWithFields(ctx, "Client already exists, updating password on southbound mqtt", map[string]interface{}{
 				"client_username": clientUsername,
 			})
+		// Update password if client exists to ensure it matches the current configuration
+		setPasswordCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "setClientPassword",
+					"username": clientUsername,
+					"password": clientPassword,
+				},
+			},
+		}
+		if err := d.executeCommand(ctx, setPasswordCmd); err != nil {
+			logger.WithDeviceID(deviceID).
+				Warnf(ctx, "Failed to update password for device client on southbound mqtt: %v", err)
+			// Continue anyway - password might already be correct
+		}
 	}
 
 	// Step 5: Assign role to client

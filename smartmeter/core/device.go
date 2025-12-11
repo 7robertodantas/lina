@@ -611,7 +611,18 @@ func (m *SmartMeter) HaltConsumption(reason string) {
 
 // Shutdown shuts down the meter completely
 func (m *SmartMeter) Shutdown() {
-	// Stop tickers
+	// Set device status to OFFLINE first to prevent race conditions
+	// This ensures any concurrent operations (like updatePowerReadings) see OFFLINE status immediately
+	m.mu.Lock()
+	m.state.DeviceStatus = "OFFLINE"
+	for i := range m.state.Appliances {
+		m.state.Appliances[i].IsOn = false
+		m.state.Appliances[i].CurrentWatts = 0
+	}
+	m.state.InstantPower = 0
+	m.mu.Unlock()
+
+	// Stop tickers (after setting status to prevent concurrent updates)
 	if m.powerUpdateTicker != nil {
 		m.powerUpdateTicker.Stop()
 		m.powerUpdateTicker = nil
@@ -628,19 +639,15 @@ func (m *SmartMeter) Shutdown() {
 	// Publish offline and disconnect MQTT
 	m.southbound.PublishHeartbeat(mqttmodel.DeviceStatus_DEVICE_STATUS_OFFLINE)
 	m.southbound.Disconnect()
-	m.SetMQTTStatus("disconnected")
 
-	// Reset device state
+	// Update MQTT status directly (avoid SetMQTTStatus to prevent extra notifyStateChange)
 	m.mu.Lock()
-	m.state.DeviceStatus = "OFFLINE"
-	for i := range m.state.Appliances {
-		m.state.Appliances[i].IsOn = false
-		m.state.Appliances[i].CurrentWatts = 0
-	}
-	m.state.InstantPower = 0
+	m.state.MQTTStatus = "disconnected"
 	m.mu.Unlock()
 
 	m.AddLog("Meter system shut down", "info")
+	// Single state change notification with final OFFLINE status
+	m.notifyStateChange()
 }
 
 // StartSimulation starts the meter simulation (power updates and usage reporting)
@@ -735,6 +742,12 @@ func (m *SmartMeter) hasActiveAuthorization() bool {
 // updatePowerReadings updates power consumption for all appliances
 func (m *SmartMeter) updatePowerReadings() {
 	m.mu.Lock()
+
+	// Skip if device is offline to prevent race conditions during shutdown
+	if m.state.DeviceStatus == "OFFLINE" {
+		m.mu.Unlock()
+		return
+	}
 
 	totalPower := 0
 	for i := range m.state.Appliances {
