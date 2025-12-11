@@ -1,8 +1,7 @@
 import { Client } from 'k6/x/mqtt';
-import { check, sleep } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
 import http from 'k6/http';
-import { randomString, randomIntBetween } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
+import { randomString } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 
 // --- Metrics ---
 const mqttPublishSuccess = new Counter('mqtt_publish_success');
@@ -12,8 +11,8 @@ const mqttPublishRate = new Rate('mqtt_publish_rate');
 // --- Configuration ---
 export const options = {
   stages: [
-    { duration: '10s', target: 1 },   
-    { duration: '30s', target: 1 },
+    { duration: '10s', target: 5 },   
+    { duration: '10s', target: 5 },
     { duration: '10s', target: 0 },
     // { duration: '30s', target: 100 },   // Ramp up to 100 devices
     // { duration: '2m', target: 100 },    // Stay at 100 devices
@@ -35,28 +34,8 @@ const MQTT_TLS_PORT = parseInt(__ENV.MQTT_TLS_PORT || '8883');
 const HEARTBEAT_INTERVAL = parseInt(__ENV.HEARTBEAT_INTERVAL || '60'); 
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); 
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '1000000000');
-const INVOICE_REQUEST_INTERVAL = parseInt(__ENV.INVOICE_REQUEST_INTERVAL || '5'); // Request invoice every 5 seconds
-const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '100000000'); // 0.1 BTC 
-
-// --- VU-Global State ---
-// These variables persist inside a specific VU as long as the VU is running.
-// They are NOT shared between VUs.
-let mqttClient = null;
-let deviceContext = {
-  id: null,
-  secret: null,
-  connected: false,
-  lastHeartbeat: 0,
-  lastUsageReport: 0,
-  lastAuthorizeRequest: 0,
-  lastInvoiceRequest: 0,
-  availableMsat: 0,           // Current available balance
-  reportingEnabled: false,     // Whether usage reporting is enabled (set by RESUME/STOP)
-  subscriptionsReady: false,   // Whether MQTT subscriptions are ready
-  authorizationStatus: null,   // null, 'GRANTED', 'ACTIVE', 'REJECTED'
-  initialAuthSent: false,       // Whether initial authorization request has been sent
-  pendingAuthorization: false,  // Whether an authorization request is pending
-};
+const INVOICE_REQUEST_INTERVAL = parseInt(__ENV.INVOICE_REQUEST_INTERVAL || '5'); 
+const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '100000000'); 
 
 // --- Helpers ---
 function generateDeviceID(vuID) {
@@ -71,29 +50,253 @@ function getISOTimestamp() {
   return new Date().toISOString();
 }
 
+// --- Setup ---
+export function setup() {
+  console.log("Starting load test setup...");
+}
+
+// --- Main VU Function (Event-Driven MQTT Pattern) ---
+export default function () {
+  const vuID = __VU;
+  const deviceID = generateDeviceID(vuID);
+  const deviceSecret = `${deviceID}_password`;
+
+  // Device context stored in closure (accessible to all event handlers)
+  const deviceContext = {
+    id: deviceID,
+    secret: deviceSecret,
+    availableMsat: 0,
+    reportingEnabled: false,
+    subscriptionsReady: false,
+    authorizationStatus: null,
+    pendingAuthorization: false,
+    lastInvoiceRequest: Date.now() - (INVOICE_REQUEST_INTERVAL * 1000),
+    lastUsageReport: Date.now() - (USAGE_REPORT_INTERVAL * 1000),
+  };
+
+  // 1. Register Device via HTTP (one-time per VU)
+  const devicePayload = JSON.stringify({
+    device_id: deviceID,
+    device_secret: deviceSecret,
+    measurement_unit: 'kWh',
+    unit_price_msat: 1000000,
+    reporting_strategy: 'interval',
+    reporting_interval: 30,
+    heartbeat_interval: HEARTBEAT_INTERVAL,
+    authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
+    timestamp: getISOTimestamp(),
+  });
+
+  const registerRes = http.post(
+    `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
+    devicePayload,
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  if (registerRes.status !== 200 && registerRes.status !== 201) {
+    console.error(`[VU ${vuID}] Device registration failed: ${registerRes.status}`);
+    return; // VU exits if registration fails
+  }
+
+  console.log(`[VU ${vuID}] Device registered: ${deviceID}`);
+
+  // 2. Create MQTT Client
+  const brokerURL = `ssl://${MQTT_BROKER}:${MQTT_TLS_PORT}`;
+  
+  const client = new Client({
+    clientId: `${deviceID}_k6_${generateID()}`,
+    username: deviceID,
+    password: deviceSecret,
+    clean: true,
+    connectTimeout: 10,
+    reconnectPeriod: 5,
+  });
+
+  // Topic definitions
+  const balanceTopic = `/devices/${deviceID}/balance`;
+  const controlTopic = `/devices/${deviceID}/control`;
+  const authorizeResponseTopic = `/devices/${deviceID}/response/authorize`;
+
+  // 3. Set up event handlers
+  client.on('connect', () => {
+    console.log(`[VU ${vuID}] Connected to MQTT broker`);
+
+    // Subscribe to topics
+    client.subscribe(balanceTopic);
+    client.subscribe(controlTopic);
+    client.subscribe(authorizeResponseTopic);
+    
+    deviceContext.subscriptionsReady = true;
+    console.log(`[VU ${vuID}] Subscribed to topics: ${balanceTopic}, ${controlTopic}, ${authorizeResponseTopic}`);
+
+    // Send initial authorization request
+    const authPayload = JSON.stringify({
+      device_id: deviceContext.id,
+      request_id: generateID(),
+      request_msat: AUTHORIZE_REQUEST_MSAT,
+      reason: 'STARTUP',
+      timestamp: getISOTimestamp(),
+    });
+
+    try {
+      client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 0 });
+      mqttPublishSuccess.add(1);
+      mqttPublishRate.add(1);
+      deviceContext.pendingAuthorization = true;
+      console.log(`[VU ${vuID}] Initial authorization request sent`);
+    } catch (e) {
+      mqttPublishFailure.add(1);
+      console.error(`[VU ${vuID}] Initial auth request failed: ${e}`);
+    }
+
+    // Set up heartbeat interval
+    setInterval(() => {
+      const payload = JSON.stringify({
+        device_id: deviceContext.id,
+        status: 1,
+        timestamp: getISOTimestamp(),
+      });
+
+      try {
+        client.publish(`/devices/${deviceContext.id}/heartbeat`, payload, { qos: 0 });
+        mqttPublishSuccess.add(1);
+        mqttPublishRate.add(1);
+      } catch (e) {
+        mqttPublishFailure.add(1);
+        console.error(`[VU ${vuID}] Heartbeat failed: ${e}`);
+      }
+    }, HEARTBEAT_INTERVAL * 1000);
+
+    // Set up usage reporting interval
+    let lastUsageReport = Date.now() - (USAGE_REPORT_INTERVAL * 1000);
+    setInterval(() => {
+      if (!deviceContext.reportingEnabled) {
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceLastReport = now - lastUsageReport;
+      const reportIntervalMs = USAGE_REPORT_INTERVAL * 1000;
+      
+      // Check if we should report (either interval elapsed or immediate trigger)
+      const shouldReport = (deviceContext.lastUsageReport === 0) || (timeSinceLastReport >= reportIntervalMs);
+      
+      if (shouldReport) {
+        const measure = Math.floor(Math.random() * 100) / 1000.0;
+        const payload = JSON.stringify({
+          device_id: deviceContext.id,
+          report_id: generateID(),
+          strategy: 1,
+          measure: measure,
+          unit: 'kWh',
+          timestamp: getISOTimestamp(),
+        });
+
+        try {
+          client.publish(`/devices/${deviceContext.id}/usage`, payload, { qos: 0 });
+          mqttPublishSuccess.add(1);
+          mqttPublishRate.add(1);
+          lastUsageReport = now;
+          deviceContext.lastUsageReport = now; // Update context for immediate trigger logic
+          console.log(`[VU ${vuID}] Usage report sent: ${measure} kWh`);
+        } catch (e) {
+          mqttPublishFailure.add(1);
+          mqttPublishRate.add(0);
+          console.error(`[VU ${vuID}] Usage report failed: ${e}`);
+        }
+      }
+    }, 100); // Check every 100ms for more responsive reporting
+
+    // Set up invoice retry interval (for REJECTED auth recovery)
+    setInterval(() => {
+      if (deviceContext.authorizationStatus !== 'REJECTED') {
+        return;
+      }
+
+      const now = Date.now();
+      if (now - deviceContext.lastInvoiceRequest >= INVOICE_REQUEST_INTERVAL * 1000) {
+        const payload = JSON.stringify({
+          device_id: deviceContext.id,
+          request_id: generateID(),
+          amount_msat: INVOICE_AMOUNT_MSAT,
+          reason: 'USER_TOPUP',
+          timestamp: getISOTimestamp(),
+        });
+
+        try {
+          client.publish(`/devices/${deviceContext.id}/request/invoice`, payload, { qos: 0 });
+          mqttPublishSuccess.add(1);
+          mqttPublishRate.add(1);
+          deviceContext.lastInvoiceRequest = now;
+          deviceContext.authorizationStatus = null; // Clear status to allow balance update to trigger new auth
+          console.log(`[VU ${vuID}] Invoice request sent (REJECTED recovery)`);
+        } catch (e) {
+          mqttPublishFailure.add(1);
+          console.error(`[VU ${vuID}] Invoice request failed: ${e}`);
+        }
+      }
+    }, 1000); // Check every second
+  });
+
+  client.on('message', (topic, message) => {
+    try {
+      // Robust string conversion
+      const msgStr = (typeof message === 'string')
+        ? message
+        : String.fromCharCode.apply(null, new Uint8Array(message));
+
+      const payload = JSON.parse(msgStr);
+
+      if (topic === balanceTopic) {
+        handleBalanceMessage(vuID, client, deviceContext, payload);
+      } else if (topic === controlTopic) {
+        handleControlMessage(vuID, client, deviceContext, payload);
+      } else if (topic === authorizeResponseTopic) {
+        handleAuthorizationResponse(vuID, deviceContext, payload);
+      } else {
+        console.log(`[VU ${vuID}] Unknown topic: ${topic}`);
+      }
+    } catch (e) {
+      console.error(`[VU ${vuID}] Message handler error: ${e} | Topic: ${topic}`);
+    }
+  });
+
+  client.on('end', () => {
+    console.log(`[VU ${vuID}] Disconnected from MQTT broker`);
+  });
+
+  client.on('error', (err) => {
+    console.error(`[VU ${vuID}] MQTT error: ${err}`);
+  });
+
+  // 4. Connect to broker (this blocks until connection closes)
+  try {
+    client.connect(brokerURL);
+  } catch (e) {
+    console.error(`[VU ${vuID}] MQTT connect error: ${e}`);
+  }
+
+  // Note: Function returns here, but VU stays alive running the MQTT event loop
+}
+
 // --- Message Handlers ---
-function handleBalanceMessage(vuID, payload) {
-  // Update balance from message
-  // BalancePayload JSON format: { device_id, available_msat (string), reserved_msat, total_msat, timestamp }
-  // Example: {"device_id":"smart-meter-001", "available_msat":"31701", "total_msat":"31701", "timestamp":"2025-12-11T13:18:55Z"}
+function handleBalanceMessage(vuID, client, deviceContext, payload) {
   if (payload && payload.available_msat !== undefined) {
-    // available_msat comes as a string in JSON, convert to number
     const availableMsat = typeof payload.available_msat === 'string' 
       ? parseInt(payload.available_msat, 10) 
       : parseInt(payload.available_msat) || 0;
-    const previousBalance = deviceContext.availableMsat;
-    deviceContext.availableMsat = availableMsat;
-    console.log(`[VU ${vuID}] Balance updated: ${deviceContext.availableMsat} msat available`);
     
-    // If balance is >= 0 and we don't have an active authorization, request authorization
-    // But only if we haven't just sent an invoice request (wait for it to be paid first)
+    deviceContext.availableMsat = availableMsat;
+    console.log(`[VU ${vuID}] Balance updated: ${deviceContext.availableMsat}`);
+    
+    // Auto-request auth if we have funds but no auth
     const now = Date.now();
     const timeSinceLastInvoice = now - deviceContext.lastInvoiceRequest;
     const shouldRequestAuth = availableMsat >= 0 && 
         deviceContext.authorizationStatus !== 'GRANTED' && 
         deviceContext.authorizationStatus !== 'ACTIVE' &&
         !deviceContext.pendingAuthorization &&
-        timeSinceLastInvoice >= INVOICE_REQUEST_INTERVAL * 1000; // Wait at least INVOICE_REQUEST_INTERVAL before trying auth after invoice
+        timeSinceLastInvoice >= INVOICE_REQUEST_INTERVAL * 1000;
     
     if (shouldRequestAuth) {
       const authPayload = JSON.stringify({
@@ -105,95 +308,64 @@ function handleBalanceMessage(vuID, payload) {
       });
       
       try {
-        mqttClient.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 1 });
+        client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 0 });
         mqttPublishSuccess.add(1);
         mqttPublishRate.add(1);
-        deviceContext.lastAuthorizeRequest = now;
         deviceContext.pendingAuthorization = true;
-        console.log(`[VU ${vuID}] Authorization request sent after balance update: ${AUTHORIZE_REQUEST_MSAT} msat (balance: ${availableMsat} msat)`);
+        console.log(`[VU ${vuID}] Auth request sent (balance update)`);
       } catch (e) {
-        mqttPublishFailure.add(1);
-        mqttPublishRate.add(0);
-        console.error(`[VU ${vuID}] Authorization request failed: ${e}`);
+        console.error(`[VU ${vuID}] Auth request failed: ${e}`);
       }
     }
   }
 }
 
-function handleAuthorizationResponse(vuID, payload) {
-  // AuthorizationResponsePayload JSON format: { device_id, request_id, status, authorization_id, granted_msat, remaining_msat, issued_at, expires_at, reason, available_msat }
-  // status: "AUTHORIZATION_STATUS_GRANTED", "AUTHORIZATION_STATUS_ACTIVE", "AUTHORIZATION_STATUS_REJECTED"
-  if (!payload || !payload.status) return;
-  
+function handleAuthorizationResponse(vuID, deviceContext, payload) {
+  if (!payload || !payload.status) {
+    return;
+  }
+
   const status = payload.status;
+  console.log(`[VU ${vuID}] Authorization status received: ${status}`);
   
   if (status === 'AUTHORIZATION_STATUS_GRANTED') {
     deviceContext.authorizationStatus = 'GRANTED';
     deviceContext.pendingAuthorization = false;
-    deviceContext.reportingEnabled = true; // Enable usage reporting when authorization is granted
-    deviceContext.lastUsageReport = 0; // Reset to 0 to allow immediate first report on next loop
-    console.log(`[VU ${vuID}] Authorization GRANTED: ${payload.granted_msat || 0} msat (request_id: ${payload.request_id || 'N/A'}) - usage reporting enabled`);
+    deviceContext.reportingEnabled = true;
+    deviceContext.lastUsageReport = 0; // Reset to 0 to trigger immediate report
+    console.log(`[VU ${vuID}] Authorization GRANTED - reporting ENABLED`);
   } else if (status === 'AUTHORIZATION_STATUS_ACTIVE') {
     deviceContext.authorizationStatus = 'ACTIVE';
     deviceContext.pendingAuthorization = false;
-    deviceContext.reportingEnabled = true; // Enable usage reporting when authorization is active
-    deviceContext.lastUsageReport = 0; // Reset to 0 to allow immediate first report on next loop
-    console.log(`[VU ${vuID}] Authorization ACTIVE: ${payload.remaining_msat || 0} msat remaining (request_id: ${payload.request_id || 'N/A'}) - usage reporting enabled`);
+    deviceContext.reportingEnabled = true;
+    deviceContext.lastUsageReport = 0; // Reset to 0 to trigger immediate report
+    console.log(`[VU ${vuID}] Authorization ACTIVE - reporting ENABLED`);
   } else if (status === 'AUTHORIZATION_STATUS_REJECTED') {
     deviceContext.pendingAuthorization = false;
     deviceContext.authorizationStatus = 'REJECTED';
-    const reason = payload.reason || 'INSUFFICIENT_FUNDS';
-    console.log(`[VU ${vuID}] Authorization REJECTED: ${reason} (request_id: ${payload.request_id || 'N/A'})`);
-    
-    // If rejected due to insufficient funds, request invoice only if we haven't sent one recently
-    if ((reason === 'INSUFFICIENT_FUNDS' || reason.includes('INSUFFICIENT')) &&
-        (Date.now() - deviceContext.lastInvoiceRequest >= INVOICE_REQUEST_INTERVAL * 1000)) {
-      const invoicePayload = JSON.stringify({
-        device_id: deviceContext.id,
-        request_id: generateID(),
-        amount_msat: INVOICE_AMOUNT_MSAT,
-        reason: 'USER_TOPUP',
-        timestamp: getISOTimestamp(),
-      });
-      
-      try {
-        mqttClient.publish(`/devices/${deviceContext.id}/request/invoice`, invoicePayload, { qos: 1 });
-        mqttPublishSuccess.add(1);
-        mqttPublishRate.add(1);
-        deviceContext.lastInvoiceRequest = Date.now();
-        console.log(`[VU ${vuID}] Invoice request sent immediately after rejection: ${INVOICE_AMOUNT_MSAT} msat`);
-      } catch (e) {
-        mqttPublishFailure.add(1);
-        mqttPublishRate.add(0);
-        console.error(`[VU ${vuID}] Invoice request failed: ${e}`);
-      }
-    } else if (reason === 'INSUFFICIENT_FUNDS' || reason.includes('INSUFFICIENT')) {
-      console.log(`[VU ${vuID}] Skipping invoice request - already sent recently (${Date.now() - deviceContext.lastInvoiceRequest}ms ago)`);
-    }
+    console.log(`[VU ${vuID}] Authorization REJECTED: ${payload.reason || 'Unknown'}`);
   } else {
     console.log(`[VU ${vuID}] Unknown authorization status: ${status}`);
   }
 }
 
-function handleControlMessage(vuID, payload) {
-  // ControlPayload JSON format: { command, reason, id, authorization_id }
-  // command: "CONTROL_COMMAND_STOP", "CONTROL_COMMAND_PAUSE", "CONTROL_COMMAND_RESUME", etc.
-  if (!payload || !payload.command) return;
-  
+function handleControlMessage(vuID, client, deviceContext, payload) {
+  if (!payload || !payload.command) {
+    return;
+  }
+
   const command = payload.command;
+  console.log(`[VU ${vuID}] Control command received: ${command}`);
   
-  if (command === 'CONTROL_COMMAND_STOP') {
+  if (command === 'CONTROL_COMMAND_STOP' || command === 'CONTROL_COMMAND_PAUSE') {
     deviceContext.reportingEnabled = false;
-    console.log(`[VU ${vuID}] Control command STOP received: ${payload.reason || 'REMOTE_COMMAND'}`);
-  } else if (command === 'CONTROL_COMMAND_PAUSE') {
-    deviceContext.reportingEnabled = false;
-    console.log(`[VU ${vuID}] Control command PAUSE received: ${payload.reason || 'REMOTE_COMMAND'}`);
+    console.log(`[VU ${vuID}] STOP/PAUSE received - reporting DISABLED`);
   } else if (command === 'CONTROL_COMMAND_RESUME') {
     deviceContext.reportingEnabled = true;
-    deviceContext.lastUsageReport = 0; // Reset to 0 to allow immediate first report on next loop
-    console.log(`[VU ${vuID}] Control command RESUME received - enabling usage reporting`);
+    deviceContext.lastUsageReport = 0; // Reset to 0 to trigger immediate report
+    console.log(`[VU ${vuID}] RESUME received - reporting ENABLED`);
   } else if (command === 'CONTROL_COMMAND_AUTHORIZATION') {
-    // Publish authorization request
+    // Manually trigger auth request
     const authPayload = JSON.stringify({
       device_id: deviceContext.id,
       request_id: generateID(),
@@ -201,317 +373,21 @@ function handleControlMessage(vuID, payload) {
       reason: payload.reason || 'AUTHORIZATION_REQUIRED',
       timestamp: getISOTimestamp(),
     });
-    
     try {
-      mqttClient.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 1 });
+      client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 0 });
       mqttPublishSuccess.add(1);
       mqttPublishRate.add(1);
-      console.log(`[VU ${vuID}] Authorization request sent (command): ${AUTHORIZE_REQUEST_MSAT} msat`);
-    } catch (e) {
-      mqttPublishFailure.add(1);
-      mqttPublishRate.add(0);
-      console.error(`[VU ${vuID}] Authorization request failed: ${e}`);
+      deviceContext.pendingAuthorization = true;
+      console.log(`[VU ${vuID}] Auth request sent (command)`);
+    } catch (e) { 
+      console.error(`[VU ${vuID}] Auth request failed (command): ${e}`);
     }
   } else {
-    console.log(`[VU ${vuID}] Control command received: ${command} (reason: ${payload.reason || 'N/A'})`);
+    console.log(`[VU ${vuID}] Unknown control command: ${command}`);
   }
-}
-
-// --- Setup (Optional) ---
-export function setup() {
-  // Use setup ONLY for global health checks or getting authentication tokens.
-  // DO NOT connect to MQTT here.
-  console.log("Starting load test setup...");
-}
-
-// --- Main VU Loop ---
-export default function () {
-  // 1. INITIALIZATION: Run once per VU
-  if (!mqttClient) {
-    const vuID = __VU;
-    const deviceID = generateDeviceID(vuID);
-    const deviceSecret = `${deviceID}_password`;
-    
-    console.log(`[VU ${vuID}] Initializing Device: ${deviceID}`);
-
-    // A. Register Device via HTTP
-    const devicePayload = JSON.stringify({
-      device_id: deviceID,
-      device_secret: deviceSecret,
-      measurement_unit: 'kWh',
-      unit_price_msat: 1000000,
-      reporting_strategy: 'interval',
-      reporting_interval: 30,
-      heartbeat_interval: HEARTBEAT_INTERVAL,
-      authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
-      timestamp: getISOTimestamp(),
-    });
-
-    const registerRes = http.post(
-      `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
-      devicePayload,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-
-    if (registerRes.status !== 200 && registerRes.status !== 201) {
-      console.error(`[VU ${vuID}] Registration failed: ${registerRes.status}`);
-      sleep(1); 
-      return; // Retry next loop
-    }
-
-    // B. Create MQTT Client
-    const brokerURL = `ssl://${MQTT_BROKER}:${MQTT_TLS_PORT}`;
-    const clientId = `${deviceID}_k6_${generateID()}`;
-    
-    mqttClient = new Client({
-      clientId: clientId,
-      username: deviceID,
-      password: deviceSecret,
-      clean: true,
-      connectTimeout: 10,
-      reconnectPeriod: 5,
-    });
-
-    // C. Connect
-    try {
-      mqttClient.connect(brokerURL);
-      console.log(`[VU ${vuID}] Connected to MQTT`);
-      
-      // Update local state
-      deviceContext.id = deviceID;
-      deviceContext.secret = deviceSecret;
-      deviceContext.connected = true;
-
-      // Initialize timings so we trigger immediate first actions if desired
-      const now = Date.now();
-      deviceContext.lastHeartbeat = now - (HEARTBEAT_INTERVAL * 1000);
-      deviceContext.lastInvoiceRequest = now - (INVOICE_REQUEST_INTERVAL * 1000);
-      deviceContext.lastUsageReport = now - (USAGE_REPORT_INTERVAL * 1000); // Initialize to allow immediate first report
-
-      // D. Subscribe to balance, control, and authorization response topics
-      const balanceTopic = `/devices/${deviceID}/balance`;
-      const controlTopic = `/devices/${deviceID}/control`;
-      const authorizeResponseTopic = `/devices/${deviceID}/response/authorize`;
-      
-      try {
-        // Subscribe to balance topic
-        mqttClient.subscribe(balanceTopic, { qos: 1 }, (err) => {
-          if (err) {
-            console.error(`[VU ${vuID}] Failed to subscribe to balance: ${err}`);
-          } else {
-            console.log(`[VU ${vuID}] Subscribed to ${balanceTopic}`);
-          }
-        });
-
-        // Subscribe to control topic
-        mqttClient.subscribe(controlTopic, { qos: 1 }, (err) => {
-          if (err) {
-            console.error(`[VU ${vuID}] Failed to subscribe to control: ${err}`);
-          } else {
-            console.log(`[VU ${vuID}] Subscribed to ${controlTopic}`);
-          }
-        });
-
-        // Subscribe to authorization response topic
-        mqttClient.subscribe(authorizeResponseTopic, { qos: 1 }, (err) => {
-          if (err) {
-            console.error(`[VU ${vuID}] Failed to subscribe to authorization response: ${err}`);
-          } else {
-            console.log(`[VU ${vuID}] Subscribed to ${authorizeResponseTopic}`);
-          }
-        });
-
-        // Set up message handler - MQTT messages are in JSON format
-        const messageHandler = (topic, message) => {
-          try {
-            let payload;
-            
-            // Convert message to string if needed
-            let messageString;
-            if (typeof message === 'string') {
-              messageString = message;
-            } else if (message instanceof ArrayBuffer) {
-              messageString = String.fromCharCode.apply(null, new Uint8Array(message));
-            } else if (message && message.buffer instanceof ArrayBuffer) {
-              messageString = String.fromCharCode.apply(null, new Uint8Array(message.buffer, message.byteOffset || 0, message.byteLength || message.length));
-            } else if (typeof message === 'object' && message !== null) {
-              // Already an object (may be auto-parsed by k6/x/mqtt)
-              payload = message;
-            } else {
-              // Try toString as fallback
-              messageString = String(message);
-            }
-            
-            // Parse JSON if we have a string
-            if (messageString !== undefined && !payload) {
-              payload = JSON.parse(messageString);
-            }
-            
-            if (payload) {
-              if (topic === balanceTopic) {
-                handleBalanceMessage(vuID, payload);
-              } else if (topic === controlTopic) {
-                handleControlMessage(vuID, payload);
-              } else if (topic === authorizeResponseTopic) {
-                handleAuthorizationResponse(vuID, payload);
-              }
-            }
-          } catch (e) {
-            console.error(`[VU ${vuID}] Error parsing JSON message from ${topic}: ${e}`);
-          }
-        };
-
-        // Try different message handler patterns based on k6/x/mqtt API
-        if (mqttClient.onMessage) {
-          mqttClient.onMessage(messageHandler);
-        } else if (mqttClient.on) {
-          // Fallback to event emitter pattern if available
-          mqttClient.on('message', messageHandler);
-        } else {
-          console.warn(`[VU ${vuID}] MQTT client does not support message handlers - subscriptions may not work`);
-        }
-
-        // Mark subscriptions as ready (give a small sleep for subscriptions to complete)
-        sleep(0.5);
-        deviceContext.subscriptionsReady = true;
-
-      } catch (e) {
-        console.error(`[VU ${vuID}] Subscription error: ${e}`);
-      }
-      
-    } catch (e) {
-      console.error(`[VU ${vuID}] MQTT Connect error: ${e}`);
-      mqttClient = null; // Reset to try again next loop
-      sleep(1);
-      return;
-    }
-  }
-
-  // 2. RUNTIME LOGIC
-  // If we are here, we have an active mqttClient for this VU
-  
-  const now = Date.now();
-  
-  // Logic: Send initial authorization request after subscriptions are ready
-  if (deviceContext.subscriptionsReady && !deviceContext.initialAuthSent) {
-    const authPayload = JSON.stringify({
-      device_id: deviceContext.id,
-      request_id: generateID(),
-      request_msat: AUTHORIZE_REQUEST_MSAT,
-      reason: 'STARTUP',
-      timestamp: getISOTimestamp(),
-    });
-    
-    try {
-      mqttClient.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 1 });
-      mqttPublishSuccess.add(1);
-      mqttPublishRate.add(1);
-      deviceContext.initialAuthSent = true;
-      deviceContext.lastAuthorizeRequest = now;
-      console.log(`[VU ${__VU}] Initial authorization request sent: ${AUTHORIZE_REQUEST_MSAT} msat`);
-    } catch (e) {
-      mqttPublishFailure.add(1);
-      mqttPublishRate.add(0);
-      console.error(`[VU ${__VU}] Initial authorization request failed: ${e}`);
-    }
-  }
-  
-  // Logic: Heartbeat
-  if (now - deviceContext.lastHeartbeat >= HEARTBEAT_INTERVAL * 1000) {
-    const payload = JSON.stringify({
-      device_id: deviceContext.id,
-      status: 1, 
-      timestamp: getISOTimestamp(),
-    });
-    
-    try {
-        mqttClient.publish(`/devices/${deviceContext.id}/heartbeat`, payload, { qos: 1 });
-        mqttPublishSuccess.add(1);
-        mqttPublishRate.add(1);
-    } catch(e) {
-        mqttPublishFailure.add(1);
-        mqttPublishRate.add(0);
-        console.error(`[VU ${__VU}] Publish failed: ${e}`);
-    }
-    deviceContext.lastHeartbeat = now;
-  }
-
-  // Logic: Usage Report (only if reporting is enabled)
-  if (deviceContext.reportingEnabled) {
-    const timeSinceLastReport = now - deviceContext.lastUsageReport;
-    const shouldReport = timeSinceLastReport >= USAGE_REPORT_INTERVAL * 1000;
-    
-    // Debug: always log the first check, then every 5 seconds
-    const debugLog = (deviceContext.lastUsageReport === 0 || now % 5000 < 100);
-    if (debugLog || shouldReport) {
-      console.log(`[VU ${__VU}] Usage check: enabled=true, timeSince=${timeSinceLastReport}ms, interval=${USAGE_REPORT_INTERVAL * 1000}ms, shouldReport=${shouldReport}, lastReport=${deviceContext.lastUsageReport}, now=${now}`);
-    }
-    
-    if (shouldReport) {
-      const measure = randomIntBetween(0, 100) / 1000.0;
-      const payload = JSON.stringify({
-        device_id: deviceContext.id,
-        report_id: generateID(),
-        strategy: 1,
-        measure: measure,
-        unit: 'kWh',
-        timestamp: getISOTimestamp(),
-      });
-
-      try {
-          mqttClient.publish(`/devices/${deviceContext.id}/usage`, payload, { qos: 1 });
-          mqttPublishSuccess.add(1);
-          mqttPublishRate.add(1);
-          deviceContext.lastUsageReport = now;
-          console.log(`[VU ${__VU}] Usage report sent: ${measure} kWh`);
-      } catch(e) {
-          mqttPublishFailure.add(1);
-          mqttPublishRate.add(0);
-          console.error(`[VU ${__VU}] Usage report failed: ${e}`);
-      }
-    }
-  }
-
-  // Logic: Invoice Request (to add funds after authorization is rejected)
-  // Request invoice only if authorization was rejected and enough time has passed since last request
-  if (deviceContext.subscriptionsReady && 
-      deviceContext.initialAuthSent &&
-      deviceContext.authorizationStatus === 'REJECTED' && 
-      now - deviceContext.lastInvoiceRequest >= INVOICE_REQUEST_INTERVAL * 1000) {
-    const payload = JSON.stringify({
-      device_id: deviceContext.id,
-      request_id: generateID(),
-      amount_msat: INVOICE_AMOUNT_MSAT,
-      reason: 'USER_TOPUP',
-      timestamp: getISOTimestamp(),
-    });
-
-    try {
-        mqttClient.publish(`/devices/${deviceContext.id}/request/invoice`, payload, { qos: 1 });
-        mqttPublishSuccess.add(1);
-        mqttPublishRate.add(1);
-        console.log(`[VU ${__VU}] Invoice request sent: ${INVOICE_AMOUNT_MSAT} msat (authorization was rejected)`);
-        // Reset authorization status so we can retry after invoice is paid
-        deviceContext.authorizationStatus = null;
-    } catch(e) {
-        mqttPublishFailure.add(1);
-        mqttPublishRate.add(0);
-        console.error(`[VU ${__VU}] Invoice request failed: ${e}`);
-    }
-    deviceContext.lastInvoiceRequest = now;
-  }
-  
-
-  // IMPORTANT: k6 execution model is a loop.
-  // Add a small sleep to prevent tight looping CPU spikes if no work was done.
-  // k6/x/mqtt is async, but the loop needs to yield.
-  sleep(0.1); 
 }
 
 // --- Teardown ---
-// Does not have access to VU-Global state (mqttClient), 
-// so we cannot disconnect here. 
-// k6/x/mqtt automatically closes connections when the VU stops.
 export function teardown() {
   console.log("Load test finished.");
 }
