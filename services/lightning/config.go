@@ -25,7 +25,7 @@ type Config struct {
 
 func LoadConfig() *Config {
 	cfg := &Config{
-		LNDHost:          internal.GetEnv("LND_HOST", "lightning.db"),
+		LNDHost:          internal.GetEnv("LND_HOST", ""),
 		LNDTLSCertHex:    internal.GetEnv("LND_TLS_CERT_HEX", ""),
 		LNDTLSServerName: internal.GetEnv("LND_TLS_SERVER_NAME", "localhost"),
 		LNDMacaroonHex:   internal.GetEnv("LND_MACAROON_HEX", ""),

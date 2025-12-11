@@ -1,0 +1,27 @@
+version: '3.9'
+
+services:
+  autopay:
+    build:
+      context: .
+      dockerfile: autopay/Dockerfile
+    container_name: autopay
+    environment:
+      - NETWORK=regtest
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Note: Autopay connects directly to LND nodes, so it doesn't strictly need
+    # the lightning service, but it's included as a dependency to ensure LND
+    # is available when autopay starts. If LND is external, remove this dependency.
+    # depends_on:
+    #   lightning:
+    #     condition: service_started
+    networks:
+      - default
+
+networks:
+  default:
+    name: lnpay-network
+    external: false
+

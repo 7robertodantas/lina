@@ -52,6 +52,8 @@ The script can be configured via environment variables:
 - `USAGE_REPORT_INTERVAL`: Interval in seconds for publishing usage reports (default: `1`)
 - `AUTHORIZE_REQUEST_MSAT`: Amount in millisatoshis to request for authorization (default: `1000000000` = 1 BTC)
 - `HEARTBEAT_INTERVAL`: Interval in seconds for heartbeat messages (default: `60`)
+- `INVOICE_REQUEST_INTERVAL`: Interval in seconds for requesting invoices to add funds (default: `5`)
+- `INVOICE_AMOUNT_MSAT`: Amount in millisatoshis to request per invoice (default: `100000000` = 0.1 BTC)
 - `ABORT_ON_SETUP_FAILURE`: Abort test if setup fails (default: `true`, set to `false` to continue)
 
 ## Project Structure
@@ -145,6 +147,7 @@ For each virtual user (device):
    - Publishes heartbeat messages to `/devices/{device_id}/heartbeat`
    - Periodically requests authorization for a large amount (configurable)
    - Publishes usage reports to `/devices/{device_id}/usage` at configurable intervals
+   - Requests invoices to add funds to devices (auto-paid by autopay service)
 
 3. **Teardown:**
    - Disconnects from MQTT broker
@@ -186,6 +189,18 @@ All MQTT messages use JSON encoding (protojson format with `UseProtoNames: true`
   }
   ```
   Note: `strategy` uses numeric enum value (1 = REPORTING_STRATEGY_INTERVAL). If your server expects string enum names, you may need to adjust the script.
+
+- **Invoice Request:**
+  ```json
+  {
+    "device_id": "smart-meter-000001",
+    "request_id": "abc123...",
+    "amount_msat": 100000000,
+    "reason": "USER_TOPUP",
+    "timestamp": "2025-01-15T10:30:00Z"
+  }
+  ```
+  Note: Invoice requests are automatically paid by the `autopay` sidecar service, which listens to invoice responses on MQTT and pays them via LND.
 
 ## Troubleshooting
 

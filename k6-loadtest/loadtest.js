@@ -12,8 +12,8 @@ const mqttPublishRate = new Rate('mqtt_publish_rate');
 // --- Configuration ---
 export const options = {
   stages: [
-    { duration: '10s', target: 5 },   
-    { duration: '30s', target: 5 },
+    { duration: '10s', target: 100 },   
+    { duration: '30s', target: 100 },
     { duration: '10s', target: 0 },
     // { duration: '30s', target: 100 },   // Ramp up to 100 devices
     // { duration: '2m', target: 100 },    // Stay at 100 devices
@@ -34,7 +34,9 @@ const MQTT_BROKER = __ENV.MQTT_BROKER || '192.168.0.111';
 const MQTT_TLS_PORT = parseInt(__ENV.MQTT_TLS_PORT || '8883');
 const HEARTBEAT_INTERVAL = parseInt(__ENV.HEARTBEAT_INTERVAL || '60'); 
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); 
-const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '1000000000'); 
+const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '1000000000');
+const INVOICE_REQUEST_INTERVAL = parseInt(__ENV.INVOICE_REQUEST_INTERVAL || '5'); // Request invoice every 5 seconds
+const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '100000000'); // 0.1 BTC 
 
 // --- VU-Global State ---
 // These variables persist inside a specific VU as long as the VU is running.
@@ -46,7 +48,9 @@ let deviceContext = {
   connected: false,
   lastHeartbeat: 0,
   lastUsageReport: 0,
-  lastAuthorizeRequest: 0
+  lastAuthorizeRequest: 0,
+  lastInvoiceRequest: 0,
+  hasFunds: false
 };
 
 // --- Helpers ---
@@ -129,7 +133,8 @@ export default function () {
 
       // Initialize timings so we trigger immediate first actions if desired
       const now = Date.now();
-      deviceContext.lastHeartbeat = now - (HEARTBEAT_INTERVAL * 1000); 
+      deviceContext.lastHeartbeat = now - (HEARTBEAT_INTERVAL * 1000);
+      deviceContext.lastInvoiceRequest = now - (INVOICE_REQUEST_INTERVAL * 1000); // Request invoice immediately 
     } catch (e) {
       console.error(`[VU ${vuID}] MQTT Connect error: ${e}`);
       mqttClient = null; // Reset to try again next loop
@@ -183,6 +188,33 @@ export default function () {
         mqttPublishRate.add(0);
     }
     deviceContext.lastUsageReport = now;
+  }
+
+  // Logic: Invoice Request (to add funds)
+  if (!deviceContext.hasFunds && now - deviceContext.lastInvoiceRequest >= INVOICE_REQUEST_INTERVAL * 1000) {
+    const payload = JSON.stringify({
+      device_id: deviceContext.id,
+      request_id: generateID(),
+      amount_msat: INVOICE_AMOUNT_MSAT,
+      reason: 'USER_TOPUP',
+      timestamp: getISOTimestamp(),
+    });
+
+    try {
+        mqttClient.publish(`/devices/${deviceContext.id}/request/invoice`, payload, { qos: 1 });
+        mqttPublishSuccess.add(1);
+        mqttPublishRate.add(1);
+        console.log(`[VU ${__VU}] Invoice request sent: ${INVOICE_AMOUNT_MSAT} msat`);
+    } catch(e) {
+        mqttPublishFailure.add(1);
+        mqttPublishRate.add(0);
+        console.error(`[VU ${__VU}] Invoice request failed: ${e}`);
+    }
+    deviceContext.lastInvoiceRequest = now;
+    // Mark as having funds after requesting (autopay will pay it)
+    // In a real scenario, you'd wait for the invoice to be paid, but for load testing
+    // we assume the autopay service will handle it quickly
+    deviceContext.hasFunds = true;
   }
 
   // IMPORTANT: k6 execution model is a loop.
