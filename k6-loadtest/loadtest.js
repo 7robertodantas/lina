@@ -13,6 +13,7 @@ const mqttPublishRate = new Rate('mqtt_publish_rate');
 
 // --- Configuration ---
 export const options = {
+  setupTimeout: '10m', // Allow up to 10 minutes for setup (device pre-registration)
   scenarios: {
     devices: {
       executor: 'ramping-vus',
@@ -60,7 +61,8 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1');
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 const INVOICE_REQUEST_INTERVAL = parseInt(__ENV.INVOICE_REQUEST_INTERVAL || '5'); 
-const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '250000'); 
+const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '250000');
+const MAX_VUS = parseInt(__ENV.MAX_VUS || '100000'); 
 
 // --- Helpers ---
 function generateDeviceID(vuID) {
@@ -76,7 +78,7 @@ function getISOTimestamp() {
 }
 
 // --- Device Registration ---
-function registerDevice(vuID, deviceID, deviceSecret) {
+function registerDevice(deviceID, deviceSecret) {
   // First, check if device already exists
   const getRes = http.get(
     `${API_BASE_URL}${API_DEVICES_ENDPOINT}/${deviceID}`,
@@ -85,13 +87,12 @@ function registerDevice(vuID, deviceID, deviceSecret) {
 
   // If device exists (200 OK), we're done
   if (getRes.status === 200) {
-    console.log(`[VU ${vuID}] Device already exists: ${deviceID}`);
     return true;
   }
 
   // If device doesn't exist (404 or other error), create it
   if (getRes.status !== 404) {
-    console.warn(`[VU ${vuID}] Unexpected GET response status: ${getRes.status}`);
+    console.warn(`Unexpected GET response status for ${deviceID}: ${getRes.status}`);
   }
 
   // Create the device
@@ -114,17 +115,77 @@ function registerDevice(vuID, deviceID, deviceSecret) {
   );
 
   if (registerRes.status !== 200 && registerRes.status !== 201) {
-    console.error(`[VU ${vuID}] Device registration failed: ${registerRes.status}`);
+    console.error(`Device registration failed for ${deviceID}: ${registerRes.status} - ${registerRes.body}`);
     return false;
   }
 
-  console.log(`[VU ${vuID}] Device registered: ${deviceID}`);
   return true;
 }
 
 // --- Setup ---
 export function setup() {
-  console.log("Starting load test setup...");
+  console.log(`Starting load test setup: pre-registering ${MAX_VUS} devices...`);
+  
+  const batchSize = 100; // Register devices in batches to avoid overwhelming the API
+  let registered = 0;
+  let skipped = 0;
+  let failed = 0;
+  
+  for (let vuID = 1; vuID <= MAX_VUS; vuID++) {
+    const deviceID = generateDeviceID(vuID);
+    const deviceSecret = `${deviceID}_password`;
+    
+    // Check if device exists first
+    const getRes = http.get(
+      `${API_BASE_URL}${API_DEVICES_ENDPOINT}/${deviceID}`,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    
+    if (getRes.status === 200) {
+      skipped++;
+      continue;
+    }
+    
+    // Create the device
+    const devicePayload = JSON.stringify({
+      device_id: deviceID,
+      device_secret: deviceSecret,
+      measurement_unit: 'kWh',
+      unit_price_msat: UNIT_PRICE_MSAT,
+      reporting_strategy: 'interval',
+      reporting_interval: USAGE_REPORT_INTERVAL,
+      heartbeat_interval: HEARTBEAT_INTERVAL,
+      authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
+      timestamp: getISOTimestamp(),
+    });
+    
+    const registerRes = http.post(
+      `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
+      devicePayload,
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+    
+    if (registerRes.status === 200 || registerRes.status === 201) {
+      registered++;
+    } else {
+      failed++;
+      console.error(`Failed to register device ${deviceID}: ${registerRes.status} - ${registerRes.body}`);
+    }
+    
+    // Progress logging every batch
+    if (vuID % batchSize === 0) {
+      console.log(`Progress: ${vuID}/${MAX_VUS} - Registered: ${registered}, Skipped: ${skipped}, Failed: ${failed}`);
+    }
+  }
+  
+  console.log(`Setup complete: Registered: ${registered}, Skipped: ${skipped}, Failed: ${failed}, Total: ${MAX_VUS}`);
+  
+  return {
+    registered,
+    skipped,
+    failed,
+    total: MAX_VUS,
+  };
 }
 
 // --- Main VU Function (Event-Driven MQTT Pattern) ---
@@ -146,16 +207,15 @@ export default function () {
     lastUsageReport: Date.now() - (USAGE_REPORT_INTERVAL * 1000),
   };
 
-  // 1. Register Device via HTTP (one-time per VU)
-  if (!registerDevice(vuID, deviceID, deviceSecret)) {
-    return; // VU exits if registration fails
-  }
-
-  // 2. Create MQTT Client
+  // Device should already be registered in setup()
+  // Skip registration during load test to avoid testing registration endpoint
+  
+  // 1. Create MQTT Client
   const brokerURL = `ssl://${MQTT_BROKER}:${MQTT_TLS_PORT}`;
   
   const client = new Client({
-    client_id: `${deviceID}_k6_${generateID()}`,
+    // Using deviceID for client_id ensures uniqueness per VU, which is sufficient if each VU/device is only ever connected once at a time.
+    client_id: deviceID,
     username: deviceID,
     password: deviceSecret,
     clean: true,
