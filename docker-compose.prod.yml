@@ -129,6 +129,8 @@ services:
       - "3001:8080" # UI
     environment:
       - MQTT_BROKER=mosquitto
+      - DEVICE_ID=${SMARTMETER_DEVICE_ID}
+      - DEVICE_SECRET=${SMARTMETER_DEVICE_SECRET}
     env_file:
       - .env
     volumes:

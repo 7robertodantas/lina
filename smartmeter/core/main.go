@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 
 	"github.com/robertodantas/lnpay/internal"
 )
@@ -15,9 +16,17 @@ func main() {
 
 	cfg := LoadConfig()
 
-	// Create device instance
-	deviceID := "smart-meter-001"
-	deviceSecret := "smart-meter-001_password"
+	// Get device ID and secret from environment variables (required)
+	deviceID := os.Getenv("DEVICE_ID")
+	if deviceID == "" {
+		logger.Fatal(ctx, "DEVICE_ID environment variable is required", nil)
+	}
+
+	deviceSecret := os.Getenv("DEVICE_SECRET")
+	if deviceSecret == "" {
+		logger.Fatal(ctx, "DEVICE_SECRET environment variable is required", nil)
+	}
+
 	meter := NewSmartMeter(deviceID, deviceSecret, cfg)
 
 	// Create WebSocket handler

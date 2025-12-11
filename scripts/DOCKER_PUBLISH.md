@@ -190,13 +190,13 @@ Examples:
 
 ## Development vs Production
 
-- **Development**: Use `docker-compose.yml` (builds images locally)
+- **Development**: Use `docker-compose.dev.yml` (builds images locally)
 - **Production**: Use `docker-compose.prod.yml` (pulls pre-built images)
 
-You can still use the original `docker-compose.yml` for local development:
+You can still use `docker-compose.dev.yml` for local development:
 
 ```bash
-docker-compose up --build
+docker-compose -f docker-compose.dev.yml up --build
 ```
 
 ## Updating Images

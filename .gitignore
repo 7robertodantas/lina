@@ -41,6 +41,9 @@ build/
 .env
 .env.local
 .env.*.local
+.env.sims*
+.env.meas*
+.env.prod*
 
 # OS files
 .DS_Store
