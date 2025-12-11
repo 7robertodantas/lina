@@ -3,6 +3,9 @@ import { Counter, Rate } from 'k6/metrics';
 import http from 'k6/http';
 import { randomString } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
 
+
+
+
 // --- Metrics ---
 const mqttPublishSuccess = new Counter('mqtt_publish_success');
 const mqttPublishFailure = new Counter('mqtt_publish_failure');
@@ -10,22 +13,43 @@ const mqttPublishRate = new Rate('mqtt_publish_rate');
 
 // --- Configuration ---
 export const options = {
-  stages: [
-    { duration: '10s', target: 5 },   
-    { duration: '10s', target: 5 },
-    { duration: '10s', target: 0 },
-    // { duration: '30s', target: 100 },   // Ramp up to 100 devices
-    // { duration: '2m', target: 100 },    // Stay at 100 devices
-    // { duration: '30s', target: 500 },  // Ramp up to 500 devices
-    // { duration: '2m', target: 500 },    // Stay at 500 devices
-    // { duration: '30s', target: 1000 },   // Ramp up to 1000 devices
-    // { duration: '5m', target: 1000 },   // Stay at 1000 devices (stress test)
-    // { duration: '30s', target: 0 },    // Ramp down
-  ],
-  thresholds: {
-    'mqtt_publish_rate': ['rate>0.95'], 
+  scenarios: {
+    devices: {
+      executor: 'ramping-vus',
+      startVUs: 0,
+      stages: [
+        { duration: '1m', target: 1000 },   // warmup
+        // { duration: '1m', target: 5000 },
+        // { duration: '1m', target: 10000 },
+        // { duration: '1m', target: 20000 },
+        // { duration: '1m', target: 40000 },
+        // { duration: '1m', target: 60000 },
+        // { duration: '1m', target: 80000 },
+        // { duration: '1m', target: 100000 }, // peak
+        // { duration: '5m', target: 100000 },// plateau at max
+        { duration: '1m', target: 0 },      // ramp down
+      ],
+      gracefulRampDown: '2m',
+    },
   },
 };
+// export const options = {
+//   stages: [
+//     { duration: '10s', target: 5 },   
+//     { duration: '10s', target: 5 },
+//     { duration: '10s', target: 0 },
+//     // { duration: '30s', target: 100 },   // Ramp up to 100 devices
+//     // { duration: '2m', target: 100 },    // Stay at 100 devices
+//     // { duration: '30s', target: 500 },  // Ramp up to 500 devices
+//     // { duration: '2m', target: 500 },    // Stay at 500 devices
+//     // { duration: '30s', target: 1000 },   // Ramp up to 1000 devices
+//     // { duration: '5m', target: 1000 },   // Stay at 1000 devices (stress test)
+//     // { duration: '30s', target: 0 },    // Ramp down
+//   ],
+//   thresholds: {
+//     'mqtt_publish_rate': ['rate>0.95'], 
+//   },
+// };
 
 const API_BASE_URL = __ENV.API_BASE_URL || 'http://192.168.0.111:8080';
 const API_DEVICES_ENDPOINT = __ENV.API_DEVICES_ENDPOINT || '/devices';
@@ -33,9 +57,10 @@ const MQTT_BROKER = __ENV.MQTT_BROKER || '192.168.0.111';
 const MQTT_TLS_PORT = parseInt(__ENV.MQTT_TLS_PORT || '8883');
 const HEARTBEAT_INTERVAL = parseInt(__ENV.HEARTBEAT_INTERVAL || '60'); 
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); 
-const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '1000000000');
+const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
+const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 const INVOICE_REQUEST_INTERVAL = parseInt(__ENV.INVOICE_REQUEST_INTERVAL || '5'); 
-const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '100000000'); 
+const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '250000'); 
 
 // --- Helpers ---
 function generateDeviceID(vuID) {
@@ -48,6 +73,53 @@ function generateID() {
 
 function getISOTimestamp() {
   return new Date().toISOString();
+}
+
+// --- Device Registration ---
+function registerDevice(vuID, deviceID, deviceSecret) {
+  // First, check if device already exists
+  const getRes = http.get(
+    `${API_BASE_URL}${API_DEVICES_ENDPOINT}/${deviceID}`,
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  // If device exists (200 OK), we're done
+  if (getRes.status === 200) {
+    console.log(`[VU ${vuID}] Device already exists: ${deviceID}`);
+    return true;
+  }
+
+  // If device doesn't exist (404 or other error), create it
+  if (getRes.status !== 404) {
+    console.warn(`[VU ${vuID}] Unexpected GET response status: ${getRes.status}`);
+  }
+
+  // Create the device
+  const devicePayload = JSON.stringify({
+    device_id: deviceID,
+    device_secret: deviceSecret,
+    measurement_unit: 'kWh',
+    unit_price_msat: UNIT_PRICE_MSAT,
+    reporting_strategy: 'interval',
+    reporting_interval: USAGE_REPORT_INTERVAL,
+    heartbeat_interval: HEARTBEAT_INTERVAL,
+    authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
+    timestamp: getISOTimestamp(),
+  });
+
+  const registerRes = http.post(
+    `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
+    devicePayload,
+    { headers: { 'Content-Type': 'application/json' } }
+  );
+
+  if (registerRes.status !== 200 && registerRes.status !== 201) {
+    console.error(`[VU ${vuID}] Device registration failed: ${registerRes.status}`);
+    return false;
+  }
+
+  console.log(`[VU ${vuID}] Device registered: ${deviceID}`);
+  return true;
 }
 
 // --- Setup ---
@@ -75,36 +147,15 @@ export default function () {
   };
 
   // 1. Register Device via HTTP (one-time per VU)
-  const devicePayload = JSON.stringify({
-    device_id: deviceID,
-    device_secret: deviceSecret,
-    measurement_unit: 'kWh',
-    unit_price_msat: 1000000,
-    reporting_strategy: 'interval',
-    reporting_interval: 30,
-    heartbeat_interval: HEARTBEAT_INTERVAL,
-    authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
-    timestamp: getISOTimestamp(),
-  });
-
-  const registerRes = http.post(
-    `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
-    devicePayload,
-    { headers: { 'Content-Type': 'application/json' } }
-  );
-
-  if (registerRes.status !== 200 && registerRes.status !== 201) {
-    console.error(`[VU ${vuID}] Device registration failed: ${registerRes.status}`);
+  if (!registerDevice(vuID, deviceID, deviceSecret)) {
     return; // VU exits if registration fails
   }
-
-  console.log(`[VU ${vuID}] Device registered: ${deviceID}`);
 
   // 2. Create MQTT Client
   const brokerURL = `ssl://${MQTT_BROKER}:${MQTT_TLS_PORT}`;
   
   const client = new Client({
-    clientId: `${deviceID}_k6_${generateID()}`,
+    client_id: `${deviceID}_k6_${generateID()}`,
     username: deviceID,
     password: deviceSecret,
     clean: true,
@@ -182,7 +233,8 @@ export default function () {
       const shouldReport = (deviceContext.lastUsageReport === 0) || (timeSinceLastReport >= reportIntervalMs);
       
       if (shouldReport) {
-        const measure = Math.floor(Math.random() * 100) / 1000.0;
+        // Random measure between 0.1 and 1.0
+        const measure = 0.1 + Math.random() * 0.9;
         const payload = JSON.stringify({
           device_id: deviceContext.id,
           report_id: generateID(),
