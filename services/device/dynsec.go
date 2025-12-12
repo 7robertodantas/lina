@@ -303,6 +303,100 @@ func (d *DynSecService) clientExists(ctx context.Context, username string) (bool
 	return false, nil
 }
 
+// listGroups lists all groups using the dynamic security API
+func (d *DynSecService) listGroups(ctx context.Context) ([]string, error) {
+	commandID := d.getNextCommandID()
+	command := map[string]interface{}{
+		"command": commandID,
+		"commands": []map[string]interface{}{
+			{
+				"command": "listGroups",
+			},
+		},
+	}
+
+	// Drain old responses
+	for {
+		select {
+		case <-d.responseCh:
+		default:
+			goto sendCommand
+		}
+	}
+sendCommand:
+
+	commandJSON, err := json.Marshal(command)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal command: %w", err)
+	}
+
+	controlTopic := "$CONTROL/dynamic-security/v1"
+	logger.DebugWithFields(ctx, "Listing groups on southbound mqtt", map[string]interface{}{
+		"command_id": commandID,
+	})
+
+	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	if !token.WaitTimeout(5 * time.Second) {
+		return nil, fmt.Errorf("timeout publishing listGroups command")
+	}
+	if token.Error() != nil {
+		return nil, fmt.Errorf("failed to publish listGroups command: %w", token.Error())
+	}
+
+	timeout := time.After(10 * time.Second)
+	select {
+	case response := <-d.responseCh:
+		// Parse response format: response["responses"][0]["data"]["groups"]
+		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
+			if respMap, ok := resp[0].(map[string]interface{}); ok {
+				// Check for error first
+				if errMsg, hasErr := respMap["error"]; hasErr {
+					return nil, fmt.Errorf("listGroups failed: %v", errMsg)
+				}
+				// Extract groups from data field
+				if data, ok := respMap["data"].(map[string]interface{}); ok {
+					if groups, ok := data["groups"].([]interface{}); ok {
+						groupNames := make([]string, 0, len(groups))
+						for _, group := range groups {
+							// Groups can be strings or objects with groupname field
+							if groupStr, ok := group.(string); ok {
+								groupNames = append(groupNames, groupStr)
+							} else if groupMap, ok := group.(map[string]interface{}); ok {
+								if groupname, ok := groupMap["groupname"].(string); ok {
+									groupNames = append(groupNames, groupname)
+								}
+							}
+						}
+						return groupNames, nil
+					}
+				}
+			}
+		}
+		// Log the response for debugging
+		responseJSON, _ := json.MarshalIndent(response, "", "  ")
+		logger.WarnWithFields(ctx, "Unexpected listGroups response format on southbound mqtt", map[string]interface{}{
+			"response": string(responseJSON),
+		})
+		return nil, fmt.Errorf("unexpected response format from listGroups")
+	case <-timeout:
+		return nil, fmt.Errorf("timeout waiting for listGroups response")
+	}
+}
+
+// groupExists checks if a group exists
+func (d *DynSecService) groupExists(ctx context.Context, groupName string) (bool, error) {
+	groups, err := d.listGroups(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range groups {
+		if group == groupName {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // executeCommand sends a command to the dynamic security plugin and waits for response
 func (d *DynSecService) executeCommand(ctx context.Context, command map[string]interface{}) error {
 	commandID := d.getNextCommandID()
@@ -644,6 +738,234 @@ func (d *DynSecService) GetDeviceCredentials(deviceID string) (username, passwor
 	username = deviceID
 	password = fmt.Sprintf("%s_password", deviceID)
 	return username, password
+}
+
+// ProvisionDevicesBatch provisions multiple devices in batch using groups for efficiency
+// Creates a single group and role for all devices in the batch instead of per-device roles
+// groupName and roleName should be provided by the caller (e.g., calculated from device pattern and range)
+// deviceIDPattern is the pattern used to generate device IDs (e.g., "smart_meter_{id}")
+func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*Device, deviceSecrets map[string]string, groupName, roleName, deviceIDPattern string) error {
+	if len(devices) == 0 {
+		return nil
+	}
+
+	if groupName == "" || roleName == "" {
+		return fmt.Errorf("groupName and roleName are required")
+	}
+
+	if deviceIDPattern == "" {
+		return fmt.Errorf("deviceIDPattern is required")
+	}
+
+	logger.Infof(ctx, "Starting batch provisioning of %d devices in dynsec using groups", len(devices))
+
+	// Extract wildcard pattern for ACLs by splitting deviceIDPattern on {id}
+	// For pattern "smart_meter_{id}", split by "{id}" to get "smart_meter_" prefix
+	// Then create wildcard "smart_meter_+" to match all devices in the range
+	parts := strings.Split(deviceIDPattern, "{id}")
+	if len(parts) == 0 {
+		return fmt.Errorf("deviceIDPattern %s does not contain {id} placeholder", deviceIDPattern)
+	}
+	deviceBasePattern := parts[0]             // "smart_meter_" (everything before {id})
+	deviceWildcard := deviceBasePattern + "+" // "smart_meter_+"
+
+	logger.Infof(ctx, "Using group-based provisioning: group=%s, role=%s, wildcard=%s", groupName, roleName, deviceWildcard)
+
+	// Step 1: Check if group exists, create if missing
+	groupExists, err := d.groupExists(ctx, groupName)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to check if group exists, will attempt to create: %v", err)
+		groupExists = false
+	}
+
+	if !groupExists {
+		logger.Infof(ctx, "Creating group %s", groupName)
+		createGroupCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":   "createGroup",
+					"groupname": groupName,
+				},
+			},
+		}
+		if err := d.executeCommand(ctx, createGroupCmd); err != nil {
+			return fmt.Errorf("failed to create group %s: %w", groupName, err)
+		}
+		logger.Infof(ctx, "Group %s created successfully", groupName)
+	} else {
+		logger.Infof(ctx, "Group %s already exists, skipping creation", groupName)
+	}
+
+	// Step 2: Check if role exists, create if missing
+	roleExists, err := d.roleExists(ctx, roleName)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to check if role exists, will attempt to create: %v", err)
+		roleExists = false
+	}
+
+	if !roleExists {
+		logger.Infof(ctx, "Creating role %s with wildcard ACLs", roleName)
+		createRoleCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "createRole",
+					"rolename": roleName,
+				},
+			},
+		}
+		if err := d.executeCommand(ctx, createRoleCmd); err != nil {
+			return fmt.Errorf("failed to create role %s: %w", roleName, err)
+		}
+
+		// Add subscribe ACLs with wildcard pattern
+		// Subscribe to any /devices/smart_meter_*/ topics
+		subscribeTopics := []string{
+			fmt.Sprintf("/devices/%s/#", deviceWildcard), // Multi-level wildcard for all device topics
+		}
+
+		subscribeACLCommands := make([]map[string]interface{}, 0, len(subscribeTopics))
+		for _, topic := range subscribeTopics {
+			subscribeACLCommands = append(subscribeACLCommands, map[string]interface{}{
+				"command":  "addRoleACL",
+				"rolename": roleName,
+				"acltype":  "subscribePattern",
+				"topic":    topic,
+				"allow":    true,
+				"priority": 5,
+			})
+		}
+
+		addSubscribeACLCmd := map[string]interface{}{
+			"commands": subscribeACLCommands,
+		}
+		if err := d.executeCommand(ctx, addSubscribeACLCmd); err != nil {
+			logger.Warnf(ctx, "Some subscribe ACLs may have failed to add (non-fatal if already exist): %v", err)
+		}
+
+		// Add publish ACLs with wildcard pattern (restricted to specific topics)
+		// Publish to heartbeat, usage, request/authorize, request/invoice
+		publishTopics := []string{
+			fmt.Sprintf("/devices/%s/heartbeat", deviceWildcard),
+			fmt.Sprintf("/devices/%s/usage", deviceWildcard),
+			fmt.Sprintf("/devices/%s/request/authorize", deviceWildcard),
+			fmt.Sprintf("/devices/%s/request/invoice", deviceWildcard),
+		}
+
+		publishACLCommands := make([]map[string]interface{}, 0, len(publishTopics))
+		for _, topic := range publishTopics {
+			publishACLCommands = append(publishACLCommands, map[string]interface{}{
+				"command":  "addRoleACL",
+				"rolename": roleName,
+				"acltype":  "publishClientSend",
+				"topic":    topic,
+				"allow":    true,
+				"priority": 5,
+			})
+		}
+
+		addPublishACLCmd := map[string]interface{}{
+			"commands": publishACLCommands,
+		}
+		if err := d.executeCommand(ctx, addPublishACLCmd); err != nil {
+			logger.Warnf(ctx, "Some publish ACLs may have failed to add (non-fatal if already exist): %v", err)
+		}
+
+		logger.Infof(ctx, "Role %s created successfully with wildcard ACLs", roleName)
+	} else {
+		logger.Infof(ctx, "Role %s already exists, skipping creation", roleName)
+	}
+
+	// Step 3: Assign role to group
+	logger.Infof(ctx, "Assigning role %s to group %s", roleName, groupName)
+	addGroupRoleCmd := map[string]interface{}{
+		"commands": []map[string]interface{}{
+			{
+				"command":   "addGroupRole",
+				"groupname": groupName,
+				"rolename":  roleName,
+				"priority":  5,
+			},
+		},
+	}
+	if err := d.executeCommand(ctx, addGroupRoleCmd); err != nil {
+		logger.Warnf(ctx, "Failed to assign role to group (may already be assigned): %v", err)
+	}
+
+	// Step 4: Create all clients in chunks to avoid command limits
+	// Chunk size: 100 commands per batch (reasonable limit to avoid MQTT message size issues)
+	dynsecCommandChunkSize := 100
+	logger.Infof(ctx, "Creating %d clients in chunks of %d", len(devices), dynsecCommandChunkSize)
+
+	for chunkStart := 0; chunkStart < len(devices); chunkStart += dynsecCommandChunkSize {
+		chunkEnd := chunkStart + dynsecCommandChunkSize
+		if chunkEnd > len(devices) {
+			chunkEnd = len(devices)
+		}
+		chunk := devices[chunkStart:chunkEnd]
+
+		createClientCommands := make([]map[string]interface{}, 0, len(chunk))
+		for _, device := range chunk {
+			clientUsername := device.DeviceID
+			clientPassword := deviceSecrets[device.DeviceID]
+			createClientCommands = append(createClientCommands, map[string]interface{}{
+				"command":  "createClient",
+				"username": clientUsername,
+				"password": clientPassword,
+			})
+		}
+
+		createClientsCmd := map[string]interface{}{
+			"commands": createClientCommands,
+		}
+		if err := d.executeCommand(ctx, createClientsCmd); err != nil {
+			logger.Warnf(ctx, "Some clients in chunk %d-%d may have failed to create (non-fatal if already exist): %v", chunkStart, chunkEnd-1, err)
+		} else {
+			logger.Infof(ctx, "Created client chunk %d-%d (%d clients)", chunkStart, chunkEnd-1, len(chunk))
+		}
+
+		// Add delay between chunks (except after the last chunk) to allow MQTT to process
+		if chunkEnd < len(devices) {
+			time.Sleep(1 * time.Second) // 1 second delay between chunks
+		}
+	}
+
+	// Step 5: Add all clients to the group in chunks
+	logger.Infof(ctx, "Adding %d clients to group %s in chunks of %d", len(devices), groupName, dynsecCommandChunkSize)
+
+	for chunkStart := 0; chunkStart < len(devices); chunkStart += dynsecCommandChunkSize {
+		chunkEnd := chunkStart + dynsecCommandChunkSize
+		if chunkEnd > len(devices) {
+			chunkEnd = len(devices)
+		}
+		chunk := devices[chunkStart:chunkEnd]
+
+		addGroupClientCommands := make([]map[string]interface{}, 0, len(chunk))
+		for _, device := range chunk {
+			addGroupClientCommands = append(addGroupClientCommands, map[string]interface{}{
+				"command":   "addGroupClient",
+				"groupname": groupName,
+				"username":  device.DeviceID,
+				"priority":  5,
+			})
+		}
+
+		addGroupClientsCmd := map[string]interface{}{
+			"commands": addGroupClientCommands,
+		}
+		if err := d.executeCommand(ctx, addGroupClientsCmd); err != nil {
+			logger.Warnf(ctx, "Some clients in chunk %d-%d may have failed to add to group (non-fatal if already in group): %v", chunkStart, chunkEnd-1, err)
+		} else {
+			logger.Infof(ctx, "Added client chunk %d-%d to group (%d clients)", chunkStart, chunkEnd-1, len(chunk))
+		}
+
+		// Add delay between chunks (except after the last chunk) to allow MQTT to process
+		if chunkEnd < len(devices) {
+			time.Sleep(500 * time.Millisecond) // 500ms delay between chunks
+		}
+	}
+
+	logger.Infof(ctx, "Completed batch provisioning of %d devices in dynsec using group %s", len(devices), groupName)
+	return nil
 }
 
 // ProvisionDeviceService provisions the device service user with ACLs to subscribe to device topics

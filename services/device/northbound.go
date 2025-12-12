@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,22 @@ type CreateDeviceRequest struct {
 	ReportingStrategy    string `json:"reporting_strategy" binding:"required"`
 	ReportingInterval    int    `json:"reporting_interval" binding:"required"`
 	HeartbeatInterval    int    `json:"heartbeat_interval" binding:"required"`
+	AuthorizeRequestMsat int    `json:"authorize_request_msat" binding:"required"`
+	Timestamp            string `json:"timestamp" binding:"required"`
+}
+
+// CreateDevicesBatchRequest represents the request body for creating devices in batch
+type CreateDevicesBatchRequest struct {
+	DeviceIDPattern      string `json:"device_id_pattern" binding:"required"`     // e.g., "smart_meter_{id}"
+	DeviceSecretPattern  string `json:"device_secret_pattern" binding:"required"` // e.g., "smart_meter_{id}_password"
+	IDStart              *int   `json:"id_start" binding:"required"`              // inclusive start of ID range (pointer to allow 0)
+	IDEnd                *int   `json:"id_end" binding:"required"`                // inclusive end of ID range (pointer to allow 0)
+	IDPadding            int    `json:"id_padding" binding:"required,min=1"`      // number of digits to pad (e.g., 6 for "000001")
+	MeasurementUnit      string `json:"measurement_unit" binding:"required"`
+	UnitPriceMsat        int64  `json:"unit_price_msat" binding:"required"`
+	ReportingStrategy    string `json:"reporting_strategy" binding:"required"`
+	ReportingInterval    int    `json:"reporting_interval" binding:"required,min=1"`
+	HeartbeatInterval    int    `json:"heartbeat_interval" binding:"required,min=1"`
 	AuthorizeRequestMsat int    `json:"authorize_request_msat" binding:"required"`
 	Timestamp            string `json:"timestamp" binding:"required"`
 }
@@ -60,6 +77,7 @@ func (nb *NorthboundInterface) registerRoutes() {
 	api := nb.router.Group("/api/v1")
 	{
 		api.POST("/devices", nb.createDevice)
+		api.POST("/devices/batch", nb.createDevicesBatch)
 		api.GET("/devices", nb.listDevices)
 		api.GET("/devices/:id", nb.getDevice)
 	}
@@ -234,7 +252,7 @@ func (nb *NorthboundInterface) publishDeviceConfig(ctx context.Context, device *
 	// Create config payload
 	config := &mqttpb.ConfigPayload{
 		DeviceId:             device.DeviceID,
-		MeasurementUnit:     device.MeasurementUnit,
+		MeasurementUnit:      device.MeasurementUnit,
 		UnitPriceMsat:        device.UnitPriceMsat,
 		ReportingStrategy:    reportingStrategy,
 		ReportingInterval:    int32(device.ReportingInterval),
@@ -256,6 +274,157 @@ func (nb *NorthboundInterface) publishDeviceConfig(ctx context.Context, device *
 	}
 
 	return nil
+}
+
+// createDevicesBatch handles POST /devices/batch
+func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
+	var req CreateDevicesBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate reporting_strategy
+	validStrategies := map[string]bool{
+		"interval": true,
+		"delta":    true,
+		"total":    true,
+	}
+	if !validStrategies[req.ReportingStrategy] {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "reporting_strategy must be one of: interval, delta, total",
+		})
+		return
+	}
+
+	// Validate ID range (dereference pointers)
+	if req.IDStart == nil || req.IDEnd == nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "id_start and id_end are required",
+		})
+		return
+	}
+
+	idStart := *req.IDStart
+	idEnd := *req.IDEnd
+
+	if idStart < 0 || idEnd < idStart {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "id_start must be >= 0 and id_end must be >= id_start",
+		})
+		return
+	}
+
+	// Limit batch size to prevent memory issues (100,001 to allow 0-100000 range)
+	maxBatchSize := 100001
+	totalDevices := idEnd - idStart + 1
+	if totalDevices > maxBatchSize {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("batch size too large: %d devices (max: %d)", totalDevices, maxBatchSize),
+		})
+		return
+	}
+
+	// Parse timestamp
+	timestamp, err := time.Parse(time.RFC3339, req.Timestamp)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid timestamp format, expected RFC3339 (e.g., 2025-11-07T17:40:00Z)",
+		})
+		return
+	}
+
+	ctx := c.Request.Context()
+
+	// Generate all devices
+	devices := make([]*Device, 0, totalDevices)
+	deviceSecrets := make(map[string]string, totalDevices)
+
+	logger.Infof(ctx, "Generating %d devices for batch creation", totalDevices)
+	for id := idStart; id <= idEnd; id++ {
+		// Format ID with padding
+		idStr := fmt.Sprintf("%0*d", req.IDPadding, id)
+
+		// Generate device ID and secret from patterns (replace {id} placeholder)
+		deviceID := strings.ReplaceAll(req.DeviceIDPattern, "{id}", idStr)
+		deviceSecret := strings.ReplaceAll(req.DeviceSecretPattern, "{id}", idStr)
+
+		device := &Device{
+			DeviceID:             deviceID,
+			MeasurementUnit:      req.MeasurementUnit,
+			UnitPriceMsat:        req.UnitPriceMsat,
+			ReportingStrategy:    req.ReportingStrategy,
+			ReportingInterval:    req.ReportingInterval,
+			HeartbeatInterval:    req.HeartbeatInterval,
+			AuthorizeRequestMsat: req.AuthorizeRequestMsat,
+			Timestamp:            timestamp,
+		}
+		devices = append(devices, device)
+		deviceSecrets[deviceID] = deviceSecret
+	}
+
+	// Insert devices in database in batches (SQLite works better with smaller chunks)
+	logger.Infof(ctx, "Inserting %d devices into database in batches", totalDevices)
+	batchSize := 1000 // SQLite batch size
+	for i := 0; i < len(devices); i += batchSize {
+		end := i + batchSize
+		if end > len(devices) {
+			end = len(devices)
+		}
+		batch := devices[i:end]
+		if err := nb.repo.CreateDevicesBatch(ctx, batch); err != nil {
+			logger.Errorf(ctx, "Failed to create device batch %d-%d: %v", i, end-1, err)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": fmt.Sprintf("failed to create devices batch %d-%d: %v", i, end-1, err),
+			})
+			return
+		}
+		logger.Infof(ctx, "Created device batch %d-%d (%d devices)", i, end-1, len(batch))
+	}
+
+	// Calculate group and role names from device pattern prefix
+	// Extract prefix from DeviceIDPattern by removing {id} placeholder
+	// Example: smart_meter_{id} -> smart_meter_group and smart_meter_role
+	devicePrefix := strings.ReplaceAll(req.DeviceIDPattern, "{id}", "")
+	// Remove trailing underscore if present (e.g., smart_meter_ -> smart_meter)
+	devicePrefix = strings.TrimSuffix(devicePrefix, "_")
+
+	groupName := fmt.Sprintf("%s_group", devicePrefix)
+	roleName := fmt.Sprintf("%s_role", devicePrefix)
+
+	// Provision devices in dynsec in batches
+	logger.Infof(ctx, "Provisioning %d devices in dynsec with group=%s, role=%s", totalDevices, groupName, roleName)
+	if err := nb.dynSec.ProvisionDevicesBatch(ctx, devices, deviceSecrets, groupName, roleName, req.DeviceIDPattern); err != nil {
+		logger.Errorf(ctx, "Failed to provision devices in dynsec: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("failed to provision devices in dynsec: %v", err),
+		})
+		return
+	}
+	logger.Infof(ctx, "Successfully provisioned %d devices in dynsec", totalDevices)
+
+	// Publish device configurations in batches (only if dynsec provisioning succeeded)
+	logger.Infof(ctx, "Publishing configs for %d devices", totalDevices)
+	for i := 0; i < len(devices); i += batchSize {
+		end := i + batchSize
+		if end > len(devices) {
+			end = len(devices)
+		}
+		batch := devices[i:end]
+		for _, device := range batch {
+			if err := nb.publishDeviceConfig(ctx, device); err != nil {
+				logger.Warnf(ctx, "Failed to publish config for device %s: %v", device.DeviceID, err)
+				// Continue even if publishing fails - devices are already in database and dynsec
+			}
+		}
+		logger.Infof(ctx, "Published configs for device batch %d-%d", i, end-1)
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"message":         "batch creation initiated",
+		"devices_created": totalDevices,
+		"id_range":        fmt.Sprintf("%d-%d", idStart, idEnd),
+	})
 }
 
 // Stop gracefully stops the HTTP server

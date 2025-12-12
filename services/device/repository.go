@@ -237,6 +237,58 @@ func (r *DeviceRepository) ListDevices(ctx context.Context) ([]*Device, error) {
 	return devices, nil
 }
 
+// CreateDevicesBatch inserts multiple devices in a single transaction
+func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*Device) error {
+	if len(devices) == 0 {
+		return nil
+	}
+
+	// Start transaction
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Prepare statement for batch insert
+	query := `
+	INSERT INTO devices (
+		device_id, measurement_unit, unit_price_msat, reporting_strategy,
+		reporting_interval, heartbeat_interval, authorize_request_msat, timestamp
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return fmt.Errorf("failed to prepare statement: %w", err)
+	}
+	defer stmt.Close()
+
+	// Insert all devices
+	for _, device := range devices {
+		_, err := stmt.ExecContext(ctx,
+			device.DeviceID,
+			device.MeasurementUnit,
+			device.UnitPriceMsat,
+			device.ReportingStrategy,
+			device.ReportingInterval,
+			device.HeartbeatInterval,
+			device.AuthorizeRequestMsat,
+			device.Timestamp.Format(time.RFC3339),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert device %s: %w", device.DeviceID, err)
+		}
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	logger.Infof(ctx, "Batch created %d devices in database", len(devices))
+	return nil
+}
+
 // Close closes the database connection
 func (r *DeviceRepository) Close() error {
 	return r.db.Close()
