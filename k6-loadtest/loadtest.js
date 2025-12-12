@@ -146,6 +146,11 @@ export default function () {
     reportingEnabled: false,
     subscriptionsReady: false,
     authorizationStatus: null,
+    authorizationId: null,
+    authorizationExpiresAt: null,
+    authorizationGrantedMsat: null,
+    authorizationRemainingMsat: null,
+    authorizationIssuedAt: null,
     pendingAuthorization: false,
     lastInvoiceRequest: Date.now() - (INVOICE_REQUEST_INTERVAL * 1000),
     lastAuthorizationRequest: Date.now() - (INVOICE_REQUEST_INTERVAL * 1000), // Track last auth request separately
@@ -186,25 +191,7 @@ export default function () {
     console.log(`[VU ${vuID}] Subscribed to topics: ${balanceTopic}, ${controlTopic}, ${authorizeResponseTopic}`);
 
     // Send initial authorization request
-    const authPayload = JSON.stringify({
-      deviceId: deviceContext.id,
-      requestId: generateID(),
-      requestMsat: AUTHORIZE_REQUEST_MSAT,
-      reason: 'STARTUP',
-      timestamp: getISOTimestamp(),
-    });
-
-    try {
-      client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 1 });
-      mqttPublishSuccess.add(1);
-      mqttPublishRate.add(1);
-      deviceContext.pendingAuthorization = true;
-      deviceContext.lastAuthorizationRequest = Date.now(); // Update last auth request time
-      console.log(`[VU ${vuID}] Initial authorization request sent`);
-    } catch (e) {
-      mqttPublishFailure.add(1);
-      console.error(`[VU ${vuID}] Initial auth request failed: ${e}`);
-    }
+    sendAuthorizationRequest(vuID, client, deviceContext, 'STARTUP');
 
     // Set up heartbeat interval
     setInterval(() => {
@@ -224,8 +211,14 @@ export default function () {
       }
     }, HEARTBEAT_INTERVAL * 1000);
 
-    // Set up usage reporting interval
-    let lastUsageReport = Date.now() - (USAGE_REPORT_INTERVAL * 1000);
+    // Set up usage reporting interval with randomization to desynchronize VUs
+    // Add random offset (0-100% of interval) so VUs don't all report at the same time
+    const randomOffset = Math.random() * USAGE_REPORT_INTERVAL * 1000;
+    let lastUsageReport = Date.now() - (USAGE_REPORT_INTERVAL * 1000) + randomOffset;
+    
+    // Use a shorter check interval but add jitter to prevent synchronization
+    const checkInterval = 50 + Math.random() * 50; // 50-100ms random interval
+    
     setInterval(() => {
       if (!deviceContext.reportingEnabled) {
         return;
@@ -250,50 +243,24 @@ export default function () {
           timestamp: getISOTimestamp(),
         });
 
+        // Publish (QoS 0 is fire-and-forget but still blocking in k6)
+        // With randomization, VUs should be desynchronized and publish concurrently
+        const publishStart = Date.now();
         try {
           client.publish(`/devices/${deviceContext.id}/usage`, payload, { qos: 0 });
+          const publishDuration = Date.now() - publishStart;
           mqttPublishSuccess.add(1);
           mqttPublishRate.add(1);
           lastUsageReport = now;
           deviceContext.lastUsageReport = now; // Update context for immediate trigger logic
-          console.log(`[VU ${vuID}] Usage report sent: ${measure} kWh`);
+          console.log(`[VU ${vuID}] Usage report sent: ${measure} kWh (publish took ${publishDuration}ms)`);
         } catch (e) {
           mqttPublishFailure.add(1);
           mqttPublishRate.add(0);
           console.error(`[VU ${vuID}] Usage report failed: ${e}`);
         }
       }
-    }, 100); // Check every 100ms for more responsive reporting
-
-    // Set up invoice retry interval (for REJECTED auth recovery)
-    setInterval(() => {
-      if (deviceContext.authorizationStatus !== 'REJECTED') {
-        return;
-      }
-
-      const now = Date.now();
-      if (now - deviceContext.lastInvoiceRequest >= INVOICE_REQUEST_INTERVAL * 1000) {
-        const payload = JSON.stringify({
-          deviceId: deviceContext.id,
-          requestId: generateID(),
-          amountMsat: INVOICE_AMOUNT_MSAT,
-          reason: 'USER_TOPUP',
-          timestamp: getISOTimestamp(),
-        });
-
-        try {
-          client.publish(`/devices/${deviceContext.id}/request/invoice`, payload, { qos: 0 });
-          mqttPublishSuccess.add(1);
-          mqttPublishRate.add(1);
-          deviceContext.lastInvoiceRequest = now;
-          deviceContext.authorizationStatus = null; // Clear status to allow balance update to trigger new auth
-          console.log(`[VU ${vuID}] Invoice request sent (REJECTED recovery)`);
-        } catch (e) {
-          mqttPublishFailure.add(1);
-          console.error(`[VU ${vuID}] Invoice request failed: ${e}`);
-        }
-      }
-    }, 1000); // Check every second
+    }, checkInterval); // Random interval 50-100ms to prevent synchronization
   });
 
   client.on('message', (topic, message) => {
@@ -310,7 +277,7 @@ export default function () {
       } else if (topic === controlTopic) {
         handleControlMessage(vuID, client, deviceContext, payload);
       } else if (topic === authorizeResponseTopic) {
-        handleAuthorizationResponse(vuID, deviceContext, payload);
+        handleAuthorizationResponse(vuID, client, deviceContext, payload);
       } else {
         console.log(`[VU ${vuID}] Unknown topic: ${topic}`);
       }
@@ -338,66 +305,66 @@ export default function () {
 }
 
 // --- Message Handlers ---
+function sendAuthorizationRequest(vuID, client, deviceContext, reason) {
+  if (deviceContext.pendingAuthorization) {
+    console.log(`[VU ${vuID}] Auth request skipped - already pending`);
+    return;
+  }
+
+  const authPayload = JSON.stringify({
+    deviceId: deviceContext.id,
+    requestId: generateID(),
+    requestMsat: AUTHORIZE_REQUEST_MSAT,
+    reason: reason,
+    timestamp: getISOTimestamp(),
+  });
+
+  try {
+    client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 1 });
+    mqttPublishSuccess.add(1);
+    mqttPublishRate.add(1);
+    deviceContext.pendingAuthorization = true;
+    deviceContext.lastAuthorizationRequest = Date.now();
+    console.log(`[VU ${vuID}] Authorization request sent: ${reason}`);
+  } catch (e) {
+    mqttPublishFailure.add(1);
+    console.error(`[VU ${vuID}] Auth request failed: ${e}`);
+  }
+}
+
+function sendInvoiceRequest(vuID, client, deviceContext, reason) {
+  const payload = JSON.stringify({
+    deviceId: deviceContext.id,
+    requestId: generateID(),
+    amountMsat: INVOICE_AMOUNT_MSAT,
+    reason: reason,
+    timestamp: getISOTimestamp(),
+  });
+
+  try {
+    client.publish(`/devices/${deviceContext.id}/request/invoice`, payload, { qos: 1 });
+    mqttPublishSuccess.add(1);
+    mqttPublishRate.add(1);
+    deviceContext.lastInvoiceRequest = Date.now();
+    console.log(`[VU ${vuID}] Invoice request sent: ${reason}`);
+  } catch (e) {
+    mqttPublishFailure.add(1);
+    console.error(`[VU ${vuID}] Invoice request failed: ${e}`);
+  }
+}
+
 function handleBalanceMessage(vuID, client, deviceContext, payload) {
   if (payload && payload.available_msat !== undefined) {
     const availableMsat = typeof payload.available_msat === 'string' 
       ? parseInt(payload.available_msat, 10) 
       : parseInt(payload.available_msat) || 0;
     
-    // Capture previous balance before updating
-    const previousBalance = deviceContext.availableMsat || 0;
     deviceContext.availableMsat = availableMsat;
     console.log(`[VU ${vuID}] Balance updated: ${deviceContext.availableMsat}`);
-    
-    // Auto-request auth if we have funds but no auth
-    const now = Date.now();
-    const timeSinceLastAuth = now - deviceContext.lastAuthorizationRequest;
-    
-    // Check individual conditions for debugging
-    const hasFunds = availableMsat > 0;
-    const notGranted = deviceContext.authorizationStatus !== 'GRANTED';
-    const notActive = deviceContext.authorizationStatus !== 'ACTIVE';
-    const notPending = !deviceContext.pendingAuthorization;
-    const enoughTimePassed = timeSinceLastAuth >= INVOICE_REQUEST_INTERVAL * 1000;
-    // Allow immediate request if we just got funds (previous balance was 0) or if enough time has passed
-    const justGotFunds = previousBalance === 0 && availableMsat > 0;
-    const canRequestNow = justGotFunds || enoughTimePassed;
-    
-    const shouldRequestAuth = hasFunds && 
-        notGranted && 
-        notActive &&
-        notPending &&
-        canRequestNow;
-    
-    // Debug logging to see why auth request might not be triggered
-    if (!shouldRequestAuth) {
-      console.log(`[VU ${vuID}] Auth request NOT triggered - hasFunds: ${hasFunds}, notGranted: ${notGranted}, notActive: ${notActive}, notPending: ${notPending}, canRequestNow: ${canRequestNow} (justGotFunds: ${justGotFunds}, enoughTimePassed: ${enoughTimePassed} (${timeSinceLastAuth}ms >= ${INVOICE_REQUEST_INTERVAL * 1000}ms)), authStatus: ${deviceContext.authorizationStatus}`);
-    }
-    
-    if (shouldRequestAuth) {
-      const authPayload = JSON.stringify({
-        deviceId: deviceContext.id,
-        requestId: generateID(),
-        requestMsat: AUTHORIZE_REQUEST_MSAT,
-        reason: 'FUNDS_AVAILABLE',
-        timestamp: getISOTimestamp(),
-      });
-      
-      try {
-        client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 0 });
-        mqttPublishSuccess.add(1);
-        mqttPublishRate.add(1);
-        deviceContext.pendingAuthorization = true;
-        deviceContext.lastAuthorizationRequest = now; // Update last auth request time
-        console.log(`[VU ${vuID}] Auth request sent (balance update)`);
-      } catch (e) {
-        console.error(`[VU ${vuID}] Auth request failed: ${e}`);
-      }
-    }
   }
 }
 
-function handleAuthorizationResponse(vuID, deviceContext, payload) {
+function handleAuthorizationResponse(vuID, client, deviceContext, payload) {
   if (!payload || !payload.status) {
     return;
   }
@@ -405,25 +372,66 @@ function handleAuthorizationResponse(vuID, deviceContext, payload) {
   const status = payload.status;
   console.log(`[VU ${vuID}] Authorization status received: ${status}`);
   
-  if (status === 'AUTHORIZATION_STATUS_GRANTED') {
-    deviceContext.authorizationStatus = 'GRANTED';
+  if (status === 'AUTHORIZATION_STATUS_GRANTED' || status === 'AUTHORIZATION_STATUS_ACTIVE') {
+    // Store authorization details
+    deviceContext.authorizationStatus = status;
+    deviceContext.authorizationId = payload.authorization_id || null;
+    deviceContext.authorizationExpiresAt = payload.expires_at || null;
+    deviceContext.authorizationGrantedMsat = payload.granted_msat || null;
+    deviceContext.authorizationRemainingMsat = payload.remaining_msat || null;
+    deviceContext.authorizationIssuedAt = payload.issued_at || null;
     deviceContext.pendingAuthorization = false;
     deviceContext.reportingEnabled = true;
     deviceContext.lastUsageReport = 0; // Reset to 0 to trigger immediate report
-    console.log(`[VU ${vuID}] Authorization GRANTED - reporting ENABLED`);
-  } else if (status === 'AUTHORIZATION_STATUS_ACTIVE') {
-    deviceContext.authorizationStatus = 'ACTIVE';
-    deviceContext.pendingAuthorization = false;
-    deviceContext.reportingEnabled = true;
-    deviceContext.lastUsageReport = 0; // Reset to 0 to trigger immediate report
-    console.log(`[VU ${vuID}] Authorization ACTIVE - reporting ENABLED`);
+    
+    const statusText = status === 'AUTHORIZATION_STATUS_GRANTED' ? 'GRANTED' : 'ACTIVE';
+    console.log(`[VU ${vuID}] Authorization ${statusText} - reporting ENABLED`, {
+      authorizationId: deviceContext.authorizationId,
+      expiresAt: deviceContext.authorizationExpiresAt,
+      grantedMsat: deviceContext.authorizationGrantedMsat,
+      remainingMsat: deviceContext.authorizationRemainingMsat,
+    });
   } else if (status === 'AUTHORIZATION_STATUS_REJECTED') {
+    // Clear authorization details on rejection
     deviceContext.pendingAuthorization = false;
     deviceContext.authorizationStatus = 'REJECTED';
+    deviceContext.authorizationId = null;
+    deviceContext.authorizationExpiresAt = null;
+    deviceContext.authorizationGrantedMsat = null;
+    deviceContext.authorizationRemainingMsat = null;
+    deviceContext.authorizationIssuedAt = null;
     console.log(`[VU ${vuID}] Authorization REJECTED: ${payload.reason || 'Unknown'}`);
+    // Send invoice request to add funds when authorization is rejected
+    sendInvoiceRequest(vuID, client, deviceContext, 'AUTHORIZATION_REJECTED_NEED_FUNDS');
   } else {
     console.log(`[VU ${vuID}] Unknown authorization status: ${status}`);
   }
+}
+
+// Check if current authorization is valid (exists, not rejected, not expired)
+function isAuthorizationValid(deviceContext) {
+  // No authorization set
+  if (!deviceContext.authorizationStatus || 
+      deviceContext.authorizationStatus === null) {
+    return false;
+  }
+  
+  // Authorization is rejected
+  if (deviceContext.authorizationStatus === 'REJECTED') {
+    return false;
+  }
+  
+  // Check if expired
+  if (deviceContext.authorizationExpiresAt) {
+    const expiresAt = new Date(deviceContext.authorizationExpiresAt);
+    const now = new Date();
+    if (now >= expiresAt) {
+      return false; // Expired
+    }
+  }
+  
+  // Authorization is valid (GRANTED or ACTIVE and not expired)
+  return true;
 }
 
 function handleControlMessage(vuID, client, deviceContext, payload) {
@@ -441,25 +449,25 @@ function handleControlMessage(vuID, client, deviceContext, payload) {
     deviceContext.reportingEnabled = true;
     deviceContext.lastUsageReport = 0; // Reset to 0 to trigger immediate report
     console.log(`[VU ${vuID}] RESUME received - reporting ENABLED`);
+    
+    // Only send authorization request if current authorization is not valid
+    if (!isAuthorizationValid(deviceContext)) {
+      const reason = !deviceContext.authorizationStatus 
+        ? 'RESUME_NO_AUTHORIZATION' 
+        : deviceContext.authorizationStatus === 'REJECTED' 
+          ? 'RESUME_AUTHORIZATION_REJECTED'
+          : 'RESUME_AUTHORIZATION_EXPIRED';
+      sendAuthorizationRequest(vuID, client, deviceContext, reason);
+    } else {
+      console.log(`[VU ${vuID}] RESUME - authorization already valid, skipping request`, {
+        authorizationId: deviceContext.authorizationId,
+        status: deviceContext.authorizationStatus,
+        expiresAt: deviceContext.authorizationExpiresAt,
+      });
+    }
   } else if (command === 'CONTROL_COMMAND_AUTHORIZATION') {
     // Manually trigger auth request
-    const authPayload = JSON.stringify({
-      deviceId: deviceContext.id,
-      requestId: generateID(),
-      requestMsat: AUTHORIZE_REQUEST_MSAT,
-      reason: payload.reason || 'AUTHORIZATION_REQUIRED',
-      timestamp: getISOTimestamp(),
-    });
-    try {
-      client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 0 });
-      mqttPublishSuccess.add(1);
-      mqttPublishRate.add(1);
-      deviceContext.pendingAuthorization = true;
-      deviceContext.lastAuthorizationRequest = Date.now(); // Update last auth request time
-      console.log(`[VU ${vuID}] Auth request sent (command)`);
-    } catch (e) { 
-      console.error(`[VU ${vuID}] Auth request failed (command): ${e}`);
-    }
+    sendAuthorizationRequest(vuID, client, deviceContext, payload.reason || 'AUTHORIZATION_REQUIRED');
   } else {
     console.log(`[VU ${vuID}] Unknown control command: ${command}`);
   }
