@@ -143,10 +143,21 @@ func (sb *SouthboundInterface) handleAuthorizationRequest(ctx context.Context, c
 	topic := msg.Topic()
 	deviceID := extractDeviceID(topic)
 
+	// Log that we received a message on this topic
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Received message on authorization request topic on southbound mqtt", map[string]interface{}{
+			"topic":        topic,
+			"payload_size": len(msg.Payload()),
+			"payload":      string(msg.Payload()),
+		})
+
 	var request mqttpb.AuthorizationRequestPayload
 	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
 	if err := opts.Unmarshal(msg.Payload(), &request); err != nil {
 		logger.WithDeviceID(deviceID).
+			WithFields(map[string]interface{}{
+				"payload": string(msg.Payload()),
+			}).
 			Error(ctx, "Error parsing authorization request payload on southbound mqtt", err)
 		return
 	}

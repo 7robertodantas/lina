@@ -162,6 +162,15 @@ func main() {
 		logger.Info(ctx, "Device service user provisioned successfully")
 	}
 
+	// Provision shared role for all batch-provisioned devices
+	logger.Info(ctx, "Provisioning shared devices_any_role for batch devices")
+	if err := dynSecService.ProvisionDevicesAnyRole(ctx); err != nil {
+		logger.Warnf(ctx, "Failed to provision devices any role: %v", err)
+		// Continue even if provisioning fails (role might already be provisioned)
+	} else {
+		logger.Info(ctx, "Devices any role provisioned successfully")
+	}
+
 	// Connect to MQTT broker
 	logger.Info(ctx, "Connecting to MQTT broker")
 	mqttClient, err := NewMQTTClient(ctx, cfg)

@@ -336,6 +336,22 @@ func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
 
 	ctx := c.Request.Context()
 
+	// Check if batch already exists
+	batchExists, err := nb.repo.BatchExists(ctx, idStart, idEnd, req.IDPadding, req.DeviceIDPattern)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to check batch existence: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("failed to check batch existence: %v", err),
+		})
+		return
+	}
+
+	if batchExists {
+		logger.Infof(ctx, "Batch already exists for pattern %s, idStart=%d, idEnd=%d, returning 204", req.DeviceIDPattern, idStart, idEnd)
+		c.Status(http.StatusNoContent)
+		return
+	}
+
 	// Generate all devices
 	devices := make([]*Device, 0, totalDevices)
 	deviceSecrets := make(map[string]string, totalDevices)
@@ -382,18 +398,13 @@ func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
 		logger.Infof(ctx, "Created device batch %d-%d (%d devices)", i, end-1, len(batch))
 	}
 
-	// Calculate group and role names from device pattern prefix
-	// Extract prefix from DeviceIDPattern by removing {id} placeholder
-	// Example: smart_meter_{id} -> smart_meter_group and smart_meter_role
-	devicePrefix := strings.ReplaceAll(req.DeviceIDPattern, "{id}", "")
-	// Remove trailing underscore if present (e.g., smart_meter_ -> smart_meter)
-	devicePrefix = strings.TrimSuffix(devicePrefix, "_")
+	// Use shared devices_any_role for all batch-provisioned devices
+	// groupName and roleName are kept for backward compatibility but no longer used
+	groupName := ""
+	roleName := ""
 
-	groupName := fmt.Sprintf("%s_group", devicePrefix)
-	roleName := fmt.Sprintf("%s_role", devicePrefix)
-
-	// Provision devices in dynsec in batches
-	logger.Infof(ctx, "Provisioning %d devices in dynsec with group=%s, role=%s", totalDevices, groupName, roleName)
+	// Provision devices in dynsec in batches (uses shared devices_any_role internally)
+	logger.Infof(ctx, "Provisioning %d devices in dynsec with shared devices_any_role", totalDevices)
 	if err := nb.dynSec.ProvisionDevicesBatch(ctx, devices, deviceSecrets, groupName, roleName, req.DeviceIDPattern); err != nil {
 		logger.Errorf(ctx, "Failed to provision devices in dynsec: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{

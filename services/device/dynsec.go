@@ -659,15 +659,23 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 
 	if !clientExists {
 		logger.WithDeviceID(deviceID).
-			InfoWithFields(ctx, "Creating client on southbound mqtt", map[string]interface{}{
+			InfoWithFields(ctx, "Creating client with role on southbound mqtt", map[string]interface{}{
 				"client_username": clientUsername,
+				"role_name":       roleName,
 			})
+		// Create client with role already assigned
 		createClientCmd := map[string]interface{}{
 			"commands": []map[string]interface{}{
 				{
 					"command":  "createClient",
 					"username": clientUsername,
 					"password": clientPassword,
+					"roles": []map[string]interface{}{
+						{
+							"rolename": roleName,
+							"priority": 5,
+						},
+					},
 				},
 			},
 		}
@@ -675,12 +683,12 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 			return fmt.Errorf("failed to create client %s: %w", clientUsername, err)
 		}
 		logger.WithDeviceID(deviceID).
-			InfoWithFields(ctx, "Client created successfully on southbound mqtt", map[string]interface{}{
+			InfoWithFields(ctx, "Client created successfully with role on southbound mqtt", map[string]interface{}{
 				"client_username": clientUsername,
 			})
 	} else {
 		logger.WithDeviceID(deviceID).
-			InfoWithFields(ctx, "Client already exists, updating password on southbound mqtt", map[string]interface{}{
+			InfoWithFields(ctx, "Client already exists, updating password and ensuring role is assigned on southbound mqtt", map[string]interface{}{
 				"client_username": clientUsername,
 			})
 		// Update password if client exists to ensure it matches the current configuration
@@ -698,31 +706,34 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 				Warnf(ctx, "Failed to update password for device client on southbound mqtt: %v", err)
 			// Continue anyway - password might already be correct
 		}
-	}
 
-	// Step 5: Assign role to client
-	logger.WithDeviceID(deviceID).
-		InfoWithFields(ctx, "Assigning role to client on southbound mqtt", map[string]interface{}{
-			"role_name":       roleName,
-			"client_username": clientUsername,
-		})
-	addRoleCmd := map[string]interface{}{
-		"commands": []map[string]interface{}{
-			{
-				"command":  "addClientRole",
-				"username": clientUsername,
-				"rolename": roleName,
-				"priority": 5,
+		// Step 5: Assign role to existing client
+		logger.WithDeviceID(deviceID).
+			InfoWithFields(ctx, "Assigning role to existing client on southbound mqtt", map[string]interface{}{
+				"role_name":       roleName,
+				"client_username": clientUsername,
+			})
+		addRoleCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "addClientRole",
+					"username": clientUsername,
+					"rolename": roleName,
+					"priority": 5,
+				},
 			},
-		},
-	}
-	if err := d.executeCommand(ctx, addRoleCmd); err != nil {
-		// "Internal error" from addClientRole usually means role or client doesn't exist
-		errStr := err.Error()
-		if strings.Contains(strings.ToLower(errStr), "internal error") {
-			return fmt.Errorf("failed to assign role %s to client %s: %w (this usually means the role or client doesn't exist - verify steps 1 and 4 succeeded)", roleName, clientUsername, err)
 		}
-		return fmt.Errorf("failed to assign role %s to client %s: %w", roleName, clientUsername, err)
+		if err := d.executeCommand(ctx, addRoleCmd); err != nil {
+			// "Internal error" from addClientRole usually means role or client doesn't exist, or role already assigned
+			errStr := err.Error()
+			if strings.Contains(strings.ToLower(errStr), "internal error") {
+				logger.WithDeviceID(deviceID).
+					Warnf(ctx, "Failed to assign role to existing client (may already be assigned): %v", err)
+				// Continue - role might already be assigned
+			} else {
+				return fmt.Errorf("failed to assign role %s to client %s: %w", roleName, clientUsername, err)
+			}
+		}
 	}
 
 	logger.WithDeviceID(deviceID).
@@ -740,158 +751,19 @@ func (d *DynSecService) GetDeviceCredentials(deviceID string) (username, passwor
 	return username, password
 }
 
-// ProvisionDevicesBatch provisions multiple devices in batch using groups for efficiency
-// Creates a single group and role for all devices in the batch instead of per-device roles
-// groupName and roleName should be provided by the caller (e.g., calculated from device pattern and range)
-// deviceIDPattern is the pattern used to generate device IDs (e.g., "smart_meter_{id}")
+// ProvisionDevicesBatch provisions multiple devices in batch using the shared devices_any_role
+// All devices are assigned to the same role which is created once during service initialization
 func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*Device, deviceSecrets map[string]string, groupName, roleName, deviceIDPattern string) error {
 	if len(devices) == 0 {
 		return nil
 	}
 
-	if groupName == "" || roleName == "" {
-		return fmt.Errorf("groupName and roleName are required")
-	}
+	// Use the shared devices_any_role for all batch-provisioned devices
+	sharedRoleName := "devices_any_role"
 
-	if deviceIDPattern == "" {
-		return fmt.Errorf("deviceIDPattern is required")
-	}
+	logger.Infof(ctx, "Starting batch provisioning of %d devices in dynsec with shared role %s", len(devices), sharedRoleName)
 
-	logger.Infof(ctx, "Starting batch provisioning of %d devices in dynsec using groups", len(devices))
-
-	// Extract wildcard pattern for ACLs by splitting deviceIDPattern on {id}
-	// For pattern "smart_meter_{id}", split by "{id}" to get "smart_meter_" prefix
-	// Then create wildcard "smart_meter_+" to match all devices in the range
-	parts := strings.Split(deviceIDPattern, "{id}")
-	if len(parts) == 0 {
-		return fmt.Errorf("deviceIDPattern %s does not contain {id} placeholder", deviceIDPattern)
-	}
-	deviceBasePattern := parts[0]             // "smart_meter_" (everything before {id})
-	deviceWildcard := deviceBasePattern + "+" // "smart_meter_+"
-
-	logger.Infof(ctx, "Using group-based provisioning: group=%s, role=%s, wildcard=%s", groupName, roleName, deviceWildcard)
-
-	// Step 1: Check if group exists, create if missing
-	groupExists, err := d.groupExists(ctx, groupName)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to check if group exists, will attempt to create: %v", err)
-		groupExists = false
-	}
-
-	if !groupExists {
-		logger.Infof(ctx, "Creating group %s", groupName)
-		createGroupCmd := map[string]interface{}{
-			"commands": []map[string]interface{}{
-				{
-					"command":   "createGroup",
-					"groupname": groupName,
-				},
-			},
-		}
-		if err := d.executeCommand(ctx, createGroupCmd); err != nil {
-			return fmt.Errorf("failed to create group %s: %w", groupName, err)
-		}
-		logger.Infof(ctx, "Group %s created successfully", groupName)
-	} else {
-		logger.Infof(ctx, "Group %s already exists, skipping creation", groupName)
-	}
-
-	// Step 2: Check if role exists, create if missing
-	roleExists, err := d.roleExists(ctx, roleName)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to check if role exists, will attempt to create: %v", err)
-		roleExists = false
-	}
-
-	if !roleExists {
-		logger.Infof(ctx, "Creating role %s with wildcard ACLs", roleName)
-		createRoleCmd := map[string]interface{}{
-			"commands": []map[string]interface{}{
-				{
-					"command":  "createRole",
-					"rolename": roleName,
-				},
-			},
-		}
-		if err := d.executeCommand(ctx, createRoleCmd); err != nil {
-			return fmt.Errorf("failed to create role %s: %w", roleName, err)
-		}
-
-		// Add subscribe ACLs with wildcard pattern
-		// Subscribe to any /devices/smart_meter_*/ topics
-		subscribeTopics := []string{
-			fmt.Sprintf("/devices/%s/#", deviceWildcard), // Multi-level wildcard for all device topics
-		}
-
-		subscribeACLCommands := make([]map[string]interface{}, 0, len(subscribeTopics))
-		for _, topic := range subscribeTopics {
-			subscribeACLCommands = append(subscribeACLCommands, map[string]interface{}{
-				"command":  "addRoleACL",
-				"rolename": roleName,
-				"acltype":  "subscribePattern",
-				"topic":    topic,
-				"allow":    true,
-				"priority": 5,
-			})
-		}
-
-		addSubscribeACLCmd := map[string]interface{}{
-			"commands": subscribeACLCommands,
-		}
-		if err := d.executeCommand(ctx, addSubscribeACLCmd); err != nil {
-			logger.Warnf(ctx, "Some subscribe ACLs may have failed to add (non-fatal if already exist): %v", err)
-		}
-
-		// Add publish ACLs with wildcard pattern (restricted to specific topics)
-		// Publish to heartbeat, usage, request/authorize, request/invoice
-		publishTopics := []string{
-			fmt.Sprintf("/devices/%s/heartbeat", deviceWildcard),
-			fmt.Sprintf("/devices/%s/usage", deviceWildcard),
-			fmt.Sprintf("/devices/%s/request/authorize", deviceWildcard),
-			fmt.Sprintf("/devices/%s/request/invoice", deviceWildcard),
-		}
-
-		publishACLCommands := make([]map[string]interface{}, 0, len(publishTopics))
-		for _, topic := range publishTopics {
-			publishACLCommands = append(publishACLCommands, map[string]interface{}{
-				"command":  "addRoleACL",
-				"rolename": roleName,
-				"acltype":  "publishClientSend",
-				"topic":    topic,
-				"allow":    true,
-				"priority": 5,
-			})
-		}
-
-		addPublishACLCmd := map[string]interface{}{
-			"commands": publishACLCommands,
-		}
-		if err := d.executeCommand(ctx, addPublishACLCmd); err != nil {
-			logger.Warnf(ctx, "Some publish ACLs may have failed to add (non-fatal if already exist): %v", err)
-		}
-
-		logger.Infof(ctx, "Role %s created successfully with wildcard ACLs", roleName)
-	} else {
-		logger.Infof(ctx, "Role %s already exists, skipping creation", roleName)
-	}
-
-	// Step 3: Assign role to group
-	logger.Infof(ctx, "Assigning role %s to group %s", roleName, groupName)
-	addGroupRoleCmd := map[string]interface{}{
-		"commands": []map[string]interface{}{
-			{
-				"command":   "addGroupRole",
-				"groupname": groupName,
-				"rolename":  roleName,
-				"priority":  5,
-			},
-		},
-	}
-	if err := d.executeCommand(ctx, addGroupRoleCmd); err != nil {
-		logger.Warnf(ctx, "Failed to assign role to group (may already be assigned): %v", err)
-	}
-
-	// Step 4: Create all clients in chunks to avoid command limits
+	// Step 2: Create all clients in chunks to avoid command limits
 	// Chunk size: 100 commands per batch (reasonable limit to avoid MQTT message size issues)
 	dynsecCommandChunkSize := 100
 	logger.Infof(ctx, "Creating %d clients in chunks of %d", len(devices), dynsecCommandChunkSize)
@@ -907,10 +779,17 @@ func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*De
 		for _, device := range chunk {
 			clientUsername := device.DeviceID
 			clientPassword := deviceSecrets[device.DeviceID]
+			// Create client with role already assigned
 			createClientCommands = append(createClientCommands, map[string]interface{}{
 				"command":  "createClient",
 				"username": clientUsername,
 				"password": clientPassword,
+				"roles": []map[string]interface{}{
+					{
+						"rolename": sharedRoleName,
+						"priority": 5,
+					},
+				},
 			})
 		}
 
@@ -920,7 +799,7 @@ func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*De
 		if err := d.executeCommand(ctx, createClientsCmd); err != nil {
 			logger.Warnf(ctx, "Some clients in chunk %d-%d may have failed to create (non-fatal if already exist): %v", chunkStart, chunkEnd-1, err)
 		} else {
-			logger.Infof(ctx, "Created client chunk %d-%d (%d clients)", chunkStart, chunkEnd-1, len(chunk))
+			logger.Infof(ctx, "Created client chunk %d-%d with role %s (%d clients)", chunkStart, chunkEnd-1, sharedRoleName, len(chunk))
 		}
 
 		// Add delay between chunks (except after the last chunk) to allow MQTT to process
@@ -929,42 +808,7 @@ func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*De
 		}
 	}
 
-	// Step 5: Add all clients to the group in chunks
-	logger.Infof(ctx, "Adding %d clients to group %s in chunks of %d", len(devices), groupName, dynsecCommandChunkSize)
-
-	for chunkStart := 0; chunkStart < len(devices); chunkStart += dynsecCommandChunkSize {
-		chunkEnd := chunkStart + dynsecCommandChunkSize
-		if chunkEnd > len(devices) {
-			chunkEnd = len(devices)
-		}
-		chunk := devices[chunkStart:chunkEnd]
-
-		addGroupClientCommands := make([]map[string]interface{}, 0, len(chunk))
-		for _, device := range chunk {
-			addGroupClientCommands = append(addGroupClientCommands, map[string]interface{}{
-				"command":   "addGroupClient",
-				"groupname": groupName,
-				"username":  device.DeviceID,
-				"priority":  5,
-			})
-		}
-
-		addGroupClientsCmd := map[string]interface{}{
-			"commands": addGroupClientCommands,
-		}
-		if err := d.executeCommand(ctx, addGroupClientsCmd); err != nil {
-			logger.Warnf(ctx, "Some clients in chunk %d-%d may have failed to add to group (non-fatal if already in group): %v", chunkStart, chunkEnd-1, err)
-		} else {
-			logger.Infof(ctx, "Added client chunk %d-%d to group (%d clients)", chunkStart, chunkEnd-1, len(chunk))
-		}
-
-		// Add delay between chunks (except after the last chunk) to allow MQTT to process
-		if chunkEnd < len(devices) {
-			time.Sleep(500 * time.Millisecond) // 500ms delay between chunks
-		}
-	}
-
-	logger.Infof(ctx, "Completed batch provisioning of %d devices in dynsec using group %s", len(devices), groupName)
+	logger.Infof(ctx, "Completed batch provisioning of %d devices in dynsec with shared role %s", len(devices), sharedRoleName)
 	return nil
 }
 
@@ -1093,26 +937,34 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 	}
 
 	if !clientExists {
-		logger.InfoWithFields(ctx, "Creating device service client on southbound mqtt", map[string]interface{}{
-			"username": username,
+		logger.InfoWithFields(ctx, "Creating device service client with role on southbound mqtt", map[string]interface{}{
+			"username":  username,
+			"role_name": roleName,
 		})
+		// Create client with role already assigned
 		createClientCmd := map[string]interface{}{
 			"commands": []map[string]interface{}{
 				{
 					"command":  "createClient",
 					"username": username,
 					"password": password,
+					"roles": []map[string]interface{}{
+						{
+							"rolename": roleName,
+							"priority": 5,
+						},
+					},
 				},
 			},
 		}
 		if err := d.executeCommand(ctx, createClientCmd); err != nil {
 			return fmt.Errorf("failed to create device service client %s: %w", username, err)
 		}
-		logger.InfoWithFields(ctx, "Device service client created successfully on southbound mqtt", map[string]interface{}{
+		logger.InfoWithFields(ctx, "Device service client created successfully with role on southbound mqtt", map[string]interface{}{
 			"username": username,
 		})
 	} else {
-		logger.InfoWithFields(ctx, "Device service client already exists, updating password on southbound mqtt", map[string]interface{}{
+		logger.InfoWithFields(ctx, "Device service client already exists, updating password and ensuring role is assigned on southbound mqtt", map[string]interface{}{
 			"username": username,
 		})
 		// Update password if client exists
@@ -1128,29 +980,156 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 		if err := d.executeCommand(ctx, setPasswordCmd); err != nil {
 			logger.Warnf(ctx, "Failed to update password for device service client on southbound mqtt: %v", err)
 		}
-	}
 
-	// Step 5: Assign device_service_role to the device service client
-	logger.InfoWithFields(ctx, "Assigning device service role to client on southbound mqtt", map[string]interface{}{
-		"role_name": roleName,
-		"username":  username,
-	})
-	addRoleCmd := map[string]interface{}{
-		"commands": []map[string]interface{}{
-			{
-				"command":  "addClientRole",
-				"username": username,
-				"rolename": roleName,
+		// Assign device_service_role to the existing device service client
+		logger.InfoWithFields(ctx, "Assigning device service role to existing client on southbound mqtt", map[string]interface{}{
+			"role_name": roleName,
+			"username":  username,
+		})
+		addRoleCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "addClientRole",
+					"username": username,
+					"rolename": roleName,
+					"priority": 5,
+				},
 			},
-		},
-	}
-	if err := d.executeCommand(ctx, addRoleCmd); err != nil {
-		logger.Warnf(ctx, "Failed to assign role to device service client on southbound mqtt: %v (role might already be assigned)", err)
-		// Continue even if role is already assigned
+		}
+		if err := d.executeCommand(ctx, addRoleCmd); err != nil {
+			logger.Warnf(ctx, "Failed to assign role to device service client on southbound mqtt: %v (role might already be assigned)", err)
+			// Continue even if role is already assigned
+		}
 	}
 
 	logger.InfoWithFields(ctx, "Successfully provisioned device service on southbound mqtt", map[string]interface{}{
 		"username": username,
+	})
+	return nil
+}
+
+// ProvisionDevicesAnyRole provisions a shared role for all devices with ACLs to publish and subscribe
+// This role is used for batch-provisioned devices instead of creating a role per batch
+func (d *DynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
+	roleName := "devices_any_role"
+
+	// Step 1: Check if role exists, create if missing
+	logger.DebugWithFields(ctx, "Checking if devices any role exists on southbound mqtt", map[string]interface{}{
+		"role_name": roleName,
+	})
+	roleExists, err := d.roleExists(ctx, roleName)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to check if role exists on southbound mqtt, will attempt to create: %v", err)
+		roleExists = false
+	}
+
+	if !roleExists {
+		logger.InfoWithFields(ctx, "Creating devices any role on southbound mqtt", map[string]interface{}{
+			"role_name": roleName,
+		})
+		createRoleCmd := map[string]interface{}{
+			"commands": []map[string]interface{}{
+				{
+					"command":  "createRole",
+					"rolename": roleName,
+				},
+			},
+		}
+		if err := d.executeCommand(ctx, createRoleCmd); err != nil {
+			return fmt.Errorf("failed to create devices any role %s: %w", roleName, err)
+		}
+		logger.InfoWithFields(ctx, "Devices any role created successfully on southbound mqtt", map[string]interface{}{
+			"role_name": roleName,
+		})
+	} else {
+		logger.DebugWithFields(ctx, "Devices any role already exists, ensuring ACLs are configured on southbound mqtt", map[string]interface{}{
+			"role_name": roleName,
+		})
+	}
+
+	// Step 2: Add subscribe ACLs for device topics (devices subscribe to server messages)
+	subscribeTopics := []string{
+		"/devices/+/config",             // Device configuration
+		"/devices/+/control",            // Control commands
+		"/devices/+/balance",            // Balance updates
+		"/devices/+/response/authorize", // Authorization responses
+		"/devices/+/response/invoice",   // Invoice responses
+		"/devices/+/events/invoice",     // Invoice events
+		"/devices/+/#",                  // All topics under device path (for discovery)
+	}
+
+	logger.InfoWithFields(ctx, "Adding subscribe ACLs for devices any role on southbound mqtt", map[string]interface{}{
+		"role_name": roleName,
+		"count":     len(subscribeTopics),
+	})
+	subscribeACLCommands := make([]map[string]interface{}, 0, len(subscribeTopics))
+	for _, topic := range subscribeTopics {
+		logger.DebugWithFields(ctx, "Adding subscribe ACL for topic on southbound mqtt", map[string]interface{}{
+			"topic": topic,
+		})
+		subscribeACLCommands = append(subscribeACLCommands, map[string]interface{}{
+			"command":  "addRoleACL",
+			"rolename": roleName,
+			"acltype":  "subscribePattern",
+			"topic":    topic,
+			"allow":    true,
+			"priority": 5,
+		})
+	}
+
+	addSubscribeACLCmd := map[string]interface{}{
+		"commands": subscribeACLCommands,
+	}
+	if err := d.executeCommand(ctx, addSubscribeACLCmd); err != nil {
+		logger.Error(ctx, "Failed to add subscribe ACLs on southbound mqtt", err)
+		// Continue even if some ACLs already exist
+	} else {
+		logger.InfoWithFields(ctx, "Subscribe ACLs added successfully for devices any role on southbound mqtt", map[string]interface{}{
+			"role_name": roleName,
+		})
+	}
+
+	// Step 3: Add publish ACLs for device topics (devices publish to server)
+	publishTopics := []string{
+		"/devices/+/heartbeat",         // Heartbeat messages
+		"/devices/+/usage",             // Usage reports
+		"/devices/+/request/authorize", // Authorization requests
+		"/devices/+/request/invoice",   // Invoice requests
+	}
+
+	logger.InfoWithFields(ctx, "Adding publish ACLs for devices any role on southbound mqtt", map[string]interface{}{
+		"role_name": roleName,
+		"count":     len(publishTopics),
+	})
+	publishACLCommands := make([]map[string]interface{}, 0, len(publishTopics))
+	for _, topic := range publishTopics {
+		logger.DebugWithFields(ctx, "Adding publish ACL for topic on southbound mqtt", map[string]interface{}{
+			"topic": topic,
+		})
+		publishACLCommands = append(publishACLCommands, map[string]interface{}{
+			"command":  "addRoleACL",
+			"rolename": roleName,
+			"acltype":  "publishClientSend",
+			"topic":    topic,
+			"allow":    true,
+			"priority": 5,
+		})
+	}
+
+	addPublishACLCmd := map[string]interface{}{
+		"commands": publishACLCommands,
+	}
+	if err := d.executeCommand(ctx, addPublishACLCmd); err != nil {
+		logger.Error(ctx, "Failed to add publish ACLs on southbound mqtt", err)
+		// Continue even if some ACLs already exist
+	} else {
+		logger.InfoWithFields(ctx, "Publish ACLs added successfully for devices any role on southbound mqtt", map[string]interface{}{
+			"role_name": roleName,
+		})
+	}
+
+	logger.InfoWithFields(ctx, "Successfully provisioned devices any role on southbound mqtt", map[string]interface{}{
+		"role_name": roleName,
 	})
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/robertodantas/lnpay/internal"
@@ -235,6 +236,56 @@ func (r *DeviceRepository) ListDevices(ctx context.Context) ([]*Device, error) {
 	}
 
 	return devices, nil
+}
+
+// BatchExists checks if all devices in the specified range with the given pattern already exist
+func (r *DeviceRepository) BatchExists(ctx context.Context, idStart, idEnd, idPadding int, deviceIDPattern string) (bool, error) {
+	if idStart < 0 || idEnd < idStart {
+		return false, fmt.Errorf("invalid range: idStart=%d, idEnd=%d", idStart, idEnd)
+	}
+
+	totalDevices := idEnd - idStart + 1
+	if totalDevices == 0 {
+		return true, nil // Empty range is considered to exist
+	}
+
+	// Generate all device IDs in the range
+	deviceIDs := make([]string, 0, totalDevices)
+	for id := idStart; id <= idEnd; id++ {
+		idStr := fmt.Sprintf("%0*d", idPadding, id)
+		deviceID := strings.ReplaceAll(deviceIDPattern, "{id}", idStr)
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+
+	// Check if all devices exist using a single query with IN clause
+	// Build placeholders for the IN clause
+	placeholders := make([]string, len(deviceIDs))
+	args := make([]interface{}, len(deviceIDs))
+	for i, deviceID := range deviceIDs {
+		placeholders[i] = "?"
+		args[i] = deviceID
+	}
+
+	query := fmt.Sprintf(`
+		SELECT COUNT(*) 
+		FROM devices 
+		WHERE device_id IN (%s)`,
+		strings.Join(placeholders, ","))
+
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "devices"),
+		attribute.Int("batch.size", totalDevices),
+	}
+	var count int
+	err := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] check batch exists", attrs, r.db, query, args...).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to check batch existence: %w", err)
+	}
+
+	// Batch exists if all devices are found
+	exists := count == totalDevices
+	return exists, nil
 }
 
 // CreateDevicesBatch inserts multiple devices in a single transaction
