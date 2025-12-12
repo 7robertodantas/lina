@@ -19,7 +19,7 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '1m', target: 1000 },   // warmup
+        { duration: '1m', target: 10 },   // warmup
         // { duration: '1m', target: 5000 },
         // { duration: '1m', target: 10000 },
         // { duration: '1m', target: 20000 },
@@ -52,9 +52,10 @@ export const options = {
 //   },
 // };
 
-const API_BASE_URL = __ENV.API_BASE_URL || 'http://192.168.0.111:8080';
+const API_BASE_URL = __ENV.API_BASE_URL || 'http://localhost:8080';
 const API_DEVICES_ENDPOINT = __ENV.API_DEVICES_ENDPOINT || '/devices';
-const MQTT_BROKER = __ENV.MQTT_BROKER || '192.168.0.111';
+const API_DEVICES_BATCH_ENDPOINT = __ENV.API_DEVICES_BATCH_ENDPOINT || '/devices/batch';
+const MQTT_BROKER = __ENV.MQTT_BROKER || 'localhost';
 const MQTT_TLS_PORT = parseInt(__ENV.MQTT_TLS_PORT || '8883');
 const HEARTBEAT_INTERVAL = parseInt(__ENV.HEARTBEAT_INTERVAL || '60'); 
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); 
@@ -62,7 +63,7 @@ const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 const INVOICE_REQUEST_INTERVAL = parseInt(__ENV.INVOICE_REQUEST_INTERVAL || '5'); 
 const INVOICE_AMOUNT_MSAT = parseInt(__ENV.INVOICE_AMOUNT_MSAT || '250000');
-const MAX_VUS = parseInt(__ENV.MAX_VUS || '100000'); 
+const MAX_VUS = parseInt(__ENV.MAX_VUS || '10'); 
 
 // --- Helpers ---
 function generateDeviceID(vuID) {
@@ -77,28 +78,17 @@ function getISOTimestamp() {
   return new Date().toISOString();
 }
 
-// --- Device Registration ---
-function registerDevice(deviceID, deviceSecret) {
-  // First, check if device already exists
-  const getRes = http.get(
-    `${API_BASE_URL}${API_DEVICES_ENDPOINT}/${deviceID}`,
-    { headers: { 'Content-Type': 'application/json' } }
-  );
-
-  // If device exists (200 OK), we're done
-  if (getRes.status === 200) {
-    return true;
-  }
-
-  // If device doesn't exist (404 or other error), create it
-  if (getRes.status !== 404) {
-    console.warn(`Unexpected GET response status for ${deviceID}: ${getRes.status}`);
-  }
-
-  // Create the device
-  const devicePayload = JSON.stringify({
-    device_id: deviceID,
-    device_secret: deviceSecret,
+// --- Setup ---
+export function setup() {
+  console.log(`Starting load test setup: pre-registering ${MAX_VUS} devices using batch endpoint...`);
+  
+  // Use batch endpoint to register all devices at once
+  const batchPayload = JSON.stringify({
+    device_id_pattern: 'k6_device_{id}',
+    device_secret_pattern: 'k6_device_{id}_password',
+    id_start: 1,
+    id_end: MAX_VUS,
+    id_padding: 6,
     measurement_unit: 'kWh',
     unit_price_msat: UNIT_PRICE_MSAT,
     reporting_strategy: 'interval',
@@ -107,85 +97,39 @@ function registerDevice(deviceID, deviceSecret) {
     authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
     timestamp: getISOTimestamp(),
   });
-
-  const registerRes = http.post(
-    `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
-    devicePayload,
+  
+  const batchRes = http.post(
+    `${API_BASE_URL}${API_DEVICES_BATCH_ENDPOINT}`,
+    batchPayload,
     { headers: { 'Content-Type': 'application/json' } }
   );
-
-  if (registerRes.status !== 200 && registerRes.status !== 201) {
-    console.error(`Device registration failed for ${deviceID}: ${registerRes.status} - ${registerRes.body}`);
-    return false;
+  
+  if (batchRes.status === 204) {
+    console.log(`Batch already exists (204 No Content) - all ${MAX_VUS} devices are already registered`);
+    return {
+      registered: 0,
+      skipped: MAX_VUS,
+      failed: 0,
+      total: MAX_VUS,
+    };
+  } else if (batchRes.status === 201) {
+    const response = JSON.parse(batchRes.body);
+    console.log(`Batch creation successful: ${response.devices_created} devices created (range: ${response.id_range})`);
+    return {
+      registered: response.devices_created,
+      skipped: 0,
+      failed: 0,
+      total: MAX_VUS,
+    };
+  } else {
+    console.error(`Failed to register device batch: ${batchRes.status} - ${batchRes.body}`);
+    return {
+      registered: 0,
+      skipped: 0,
+      failed: MAX_VUS,
+      total: MAX_VUS,
+    };
   }
-
-  return true;
-}
-
-// --- Setup ---
-export function setup() {
-  console.log(`Starting load test setup: pre-registering ${MAX_VUS} devices...`);
-  
-  const batchSize = 100; // Register devices in batches to avoid overwhelming the API
-  let registered = 0;
-  let skipped = 0;
-  let failed = 0;
-  
-  for (let vuID = 1; vuID <= MAX_VUS; vuID++) {
-    const deviceID = generateDeviceID(vuID);
-    const deviceSecret = `${deviceID}_password`;
-    
-    // Check if device exists first
-    const getRes = http.get(
-      `${API_BASE_URL}${API_DEVICES_ENDPOINT}/${deviceID}`,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    
-    if (getRes.status === 200) {
-      skipped++;
-      continue;
-    }
-    
-    // Create the device
-    const devicePayload = JSON.stringify({
-      device_id: deviceID,
-      device_secret: deviceSecret,
-      measurement_unit: 'kWh',
-      unit_price_msat: UNIT_PRICE_MSAT,
-      reporting_strategy: 'interval',
-      reporting_interval: USAGE_REPORT_INTERVAL,
-      heartbeat_interval: HEARTBEAT_INTERVAL,
-      authorize_request_msat: AUTHORIZE_REQUEST_MSAT,
-      timestamp: getISOTimestamp(),
-    });
-    
-    const registerRes = http.post(
-      `${API_BASE_URL}${API_DEVICES_ENDPOINT}`,
-      devicePayload,
-      { headers: { 'Content-Type': 'application/json' } }
-    );
-    
-    if (registerRes.status === 200 || registerRes.status === 201) {
-      registered++;
-    } else {
-      failed++;
-      console.error(`Failed to register device ${deviceID}: ${registerRes.status} - ${registerRes.body}`);
-    }
-    
-    // Progress logging every batch
-    if (vuID % batchSize === 0) {
-      console.log(`Progress: ${vuID}/${MAX_VUS} - Registered: ${registered}, Skipped: ${skipped}, Failed: ${failed}`);
-    }
-  }
-  
-  console.log(`Setup complete: Registered: ${registered}, Skipped: ${skipped}, Failed: ${failed}, Total: ${MAX_VUS}`);
-  
-  return {
-    registered,
-    skipped,
-    failed,
-    total: MAX_VUS,
-  };
 }
 
 // --- Main VU Function (Event-Driven MQTT Pattern) ---
@@ -204,6 +148,7 @@ export default function () {
     authorizationStatus: null,
     pendingAuthorization: false,
     lastInvoiceRequest: Date.now() - (INVOICE_REQUEST_INTERVAL * 1000),
+    lastAuthorizationRequest: Date.now() - (INVOICE_REQUEST_INTERVAL * 1000), // Track last auth request separately
     lastUsageReport: Date.now() - (USAGE_REPORT_INTERVAL * 1000),
   };
 
@@ -242,18 +187,19 @@ export default function () {
 
     // Send initial authorization request
     const authPayload = JSON.stringify({
-      device_id: deviceContext.id,
-      request_id: generateID(),
-      request_msat: AUTHORIZE_REQUEST_MSAT,
+      deviceId: deviceContext.id,
+      requestId: generateID(),
+      requestMsat: AUTHORIZE_REQUEST_MSAT,
       reason: 'STARTUP',
       timestamp: getISOTimestamp(),
     });
 
     try {
-      client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 0 });
+      client.publish(`/devices/${deviceContext.id}/request/authorize`, authPayload, { qos: 1 });
       mqttPublishSuccess.add(1);
       mqttPublishRate.add(1);
       deviceContext.pendingAuthorization = true;
+      deviceContext.lastAuthorizationRequest = Date.now(); // Update last auth request time
       console.log(`[VU ${vuID}] Initial authorization request sent`);
     } catch (e) {
       mqttPublishFailure.add(1);
@@ -263,13 +209,13 @@ export default function () {
     // Set up heartbeat interval
     setInterval(() => {
       const payload = JSON.stringify({
-        device_id: deviceContext.id,
+        deviceId: deviceContext.id,
         status: 1,
         timestamp: getISOTimestamp(),
       });
 
       try {
-        client.publish(`/devices/${deviceContext.id}/heartbeat`, payload, { qos: 0 });
+        client.publish(`/devices/${deviceContext.id}/heartbeat`, payload, { qos: 1 });
         mqttPublishSuccess.add(1);
         mqttPublishRate.add(1);
       } catch (e) {
@@ -296,8 +242,8 @@ export default function () {
         // Random measure between 0.1 and 1.0
         const measure = 0.1 + Math.random() * 0.9;
         const payload = JSON.stringify({
-          device_id: deviceContext.id,
-          report_id: generateID(),
+          deviceId: deviceContext.id,
+          reportId: generateID(),
           strategy: 1,
           measure: measure,
           unit: 'kWh',
@@ -328,9 +274,9 @@ export default function () {
       const now = Date.now();
       if (now - deviceContext.lastInvoiceRequest >= INVOICE_REQUEST_INTERVAL * 1000) {
         const payload = JSON.stringify({
-          device_id: deviceContext.id,
-          request_id: generateID(),
-          amount_msat: INVOICE_AMOUNT_MSAT,
+          deviceId: deviceContext.id,
+          requestId: generateID(),
+          amountMsat: INVOICE_AMOUNT_MSAT,
           reason: 'USER_TOPUP',
           timestamp: getISOTimestamp(),
         });
@@ -398,23 +344,41 @@ function handleBalanceMessage(vuID, client, deviceContext, payload) {
       ? parseInt(payload.available_msat, 10) 
       : parseInt(payload.available_msat) || 0;
     
+    // Capture previous balance before updating
+    const previousBalance = deviceContext.availableMsat || 0;
     deviceContext.availableMsat = availableMsat;
     console.log(`[VU ${vuID}] Balance updated: ${deviceContext.availableMsat}`);
     
     // Auto-request auth if we have funds but no auth
     const now = Date.now();
-    const timeSinceLastInvoice = now - deviceContext.lastInvoiceRequest;
-    const shouldRequestAuth = availableMsat >= 0 && 
-        deviceContext.authorizationStatus !== 'GRANTED' && 
-        deviceContext.authorizationStatus !== 'ACTIVE' &&
-        !deviceContext.pendingAuthorization &&
-        timeSinceLastInvoice >= INVOICE_REQUEST_INTERVAL * 1000;
+    const timeSinceLastAuth = now - deviceContext.lastAuthorizationRequest;
+    
+    // Check individual conditions for debugging
+    const hasFunds = availableMsat > 0;
+    const notGranted = deviceContext.authorizationStatus !== 'GRANTED';
+    const notActive = deviceContext.authorizationStatus !== 'ACTIVE';
+    const notPending = !deviceContext.pendingAuthorization;
+    const enoughTimePassed = timeSinceLastAuth >= INVOICE_REQUEST_INTERVAL * 1000;
+    // Allow immediate request if we just got funds (previous balance was 0) or if enough time has passed
+    const justGotFunds = previousBalance === 0 && availableMsat > 0;
+    const canRequestNow = justGotFunds || enoughTimePassed;
+    
+    const shouldRequestAuth = hasFunds && 
+        notGranted && 
+        notActive &&
+        notPending &&
+        canRequestNow;
+    
+    // Debug logging to see why auth request might not be triggered
+    if (!shouldRequestAuth) {
+      console.log(`[VU ${vuID}] Auth request NOT triggered - hasFunds: ${hasFunds}, notGranted: ${notGranted}, notActive: ${notActive}, notPending: ${notPending}, canRequestNow: ${canRequestNow} (justGotFunds: ${justGotFunds}, enoughTimePassed: ${enoughTimePassed} (${timeSinceLastAuth}ms >= ${INVOICE_REQUEST_INTERVAL * 1000}ms)), authStatus: ${deviceContext.authorizationStatus}`);
+    }
     
     if (shouldRequestAuth) {
       const authPayload = JSON.stringify({
-        device_id: deviceContext.id,
-        request_id: generateID(),
-        request_msat: AUTHORIZE_REQUEST_MSAT,
+        deviceId: deviceContext.id,
+        requestId: generateID(),
+        requestMsat: AUTHORIZE_REQUEST_MSAT,
         reason: 'FUNDS_AVAILABLE',
         timestamp: getISOTimestamp(),
       });
@@ -424,6 +388,7 @@ function handleBalanceMessage(vuID, client, deviceContext, payload) {
         mqttPublishSuccess.add(1);
         mqttPublishRate.add(1);
         deviceContext.pendingAuthorization = true;
+        deviceContext.lastAuthorizationRequest = now; // Update last auth request time
         console.log(`[VU ${vuID}] Auth request sent (balance update)`);
       } catch (e) {
         console.error(`[VU ${vuID}] Auth request failed: ${e}`);
@@ -479,9 +444,9 @@ function handleControlMessage(vuID, client, deviceContext, payload) {
   } else if (command === 'CONTROL_COMMAND_AUTHORIZATION') {
     // Manually trigger auth request
     const authPayload = JSON.stringify({
-      device_id: deviceContext.id,
-      request_id: generateID(),
-      request_msat: AUTHORIZE_REQUEST_MSAT,
+      deviceId: deviceContext.id,
+      requestId: generateID(),
+      requestMsat: AUTHORIZE_REQUEST_MSAT,
       reason: payload.reason || 'AUTHORIZATION_REQUIRED',
       timestamp: getISOTimestamp(),
     });
@@ -490,6 +455,7 @@ function handleControlMessage(vuID, client, deviceContext, payload) {
       mqttPublishSuccess.add(1);
       mqttPublishRate.add(1);
       deviceContext.pendingAuthorization = true;
+      deviceContext.lastAuthorizationRequest = Date.now(); // Update last auth request time
       console.log(`[VU ${vuID}] Auth request sent (command)`);
     } catch (e) { 
       console.error(`[VU ${vuID}] Auth request failed (command): ${e}`);
