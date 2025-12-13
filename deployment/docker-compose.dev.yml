@@ -1,7 +1,8 @@
-version: '3.9'
 services:
   caddy:
-    image: 7robertodantas/lnpay-caddy:latest
+    build:
+      context: ../infrastructure/caddy
+      dockerfile: Dockerfile
     container_name: caddy
     ports:
       - "8080:80" # Northbound
@@ -15,7 +16,9 @@ services:
     restart: unless-stopped
 
   redis:
-    image: 7robertodantas/lnpay-redis:latest
+    build:
+      context: ../infrastructure/redis
+      dockerfile: Dockerfile
     container_name: redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -32,25 +35,31 @@ services:
     restart: unless-stopped
 
   mosquitto:
-    image: 7robertodantas/lnpay-mosquitto:latest
+    build:
+      context: ../infrastructure/mosquitto
+      dockerfile: Dockerfile
     container_name: mosquitto
     ports:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
       - mosquitto-data:/mosquitto/data
-      - ./certs:/mosquitto/certs:rw
+      - ../infrastructure/certs:/mosquitto/certs:rw
     env_file:
       - .env
     healthcheck:
       test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 20s
     restart: unless-stopped
 
   device:
-    image: 7robertodantas/lnpay-device:latest
+    build:
+      context: ..
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: device
     container_name: device
     environment:
       - MQTT_BROKER=mosquitto
@@ -62,15 +71,10 @@ services:
       - LIGHTNING_GRPC_HOST=lightning
       - LIGHTNING_GRPC_PORT=${GRPC_PORT}
       - DB_PATH=/data/devices.db
-      # Disable OpenTelemetry
-      - OTEL_EXPORTER_OTLP_ENDPOINT=
-      - OTEL_SERVICE_NAME=device-service
-      - OTEL_TRACES_EXPORTER=none
-      - OTEL_METRICS_EXPORTER=none
     env_file:
       - .env
     volumes:
-      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
       - device-data:/data
     depends_on:
       mosquitto:
@@ -83,16 +87,15 @@ services:
         condition: service_started
 
   ledger:
-    image: 7robertodantas/lnpay-ledger:latest
+    build:
+      context: ..
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: ledger
     container_name: ledger
     environment:
       - REDIS_HOST=redis
       - DB_PATH=/data/ledger.db
-      # Disable OpenTelemetry
-      - OTEL_EXPORTER_OTLP_ENDPOINT=
-      - OTEL_SERVICE_NAME=ledger-service
-      - OTEL_TRACES_EXPORTER=none
-      - OTEL_METRICS_EXPORTER=none
     env_file:
       - .env
     volumes:
@@ -103,16 +106,15 @@ services:
     restart: unless-stopped
 
   consumption:
-    image: 7robertodantas/lnpay-consumption:latest
+    build:
+      context: ..
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: consumption
     container_name: consumption
     environment:
-      - REDIS_HOST=redis
+      - REDIS_HOST=${REDIS_HOST:-redis}
       - DB_PATH=/data/consumption.db
-      # Disable OpenTelemetry
-      - OTEL_EXPORTER_OTLP_ENDPOINT=
-      - OTEL_SERVICE_NAME=consumption-service
-      - OTEL_TRACES_EXPORTER=none
-      - OTEL_METRICS_EXPORTER=none
     env_file:
       - .env
     volumes:
@@ -123,16 +125,16 @@ services:
     restart: unless-stopped
 
   lightning:
-    image: 7robertodantas/lnpay-lightning:latest
+    build:
+      context: ..
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: lightning
     container_name: lightning
     environment:
+      - LND_HOST=${LND_HOST}
       - REDIS_HOST=redis
       - DB_PATH=/data/lightning.db
-      # Disable OpenTelemetry
-      - OTEL_EXPORTER_OTLP_ENDPOINT=
-      - OTEL_SERVICE_NAME=lightning-service
-      - OTEL_TRACES_EXPORTER=none
-      - OTEL_METRICS_EXPORTER=none
     env_file:
       - .env
     volumes:
@@ -142,6 +144,37 @@ services:
         condition: service_healthy      
     restart: unless-stopped
 
+  smartmeter:
+    build:
+      context: ..
+      dockerfile: testing/smartmeter/Dockerfile
+    container_name: smartmeter
+    ports:
+      - "3001:8080" # UI
+    environment:
+      - MQTT_BROKER=mosquitto
+      - DEVICE_ID=smart-meter-001
+      - DEVICE_SECRET=smart-meter-001_password
+    env_file:
+      - .env
+    volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+    depends_on:    
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy        
+    restart: unless-stopped
+
+  jaeger:
+    image: jaegertracing/jaeger:2.12.0
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    ports:
+      - "16686:16686"  # UI
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+
 volumes:
   mosquitto-data:
   redis-data:
@@ -149,4 +182,3 @@ volumes:
   ledger-data:
   consumption-data:
   lightning-data:
-

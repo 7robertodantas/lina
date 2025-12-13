@@ -8,12 +8,12 @@ FROM golang:1.25-alpine AS builder
     COPY services/proto/gen ./services/proto/gen
 
     # Copy core files
-    COPY smartmeter/core/go.mod smartmeter/core/go.sum ./smartmeter/core/
+    COPY testing/smartmeter/core/go.mod testing/smartmeter/core/go.sum ./smartmeter/core/
     WORKDIR /workspace/smartmeter/core
     RUN go mod download
 
     # Copy source code
-    COPY smartmeter/core/*.go ./
+    COPY testing/smartmeter/core/*.go ./
 
     # Build the application
     RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o core .

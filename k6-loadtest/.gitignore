@@ -1,8 +1,0 @@
-# k6 test results
-*.json
-*.html
-*.csv
-
-# k6 extensions (if building locally)
-k6
-

@@ -20,16 +20,19 @@ NC='\033[0m' # No Color
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Get the project root (parent of scripts directory)
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Get the project root (parent of deployment directory)
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 # Change to project root directory
 cd "$PROJECT_ROOT"
 
-COMPOSE_FILE="docker-compose.prod.yml"
-COMPOSE_MEAS_FILE="docker-compose.meas.yml"
-CERTS_DIR="./certs"
+COMPOSE_FILE="deployment/docker-compose.prod.yml"
+COMPOSE_MEAS_FILE="deployment/docker-compose.meas.yml"
+CERTS_DIR="./infrastructure/certs"
 REMOTE_DIR="~/lnpay"
+# Extract just the filename for remote operations
+COMPOSE_FILE_BASENAME=$(basename "$COMPOSE_FILE")
+COMPOSE_MEAS_FILE_BASENAME=$(basename "$COMPOSE_MEAS_FILE")
 
 # Show usage/help
 show_usage() {
@@ -50,7 +53,7 @@ show_usage() {
     echo "  ./deploy.sh remote user@hostname -p 2222"
     echo ""
     echo "Remote deployment will:"
-    echo "  - Copy docker-compose.prod.yml, docker-compose.meas.yml and certs/ to ~/lnpay on remote"
+    echo "  - Copy deployment/docker-compose.prod.yml, deployment/docker-compose.meas.yml and infrastructure/certs/ to ~/lnpay on remote"
     echo "  - Verify prerequisites (Docker, docker-compose)"
     echo "  - Pull Docker images"
     echo "  - Provide instructions to start services"
@@ -266,22 +269,22 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     
     # Copy docker-compose.prod.yml
     echo "Copying docker-compose.prod.yml..."
-    scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/"
+    scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/$COMPOSE_FILE_BASENAME"
     
     # Copy docker-compose.meas.yml if it exists
     if [ -f "$COMPOSE_MEAS_FILE" ]; then
         echo "Copying docker-compose.meas.yml..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/"
+        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/$COMPOSE_MEAS_FILE_BASENAME"
     else
         echo -e "${YELLOW}Note: docker-compose.meas.yml not found locally, skipping${NC}"
     fi
     
     # Copy .env.example if .env doesn't exist on remote
-    if [ -f ".env.example" ]; then
+    if [ -f "deployment/.env.example" ]; then
         echo "Checking for .env file on remote..."
         if ! run_cmd "test -f $REMOTE_DIR/.env"; then
             echo "Copying .env.example to remote (no .env found)..."
-            scp $SSH_OPTS $SSH_MULTIPLEX_OPTS ".env.example" "$SSH_TARGET:$REMOTE_DIR/"
+            scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "deployment/.env.example" "$SSH_TARGET:$REMOTE_DIR/"
             echo -e "${YELLOW}⚠ IMPORTANT: Rename .env.example to .env and update variables:${NC}"
             if [ -n "$SSH_OPTS" ]; then
                 echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET${NC}"
@@ -354,7 +357,7 @@ echo -e "${BLUE}Step 3: Verifying Setup${NC}"
 echo "------------------------"
 
 if [ "$REMOTE_DEPLOY" = "true" ]; then
-    REMOTE_COMPOSE_FILE="$REMOTE_DIR/$COMPOSE_FILE"
+    REMOTE_COMPOSE_FILE="$REMOTE_DIR/$COMPOSE_FILE_BASENAME"
     REMOTE_CERTS_DIR="$REMOTE_DIR/certs"
 else
     REMOTE_COMPOSE_FILE="$COMPOSE_FILE"
@@ -384,7 +387,7 @@ echo "-------------------------------"
 
 if [ "$REMOTE_DEPLOY" = "true" ]; then
     echo "Pulling images on remote machine..."
-    run_cmd "cd $REMOTE_DIR && $DOCKER_COMPOSE -f $COMPOSE_FILE pull"
+    run_cmd "cd $REMOTE_DIR && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME pull"
 else
     echo "Pulling images..."
     $DOCKER_COMPOSE -f "$COMPOSE_FILE" pull
@@ -426,27 +429,27 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
         echo -e "${YELLOW}  ssh $SSH_TARGET${NC}"
     fi
     echo -e "${YELLOW}  cd ~/lnpay${NC}"
-    echo -e "${YELLOW}  $DOCKER_COMPOSE -f $COMPOSE_FILE up -d${NC}"
+    echo -e "${YELLOW}  $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d${NC}"
     echo ""
     echo "Or run from local machine:"
     if [ -n "$SSH_OPTS" ]; then
-        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE up -d\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d\"${NC}"
     else
-        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE up -d\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d\"${NC}"
     fi
     echo ""
     echo "To check status:"
     if [ -n "$SSH_OPTS" ]; then
-        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE ps\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME ps\"${NC}"
     else
-        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE ps\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME ps\"${NC}"
     fi
     echo ""
     echo "To view logs:"
     if [ -n "$SSH_OPTS" ]; then
-        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE logs -f\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME logs -f\"${NC}"
     else
-        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE logs -f\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME logs -f\"${NC}"
     fi
 else
     echo "To start the services, run:"

@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   sim1:
     image: 7robertodantas/lnpay-smartmeter:latest
@@ -9,9 +8,9 @@ services:
       - DEVICE_ID=smart-meter-001
       - DEVICE_SECRET=smart-meter-001_password
     env_file:
-      - .env.sims
+      - ../.env.sims
     volumes:
-      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
 
   sim2:
@@ -23,9 +22,9 @@ services:
       - DEVICE_ID=smart-meter-002
       - DEVICE_SECRET=smart-meter-002_password
     env_file:
-      - .env.sims
+      - ../.env.sims
     volumes:
-      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
 
   sim3:
@@ -37,8 +36,8 @@ services:
       - DEVICE_ID=smart-meter-003
       - DEVICE_SECRET=smart-meter-003_password
     env_file:
-      - .env.sims
+      - ../.env.sims
     volumes:
-      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
 

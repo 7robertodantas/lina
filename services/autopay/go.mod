@@ -190,9 +190,9 @@ require (
 )
 
 // Local dependencies - adjust paths as needed
-replace github.com/robertodantas/lnpay/proto => ../services/proto
+replace github.com/robertodantas/lnpay/proto => ../proto
 
-replace github.com/robertodantas/lnpay/internal => ../services/internal
+replace github.com/robertodantas/lnpay/internal => ../internal
 
 // We want to format raw bytes as hex instead of base64. The forked version
 // allows us to specify that as an option.

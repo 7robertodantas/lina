@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   caddy:
     image: 7robertodantas/lnpay-caddy:latest
@@ -38,7 +37,7 @@ services:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
       - mosquitto-data:/mosquitto/data
-      - ./certs:/mosquitto/certs:rw
+      - ../infrastructure/certs:/mosquitto/certs:rw
     env_file:
       - .env
     healthcheck:
@@ -65,7 +64,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
       - device-data:/data
     depends_on:
       mosquitto:

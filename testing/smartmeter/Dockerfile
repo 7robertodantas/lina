@@ -1,9 +1,9 @@
 # Build Smart Meter UI
 FROM node:22-alpine AS ui-build
     WORKDIR /app/ui
-    COPY smartmeter/ui/package.json smartmeter/ui/package-lock.json* ./
+    COPY testing/smartmeter/ui/package.json testing/smartmeter/ui/package-lock.json* ./
     RUN npm install
-    COPY smartmeter/ui .
+    COPY testing/smartmeter/ui .
     RUN npm run build
 
 # Build Smart Meter Core
@@ -20,12 +20,12 @@ FROM golang:1.25-alpine AS core-builder
     COPY services/internal/ *.go ./services/internal/
 
     # Copy Smart Meter Core files
-    COPY smartmeter/core/go.mod smartmeter/core/go.sum ./smartmeter/core/
+    COPY testing/smartmeter/core/go.mod testing/smartmeter/core/go.sum ./smartmeter/core/
     WORKDIR /workspace/smartmeter/core
     RUN go mod download
 
     # Copy Smart Meter Core source code
-    COPY smartmeter/core/*.go ./
+    COPY testing/smartmeter/core/*.go ./
 
     # Build Smart Meter Core application
     RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o smartmeter .
