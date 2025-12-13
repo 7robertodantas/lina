@@ -78,11 +78,37 @@ func handleConnect(c *gin.Context) {
 		return
 	}
 
+	// Check if device already has an active session
+	sessMux.RLock()
+	existingSession, exists := sessions[deviceID]
+	sessMux.RUnlock()
+
+	if exists && existingSession.Client.IsConnected() {
+		// Device is already connected, skip reconnection
+		log.Printf("[%s] Device already connected, skipping reconnection", deviceID)
+		c.Status(200)
+		return
+	}
+
+	// If session exists but client is not connected, clean it up
+	if exists {
+		log.Printf("[%s] Existing session found but not connected, cleaning up", deviceID)
+		sessMux.Lock()
+		if existingSession.Client.IsConnected() {
+			existingSession.Client.Disconnect(250)
+		}
+		delete(sessions, deviceID)
+		sessMux.Unlock()
+		// Small delay to ensure the old connection is fully closed
+		time.Sleep(100 * time.Millisecond)
+	}
+
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(mqttBroker)
 	opts.SetClientID(deviceID)
 	opts.SetUsername(deviceID)
 	opts.SetPassword(req.Secret)
+	opts.SetCleanSession(true) // Ensure clean session to avoid conflicts
 
 	// Configure TLS with certificate verification disabled
 	tlsConfig := &tls.Config{
@@ -159,11 +185,41 @@ func handleBatchConnect(c *gin.Context) {
 		go func(idx int, devID, secret string) {
 			defer wg.Done()
 
+			// Check if device already has an active session
+			sessMux.RLock()
+			existingSession, exists := sessions[devID]
+			sessMux.RUnlock()
+
+			if exists && existingSession.Client.IsConnected() {
+				// Device is already connected, skip reconnection
+				log.Printf("[%s] Device already connected, skipping reconnection", devID)
+				results[idx] = deviceResult{
+					DeviceID: devID,
+					Success:  true,
+				}
+				return
+			}
+
+			// If session exists but client is not connected, clean it up
+			if exists {
+				log.Printf("[%s] Existing session found but not connected, cleaning up", devID)
+				sessMux.Lock()
+				// Disconnect if somehow still connected (shouldn't happen, but be safe)
+				if existingSession.Client.IsConnected() {
+					existingSession.Client.Disconnect(250)
+				}
+				delete(sessions, devID)
+				sessMux.Unlock()
+				// Small delay to ensure the old connection is fully closed
+				time.Sleep(100 * time.Millisecond)
+			}
+
 			opts := mqtt.NewClientOptions()
 			opts.AddBroker(mqttBroker)
 			opts.SetClientID(devID)
 			opts.SetUsername(devID)
 			opts.SetPassword(secret)
+			opts.SetCleanSession(true) // Ensure clean session to avoid conflicts
 
 			// Configure TLS with certificate verification disabled
 			tlsConfig := &tls.Config{
