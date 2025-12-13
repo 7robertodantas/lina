@@ -24,7 +24,7 @@ func LoadConfig() Config {
 		ListenAddr:    internal.GetEnv("LISTEN_ADDR", ":8080"),
 		GRPCAddr:      internal.GetEnv("GRPC_ADDR", ":9090"),
 		MaxPageSize:   internal.IntEnv("MAX_PAGE_SIZE", 200),
-		BusyTimeoutMS: internal.IntEnv("BUSY_TIMEOUT_MS", 5000),
+		BusyTimeoutMS: internal.IntEnv("BUSY_TIMEOUT_MS", 15000),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),

@@ -20,12 +20,34 @@ type ConsumptionRepository struct {
 
 // NewConsumptionRepository creates and initializes the SQLite database with schema
 func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRepository, error) {
-	// WAL + busy_timeout for concurrent writers on edge devices.
-	dsn := fmt.Sprintf("%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)", dbPath, busyTimeoutMS)
+	// WAL + busy_timeout + performance optimizations for high load
+	// - WAL mode: allows concurrent readers and one writer
+	// - busy_timeout: how long to wait when database is locked (in ms)
+	// - synchronous(NORMAL): good balance between safety and performance with WAL
+	// - cache_size: increase cache to 8MB (negative = KB, so -8192 = 8MB, default is -2000 = 2MB)
+	// - temp_store: use memory for temporary tables/indexes (2 = memory)
+	// - mmap_size: use memory-mapped I/O for better performance (268435456 = 256MB)
+	// - foreign_keys: enable foreign key constraints
+	dsn := fmt.Sprintf(
+		"%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-8192)&_pragma=temp_store(2)&_pragma=mmap_size(268435456)&_pragma=foreign_keys(1)",
+		dbPath, busyTimeoutMS,
+	)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to SQLite: %w", err)
 	}
+
+	// Configure connection pool for SQLite
+	// SQLite works best with limited connections due to its locking model
+	// With WAL mode, we can have multiple readers but only one writer at a time
+	// Set max open connections to a reasonable number (10-20 is good for WAL mode)
+	db.SetMaxOpenConns(20)
+	// Keep some connections idle for reuse
+	db.SetMaxIdleConns(5)
+	// Connection lifetime - close idle connections after 5 minutes
+	db.SetConnMaxLifetime(5 * time.Minute)
+	// Idle timeout - close idle connections after 10 minutes
+	db.SetConnMaxIdleTime(10 * time.Minute)
 
 	// Create tables and indexes
 	stmts := []string{
