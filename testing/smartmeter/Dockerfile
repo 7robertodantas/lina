@@ -31,7 +31,7 @@ FROM golang:1.25-alpine AS core-builder
     RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o smartmeter .
 
 # Smart Meter Runtime
-FROM alpine:latest
+FROM alpine:3.23
     RUN apk --no-cache add ca-certificates
     WORKDIR /app
 

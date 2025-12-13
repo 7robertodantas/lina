@@ -25,7 +25,7 @@ FROM golang:1.25-alpine AS builder
     RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o ${SERVICE} .
 
 # Final Stage
-FROM alpine:latest
+FROM alpine:3.23
 
     ARG SERVICE
     ENV APP=${SERVICE}

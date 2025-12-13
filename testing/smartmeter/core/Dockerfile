@@ -19,7 +19,7 @@ FROM golang:1.25-alpine AS builder
     RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o core .
 
 # Runtime stage
-FROM alpine:latest
+FROM alpine:3.23
 
     RUN apk --no-cache add ca-certificates
 

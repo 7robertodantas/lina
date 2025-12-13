@@ -17,7 +17,7 @@ const deviceConnectionFailed = new Counter('device_connection_failed'); // Faile
 
 const API_BASE_URL = __ENV.API_BASE_URL || 'http://localhost:8080';
 const API_DEVICES_BATCH_ENDPOINT = __ENV.API_DEVICES_BATCH_ENDPOINT || '/devices/batch';
-const BRIDGE_BASE_URL = __ENV.BRIDGE_BASE_URL || 'http://localhost:3000';
+const HTTPDEVICE_BASE_URL = __ENV.HTTPDEVICE_BASE_URL || 'http://localhost:3000';
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // seconds between reports
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
@@ -107,8 +107,8 @@ export function setup() {
     };
   }
 
-  // Step 2: Connect all devices to the bridge in batches (initialize: invoice + authorization)
-  console.log(`Connecting ${MAX_VUS} devices to bridge in batches...`);
+  // Step 2: Connect all devices to httpdevice in batches (initialize: invoice + authorization)
+  console.log(`Connecting ${MAX_VUS} devices to httpdevice in batches...`);
   const deviceIDs = [];
   let totalConnected = 0;
   let totalFailed = 0;
@@ -131,7 +131,7 @@ export function setup() {
     const batchPayload = JSON.stringify({ devices });
 
     const batchRes = http.post(
-      `${BRIDGE_BASE_URL}/devices/batch/connect`,
+      `${HTTPDEVICE_BASE_URL}/devices/batch/connect`,
       batchPayload,
       {
         headers: { 'Content-Type': 'application/json' },
@@ -180,7 +180,7 @@ export default function () {
 
   // Device should already be connected from setup
   // k6 calls this function in a loop - each call sends one usage report
-  // The bridge handles all the MQTT logic, authorization maintenance, etc.
+  // The httpdevice handles all the MQTT logic, authorization maintenance, etc.
 
   // Generate a random measurement between 0.1 and 1.0 kWh
   const measure = 0.1 + Math.random() * 0.9;
@@ -193,9 +193,9 @@ export default function () {
     timestamp: getISOTimestamp(),
   });
 
-  // Send usage report via bridge
+  // Send usage report via httpdevice
   const usageRes = http.post(
-    `${BRIDGE_BASE_URL}/devices/${deviceID}/usage`,
+    `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/usage`,
     usagePayload,
     { headers: { 'Content-Type': 'application/json' } }
   );
@@ -235,7 +235,7 @@ export function teardown(data) {
   //   // Disconnect sequentially
   //   for (const deviceID of deviceIDs) {
   //     const res = http.post(
-  //       `${BRIDGE_BASE_URL}/devices/${deviceID}/disconnect`,
+  //       `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/disconnect`,
   //       '',
   //       { timeout: '10s' }
   //     );
@@ -251,7 +251,7 @@ export function teardown(data) {
   //   for (let id = 1; id <= MAX_VUS; id++) {
   //     const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
   //     const res = http.post(
-  //       `${BRIDGE_BASE_URL}/devices/${deviceID}/disconnect`,
+  //       `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/disconnect`,
   //       '',
   //       { timeout: '10s' }
   //     );

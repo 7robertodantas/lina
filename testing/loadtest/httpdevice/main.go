@@ -41,8 +41,9 @@ func main() {
 	r.POST("/devices/:deviceId/*action", handleDeviceRoute)
 	r.POST("/devices/batch/connect", handleBatchConnect)
 
-	fmt.Printf("MQTT Proxy running on :3000 (broker: %s)\n", mqttBroker)
-	log.Fatal(r.Run(":3000"))
+	listenAddr := getEnv("LISTEN_ADDR", ":8080")
+	fmt.Printf("HTTP Device service running on %s (broker: %s)\n", listenAddr, mqttBroker)
+	log.Fatal(r.Run(listenAddr))
 }
 
 // handleDeviceRoute dispatches to the appropriate handler based on the action

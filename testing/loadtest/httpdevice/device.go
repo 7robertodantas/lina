@@ -666,3 +666,4 @@ func (d *DeviceContext) handleControlMessage(payload []byte) {
 func generateRequestID() string {
 	return fmt.Sprintf("req_%d", time.Now().UnixNano())
 }
+
