@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -21,12 +23,21 @@ const (
 	lightningInvoiceSettledReason = "LIGHTNING_INVOICE_SETTLED"
 )
 
+// messageRetryInfo tracks retry information for a message
+type messageRetryInfo struct {
+	retryCount  int
+	lastRetryAt time.Time
+	firstSeenAt time.Time
+}
+
 // StreamHandler handles Redis stream operations for the ledger service
 type StreamHandler struct {
 	streamClient *internal.StreamClient
 	repo         *LedgerRepository
 	consumerName string
 	groupName    string
+	// retryTracker tracks retry counts and timestamps for messages
+	retryTracker sync.Map // map[string]*messageRetryInfo
 }
 
 // NewStreamHandler creates a new stream handler
@@ -178,18 +189,13 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 					// TraceEventProcessing now handles both processing and ack within same span
 					err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleConsumptionEvent, ackFn)
 					if err != nil {
-						// Check if this is an expected failure that should be ACKed
+						// Check if this is an expected failure
 						var expectedErr *ExpectedFailureError
 						if errors.As(err, &expectedErr) {
-							// Expected failure - we've already handled it (published failed event)
-							// ACK the message so it doesn't accumulate in pending
-							if ackErr := ackFn(ctx, msg); ackErr != nil {
-								logger.WithStream(streamName, "consume").
-									Errorf(ctx, "Failed to ACK expected failure for message %s: %v", msg.ID, ackErr)
-							} else {
-								logger.WithStream(streamName, "consume").
-									Infof(ctx, "ACKed expected failure for message %s: %v", msg.ID, expectedErr.Err)
-							}
+							// Expected failure - don't ACK, let it go to pending for retry with backoff
+							// The pending retry mechanism will handle backoff and max retries
+							logger.WithStream(streamName, "consume").
+								Debugf(ctx, "Expected failure, message will go to pending for retry: %v", expectedErr.Err)
 						} else {
 							// Unexpected failure - don't ACK, let it go to pending for retry
 							logger.WithStream(streamName, "consume").
@@ -393,6 +399,9 @@ func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamNam
 	logger.WithStream(streamName, "consume").
 		Info(ctx, "Starting pending message retry mechanism (continuous)")
 
+	// Cleanup old retry tracking entries periodically
+	go sh.cleanupRetryTracker(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -424,11 +433,35 @@ func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamNam
 
 			// Process pending messages
 			retried := 0
+			acked := 0
+			skipped := 0
+			now := time.Now()
+			var earliestRetryTime *time.Time // Track earliest retry time among skipped messages
+
 			for _, stream := range streams {
 				for _, msg := range stream.Messages {
 					ackFn := func(ctx context.Context, msg redis.XMessage) error {
 						return sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
 					}
+
+					// Check if we should retry this message based on backoff
+					// This checks if enough time has passed since the last retry attempt
+					retryInfo, shouldRetry := sh.shouldRetryMessageWithInfo(ctx, msg.ID, now)
+					if !shouldRetry {
+						skipped++
+						// Track earliest retry time for optimization
+						if retryInfo != nil && retryInfo.retryCount > 0 {
+							backoffDuration := sh.calculateBackoffDuration(retryInfo.retryCount)
+							nextRetryTime := retryInfo.lastRetryAt.Add(backoffDuration)
+							if earliestRetryTime == nil || nextRetryTime.Before(*earliestRetryTime) {
+								earliestRetryTime = &nextRetryTime
+							}
+						}
+						continue
+					}
+
+					// Retry info already obtained from shouldRetryMessageWithInfo above
+					attemptTime := time.Now()
 
 					// Retry processing the message
 					err := internal.TraceEventProcessing(ctx, streamName, msg, handlerFn, ackFn)
@@ -436,22 +469,66 @@ func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamNam
 						// Check if this is an expected failure
 						var expectedErr *ExpectedFailureError
 						if errors.As(err, &expectedErr) {
-							// Expected failure - ACK it
-							if ackErr := ackFn(ctx, msg); ackErr != nil {
-								logger.WithStream(streamName, "consume").
-									Errorf(ctx, "Failed to ACK expected failure for pending message %s: %v", msg.ID, ackErr)
+							// Expected failure - apply backoff and retry limit
+							retryInfo.retryCount++
+							retryInfo.lastRetryAt = attemptTime // Set when failure occurred
+
+							const maxRetries = 10 // Maximum retries before giving up
+							if retryInfo.retryCount >= maxRetries {
+								// Max retries reached - ACK the message to stop retrying
+								if ackErr := ackFn(ctx, msg); ackErr != nil {
+									logger.WithStream(streamName, "consume").
+										Errorf(ctx, "Failed to ACK max-retry message %s: %v", msg.ID, ackErr)
+								} else {
+									acked++
+									sh.retryTracker.Delete(msg.ID) // Clean up tracking
+									logger.WithStream(streamName, "consume").
+										WarnWithFields(ctx, "Max retries reached for expected failure, ACKed message", map[string]interface{}{
+											"message_id":  msg.ID,
+											"retry_count": retryInfo.retryCount,
+											"error":       expectedErr.Error(),
+										})
+								}
 							} else {
-								retried++
+								// Will retry later with backoff - message stays in pending
+								// Log the backoff for the NEXT retry (retryCount + 1)
+								nextRetryBackoff := sh.calculateBackoffDuration(retryInfo.retryCount + 1)
 								logger.WithStream(streamName, "consume").
-									Infof(ctx, "Retried and ACKed expected failure for pending message %s", msg.ID)
+									DebugWithFields(ctx, "Expected failure, will retry with backoff", map[string]interface{}{
+										"message_id":    msg.ID,
+										"retry_count":   retryInfo.retryCount,
+										"next_retry_in": nextRetryBackoff,
+										"error":         expectedErr.Error(),
+									})
 							}
 						} else {
-							// Still failing - log but don't ACK, will retry again later
-							logger.WithStream(streamName, "consume").
-								Warnf(ctx, "Pending message %s still failing: %v (will retry later)", msg.ID, err)
+							// Unexpected failure - check if it's a database lock error
+							if isDatabaseLockError(err) {
+								// Database lock error - apply backoff to avoid contention
+								retryInfo.retryCount++
+								retryInfo.lastRetryAt = attemptTime // Set when failure occurred
+
+								// Will retry later with backoff - message stays in pending
+								// Log the backoff for the NEXT retry (retryCount + 1)
+								nextRetryBackoff := sh.calculateBackoffDuration(retryInfo.retryCount + 1)
+								logger.WithStream(streamName, "consume").
+									WarnWithFields(ctx, "Database lock error, will retry with backoff", map[string]interface{}{
+										"message_id":    msg.ID,
+										"retry_count":   retryInfo.retryCount,
+										"next_retry_in": nextRetryBackoff,
+										"error":         err.Error(),
+									})
+							} else {
+								// Other unexpected failure - reset retry count (might be transient)
+								sh.retryTracker.Delete(msg.ID)
+								// Still failing - log but don't ACK, will retry again later
+								logger.WithStream(streamName, "consume").
+									Warnf(ctx, "Pending message %s still failing: %v (will retry later)", msg.ID, err)
+							}
 						}
 					} else {
-						// Successfully processed
+						// Successfully processed - clear retry tracking
+						sh.retryTracker.Delete(msg.ID)
 						retried++
 						logger.WithStream(streamName, "consume").
 							Infof(ctx, "Successfully retried pending message %s", msg.ID)
@@ -459,11 +536,31 @@ func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamNam
 				}
 			}
 
-			if retried > 0 {
+			if retried > 0 || acked > 0 || skipped > 0 {
 				logger.WithStream(streamName, "consume").
-					InfoWithFields(ctx, "Retried pending messages", map[string]interface{}{
+					InfoWithFields(ctx, "Processed pending messages", map[string]interface{}{
 						"retried_count": retried,
+						"acked_count":   acked,
+						"skipped_count": skipped,
 					})
+			}
+
+			// If all messages were skipped and we have an earliest retry time, sleep until then
+			// This avoids constantly checking messages that are all in backoff
+			if skipped > 0 && retried == 0 && acked == 0 && earliestRetryTime != nil {
+				sleepDuration := time.Until(*earliestRetryTime)
+				// Cap sleep at 30 seconds to ensure we check for new messages periodically
+				maxSleep := 30 * time.Second
+				if sleepDuration > 0 && sleepDuration < maxSleep {
+					logger.WithStream(streamName, "consume").
+						Debugf(ctx, "All messages in backoff, sleeping for %v until earliest retry", sleepDuration)
+					time.Sleep(sleepDuration)
+				} else if sleepDuration > maxSleep {
+					// If earliest retry is more than 30s away, sleep for maxSleep
+					logger.WithStream(streamName, "consume").
+						Debugf(ctx, "Earliest retry is %v away, sleeping for %v", sleepDuration, maxSleep)
+					time.Sleep(maxSleep)
+				}
 			}
 		}
 	}
@@ -869,4 +966,108 @@ func (sh *StreamHandler) checkExpiredAuthorizations(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// shouldRetryMessage checks if enough time has passed since last retry (exponential backoff)
+func (sh *StreamHandler) shouldRetryMessage(ctx context.Context, messageID string) bool {
+	_, shouldRetry := sh.shouldRetryMessageWithInfo(ctx, messageID, time.Now())
+	return shouldRetry
+}
+
+// shouldRetryMessageWithInfo checks if enough time has passed and returns retry info
+// This allows callers to get retry info without an extra lookup
+func (sh *StreamHandler) shouldRetryMessageWithInfo(ctx context.Context, messageID string, now time.Time) (*messageRetryInfo, bool) {
+	retryInfo := sh.getOrCreateRetryInfo(messageID)
+
+	// First retry - allow immediately
+	if retryInfo.retryCount == 0 {
+		return retryInfo, true
+	}
+
+	// Calculate backoff duration based on retry count
+	backoffDuration := sh.calculateBackoffDuration(retryInfo.retryCount)
+
+	// Check if enough time has passed since last retry
+	timeSinceLastRetry := now.Sub(retryInfo.lastRetryAt)
+	shouldRetry := timeSinceLastRetry >= backoffDuration
+
+	// Only log debug messages occasionally to reduce noise (when close to retry or randomly)
+	// This reduces log spam when many messages are in backoff
+	if !shouldRetry {
+		remaining := backoffDuration - timeSinceLastRetry
+		// Only log if remaining time is less than 5 seconds (close to retry) or randomly (1% chance)
+		if remaining < 5*time.Second || now.UnixNano()%100 == 0 {
+			logger.WithStream("", "consume").
+				Debugf(ctx, "Message %s backoff not expired yet, remaining: %v (retry_count=%d)",
+					messageID, remaining, retryInfo.retryCount)
+		}
+	}
+
+	return retryInfo, shouldRetry
+}
+
+// calculateBackoffDuration calculates the backoff duration based on retry count
+func (sh *StreamHandler) calculateBackoffDuration(retryCount int) time.Duration {
+	// Exponential backoff: 2^retryCount seconds, capped at 5 minutes
+	backoffSeconds := 1 << retryCount // 2^retryCount
+	if backoffSeconds > 300 {         // Cap at 5 minutes
+		backoffSeconds = 300
+	}
+	return time.Duration(backoffSeconds) * time.Second
+}
+
+// getOrCreateRetryInfo gets or creates retry info for a message
+func (sh *StreamHandler) getOrCreateRetryInfo(messageID string) *messageRetryInfo {
+	// Try to get existing info
+	if val, ok := sh.retryTracker.Load(messageID); ok {
+		return val.(*messageRetryInfo)
+	}
+
+	// Create new retry info
+	info := &messageRetryInfo{
+		retryCount:  0,
+		lastRetryAt: time.Now(),
+		firstSeenAt: time.Now(),
+	}
+	sh.retryTracker.Store(messageID, info)
+	return info
+}
+
+// isDatabaseLockError checks if an error is a SQLite database lock error
+func isDatabaseLockError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "database is locked") ||
+		strings.Contains(errStr, "sqlite_busy") ||
+		strings.Contains(errStr, "sqlite: database is locked")
+}
+
+// cleanupRetryTracker periodically cleans up old retry tracking entries
+func (sh *StreamHandler) cleanupRetryTracker(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			cleaned := 0
+			sh.retryTracker.Range(func(key, value interface{}) bool {
+				info := value.(*messageRetryInfo)
+				// Remove entries older than 1 hour that haven't been retried recently
+				if now.Sub(info.firstSeenAt) > 1*time.Hour && now.Sub(info.lastRetryAt) > 30*time.Minute {
+					sh.retryTracker.Delete(key)
+					cleaned++
+				}
+				return true
+			})
+			if cleaned > 0 {
+				logger.Debugf(ctx, "Cleaned up %d old retry tracking entries", cleaned)
+			}
+		}
+	}
 }
