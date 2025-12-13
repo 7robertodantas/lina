@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,6 +22,7 @@ type DeviceContext struct {
 	DeviceID string
 	Secret   string
 	Client   mqtt.Client
+	Broker   string // MQTT broker URL for reconnection
 
 	// State
 	AvailableMsat                 int64
@@ -49,8 +52,9 @@ func NewDeviceContext(deviceID, secret string, client mqtt.Client) *DeviceContex
 		DeviceID:                 deviceID,
 		Secret:                   secret,
 		Client:                   client,
-		AuthorizeRequestMsat:     10000,  // Default 10k msat
-		InvoiceAmountMsat:        250000, // Default 250k msat
+		Broker:                   mqttBroker, // Store broker URL for reconnection
+		AuthorizeRequestMsat:     10000,      // Default 10k msat
+		InvoiceAmountMsat:        250000,     // Default 250k msat
 		InitComplete:             make(chan bool, 1),
 		ReportingEnabled:         true,                              // Start with reporting enabled
 		LastInvoiceRequest:       time.Now().Add(-10 * time.Minute), // Allow immediate request
@@ -256,6 +260,70 @@ func (d *DeviceContext) RequestInvoice(reason string) error {
 	return nil
 }
 
+// reconnectClient reconnects the MQTT client if it's not connected
+func (d *DeviceContext) reconnectClient() error {
+	d.mu.Lock()
+	// Check if already connected (double-check after acquiring lock)
+	if d.Client != nil && d.Client.IsConnected() {
+		d.mu.Unlock()
+		return nil
+	}
+
+	log.Printf("[%s] Client not connected, reconnecting...", d.DeviceID)
+
+	// Disconnect old client if it exists
+	oldClient := d.Client
+	d.mu.Unlock()
+
+	// Disconnect old client outside of lock to avoid blocking
+	if oldClient != nil {
+		oldClient.Disconnect(250)
+		// Small delay to ensure disconnect completes
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Create new client options
+	opts := mqtt.NewClientOptions()
+	d.mu.RLock()
+	broker := d.Broker
+	deviceID := d.DeviceID
+	secret := d.Secret
+	d.mu.RUnlock()
+
+	opts.AddBroker(broker)
+	opts.SetClientID(deviceID)
+	opts.SetUsername(deviceID)
+	opts.SetPassword(secret)
+	opts.SetCleanSession(true)
+
+	// Configure TLS with certificate verification disabled
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: true,
+	}
+	opts.SetTLSConfig(tlsConfig)
+
+	// Create and connect new client
+	client := mqtt.NewClient(opts)
+	if token := client.Connect(); token.Wait() && token.Error() != nil {
+		return fmt.Errorf("failed to reconnect: %v", token.Error())
+	}
+
+	// Update client in locked section
+	d.mu.Lock()
+	d.Client = client
+	d.mu.Unlock()
+
+	log.Printf("[%s] Client reconnected successfully", deviceID)
+
+	// Re-subscribe to topics (no lock needed, only reads DeviceID and uses Client which is already set)
+	if err := d.SubscribeToTopics(); err != nil {
+		log.Printf("[%s] Failed to re-subscribe after reconnect: %v", deviceID, err)
+		return fmt.Errorf("failed to re-subscribe: %v", err)
+	}
+
+	return nil
+}
+
 // RequestAuthorization sends an authorization request
 // Backend is idempotent, so multiple requests with same request_id are safe
 // After 3 retries with the same request_id, generate a new one
@@ -293,7 +361,26 @@ func (d *DeviceContext) RequestAuthorization(reason string) error {
 	payloadJSON, _ := json.Marshal(payload)
 	topic := fmt.Sprintf("/devices/%s/request/authorize", d.DeviceID)
 
-	token := d.Client.Publish(topic, 1, false, payloadJSON)
+	// Check if client is connected before publishing
+	d.mu.RLock()
+	client := d.Client
+	d.mu.RUnlock()
+
+	if client == nil || !client.IsConnected() {
+		log.Printf("[%s] Client not connected, attempting to reconnect...", d.DeviceID)
+		if err := d.reconnectClient(); err != nil {
+			d.mu.Lock()
+			d.PendingAuthorization = false
+			d.mu.Unlock()
+			return fmt.Errorf("failed to reconnect: %v", err)
+		}
+		// Get the reconnected client
+		d.mu.RLock()
+		client = d.Client
+		d.mu.RUnlock()
+	}
+
+	token := client.Publish(topic, 1, false, payloadJSON)
 	if !token.WaitTimeout(5 * time.Second) {
 		d.mu.Lock()
 		d.PendingAuthorization = false
@@ -301,10 +388,41 @@ func (d *DeviceContext) RequestAuthorization(reason string) error {
 		return fmt.Errorf("timeout publishing authorization request")
 	}
 	if token.Error() != nil {
+		err := token.Error()
+		errStr := err.Error()
+		// Check if error is "not Connected"
+		if strings.Contains(errStr, "not Connected") || strings.Contains(errStr, "not connected") {
+			log.Printf("[%s] Got 'not Connected' error, attempting to reconnect...", d.DeviceID)
+			if reconnectErr := d.reconnectClient(); reconnectErr != nil {
+				d.mu.Lock()
+				d.PendingAuthorization = false
+				d.mu.Unlock()
+				return fmt.Errorf("failed to reconnect after publish error: %v", reconnectErr)
+			}
+			// Retry the publish after reconnection
+			d.mu.RLock()
+			client = d.Client
+			d.mu.RUnlock()
+			retryToken := client.Publish(topic, 1, false, payloadJSON)
+			if !retryToken.WaitTimeout(5 * time.Second) {
+				d.mu.Lock()
+				d.PendingAuthorization = false
+				d.mu.Unlock()
+				return fmt.Errorf("timeout publishing authorization request after reconnect")
+			}
+			if retryToken.Error() != nil {
+				d.mu.Lock()
+				d.PendingAuthorization = false
+				d.mu.Unlock()
+				return fmt.Errorf("failed to publish after reconnect: %v", retryToken.Error())
+			}
+			log.Printf("[%s] Authorization request sent after reconnect: %s", d.DeviceID, requestID)
+			return nil
+		}
 		d.mu.Lock()
 		d.PendingAuthorization = false
 		d.mu.Unlock()
-		return token.Error()
+		return err
 	}
 
 	log.Printf("[%s] Authorization request sent: %s", d.DeviceID, requestID)

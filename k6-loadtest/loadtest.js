@@ -224,45 +224,45 @@ export default function () {
 
 // --- Teardown ---
 export function teardown(data) {
-  console.log("Disconnecting all devices...");
+  // console.log("Disconnecting all devices...");
 
-  const deviceIDs = data?.deviceIDs || [];
-  let disconnected = 0;
-  let failed = 0;
+  // const deviceIDs = data?.deviceIDs || [];
+  // let disconnected = 0;
+  // let failed = 0;
 
-  // Disconnect all devices
-  if (deviceIDs.length > 0) {
-    // Disconnect sequentially
-    for (const deviceID of deviceIDs) {
-      const res = http.post(
-        `${BRIDGE_BASE_URL}/devices/${deviceID}/disconnect`,
-        '',
-        { timeout: '10s' }
-      );
-      if (res.status === 200) {
-        disconnected++;
-      } else if (res.status !== 404) { // 404 is OK, device wasn't connected
-        failed++;
-      }
-    }
-  } else {
-    // Fallback: try to disconnect devices 1 to MAX_VUS
-    console.log("No device IDs in data, attempting to disconnect all devices...");
-    for (let id = 1; id <= MAX_VUS; id++) {
-      const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
-      const res = http.post(
-        `${BRIDGE_BASE_URL}/devices/${deviceID}/disconnect`,
-        '',
-        { timeout: '10s' }
-      );
-      if (res.status === 200) {
-        disconnected++;
-      } else if (res.status !== 404) { // 404 is OK, device wasn't connected
-        failed++;
-      }
-    }
-  }
+  // // Disconnect all devices
+  // if (deviceIDs.length > 0) {
+  //   // Disconnect sequentially
+  //   for (const deviceID of deviceIDs) {
+  //     const res = http.post(
+  //       `${BRIDGE_BASE_URL}/devices/${deviceID}/disconnect`,
+  //       '',
+  //       { timeout: '10s' }
+  //     );
+  //     if (res.status === 200) {
+  //       disconnected++;
+  //     } else if (res.status !== 404) { // 404 is OK, device wasn't connected
+  //       failed++;
+  //     }
+  //   }
+  // } else {
+  //   // Fallback: try to disconnect devices 1 to MAX_VUS
+  //   console.log("No device IDs in data, attempting to disconnect all devices...");
+  //   for (let id = 1; id <= MAX_VUS; id++) {
+  //     const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
+  //     const res = http.post(
+  //       `${BRIDGE_BASE_URL}/devices/${deviceID}/disconnect`,
+  //       '',
+  //       { timeout: '10s' }
+  //     );
+  //     if (res.status === 200) {
+  //       disconnected++;
+  //     } else if (res.status !== 404) { // 404 is OK, device wasn't connected
+  //       failed++;
+  //     }
+  //   }
+  // }
 
-  console.log(`Teardown complete: ${disconnected} disconnected, ${failed} failed`);
+  // console.log(`Teardown complete: ${disconnected} disconnected, ${failed} failed`);
   console.log("Load test finished.");
 }

@@ -122,7 +122,7 @@ func handleConnect(c *gin.Context) {
 		return
 	}
 
-	// Create device context
+	// Create device context (broker URL is set in NewDeviceContext from mqttBroker)
 	deviceCtx := NewDeviceContext(deviceID, req.Secret, client)
 
 	// Subscribe to topics (this sets up message handlers)
@@ -237,7 +237,7 @@ func handleBatchConnect(c *gin.Context) {
 				return
 			}
 
-			// Create device context
+			// Create device context (broker URL is set in NewDeviceContext from mqttBroker)
 			deviceCtx := NewDeviceContext(devID, secret, client)
 
 			// Subscribe to topics
@@ -381,11 +381,62 @@ func handleDevicePublish(c *gin.Context) {
 		session.DeviceCtx.EnsureAuthorizationActive()
 	}
 
+	// Check if client is connected before publishing
+	if !session.Client.IsConnected() {
+		log.Printf("[%s] Client not connected, attempting to reconnect before publish...", deviceID)
+		if err := session.DeviceCtx.reconnectClient(); err != nil {
+			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to reconnect: %v", err)})
+			return
+		}
+		// Update session with reconnected client
+		sessMux.Lock()
+		session, exists = sessions[deviceID]
+		if exists {
+			// Update the client reference in the session
+			session.Client = session.DeviceCtx.Client
+		}
+		sessMux.Unlock()
+		if !exists {
+			c.JSON(404, gin.H{"error": "Device session lost after reconnect"})
+			return
+		}
+	}
+
 	token := session.Client.Publish(topic, 1, false, string(payload))
 	token.Wait()
 
 	if token.Error() != nil {
-		c.JSON(500, gin.H{"error": token.Error().Error()})
+		err := token.Error()
+		errStr := err.Error()
+		// Check if error is "not Connected"
+		if strings.Contains(errStr, "not Connected") || strings.Contains(errStr, "not connected") {
+			log.Printf("[%s] Got 'not Connected' error on publish, attempting to reconnect...", deviceID)
+			if reconnectErr := session.DeviceCtx.reconnectClient(); reconnectErr != nil {
+				c.JSON(500, gin.H{"error": fmt.Sprintf("failed to reconnect after publish error: %v", reconnectErr)})
+				return
+			}
+			// Update session with reconnected client and retry publish
+			sessMux.Lock()
+			session, exists = sessions[deviceID]
+			if exists {
+				// Update the client reference in the session
+				session.Client = session.DeviceCtx.Client
+			}
+			sessMux.Unlock()
+			if !exists {
+				c.JSON(404, gin.H{"error": "Device session lost after reconnect"})
+				return
+			}
+			retryToken := session.Client.Publish(topic, 1, false, string(payload))
+			retryToken.Wait()
+			if retryToken.Error() != nil {
+				c.JSON(500, gin.H{"error": fmt.Sprintf("failed to publish after reconnect: %v", retryToken.Error())})
+				return
+			}
+			c.Status(200)
+			return
+		}
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
