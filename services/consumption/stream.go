@@ -269,11 +269,15 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 // handlerFn is the function to call for processing each message
 func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamName string, handlerFn func(context.Context, redis.XMessage) error) {
 	streamCtx := sh.streamClient.Context()
+	retryConsumerName := sh.consumerName + "-retry"
 	logger.WithStream(streamName, "consume").
 		Info(streamCtx, "Starting pending message retry mechanism (continuous)")
 
 	// Cleanup old retry tracking entries periodically
 	go sh.cleanupRetryTracker(ctx)
+
+	client := sh.streamClient.Client()
+	minIdleTime := 5 * time.Second // Only claim messages that have been pending for at least 5 seconds
 
 	for {
 		select {
@@ -282,136 +286,80 @@ func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamNam
 				Info(streamCtx, "Stopping pending message retry")
 			return
 		default:
-			// Read pending messages with blocking read
-			// Using "0" instead of ">" reads from pending entries
-			// Block: 5 seconds - will wait for pending messages or timeout
-			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
+			// Use XPENDING to find messages pending for the main consumer
+			// Then use XCLAIM to claim them to the retry consumer
+			// This avoids the issue where reading from "0" with the same consumer name
+			// would see messages currently being processed by the main consumer
+			pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+				Stream:   streamName,
 				Group:    sh.groupName,
-				Consumer: sh.consumerName,
-				Streams:  []string{streamName, "0"}, // "0" reads pending messages
-				Count:    10,                        // Process up to 10 pending messages at a time
-				Block:    5 * time.Second,           // Blocking - waits for pending messages or times out
-			})
+				Start:    "-",
+				End:      "+",
+				Count:    10,
+				Consumer: sh.consumerName, // Only look at messages pending for the main consumer
+			}).Result()
 
 			if err != nil {
 				if err == redis.Nil {
-					// No pending messages, continue loop to check again
+					// No pending messages, wait a bit before checking again
+					time.Sleep(1 * time.Second)
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Errorf(streamCtx, "Error reading pending messages: %v", err)
+					Errorf(streamCtx, "Error checking pending messages: %v", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// Process pending messages
-			retried := 0
-			acked := 0
-			skipped := 0
-			now := time.Now()
-			var earliestRetryTime *time.Time // Track earliest retry time among skipped messages
-
-			for _, stream := range streams {
-				for _, msg := range stream.Messages {
-					ackFn := func(ctx context.Context, msg redis.XMessage) error {
-						return sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
-					}
-
-					// Check if we should retry this message based on backoff
-					// This checks if enough time has passed since the last retry attempt
-					retryInfo, shouldRetry := sh.shouldRetryMessageWithInfo(streamCtx, msg.ID, now)
-					if !shouldRetry {
-						skipped++
-						// Track earliest retry time for optimization
-						if retryInfo != nil && retryInfo.retryCount > 0 {
-							backoffDuration := sh.calculateBackoffDuration(retryInfo.retryCount)
-							nextRetryTime := retryInfo.lastRetryAt.Add(backoffDuration)
-							if earliestRetryTime == nil || nextRetryTime.Before(*earliestRetryTime) {
-								earliestRetryTime = &nextRetryTime
-							}
-						}
-						continue
-					}
-
-					// Retry info already obtained from shouldRetryMessageWithInfo above
-					attemptTime := time.Now()
-
-					// Retry processing the message
-					err := internal.TraceEventProcessing(streamCtx, streamName, msg, handlerFn, ackFn)
-					if err != nil {
-						// Check if it's a database lock error
-						if isDatabaseLockError(err) {
-							// Database lock error - apply backoff to avoid contention
-							retryInfo.retryCount++
-							retryInfo.lastRetryAt = attemptTime // Set when failure occurred
-
-							const maxRetries = 10 // Maximum retries before giving up
-							if retryInfo.retryCount >= maxRetries {
-								// Max retries reached - ACK the message to stop retrying
-								if ackErr := ackFn(streamCtx, msg); ackErr != nil {
-									logger.WithStream(streamName, "consume").
-										Errorf(streamCtx, "Failed to ACK max-retry message %s: %v", msg.ID, ackErr)
-								} else {
-									acked++
-									sh.retryTracker.Delete(msg.ID) // Clean up tracking
-									logger.WithStream(streamName, "consume").
-										WarnWithFields(streamCtx, "Max retries reached for database lock error, ACKed message", map[string]interface{}{
-											"message_id":  msg.ID,
-											"retry_count": retryInfo.retryCount,
-											"error":       err.Error(),
-										})
-								}
-							} else {
-								// Will retry later with backoff - message stays in pending
-								// Log the backoff for the NEXT retry (retryCount + 1)
-								nextRetryBackoff := sh.calculateBackoffDuration(retryInfo.retryCount + 1)
-								logger.WithStream(streamName, "consume").
-									WarnWithFields(streamCtx, "Database lock error, will retry with backoff", map[string]interface{}{
-										"message_id":    msg.ID,
-										"retry_count":   retryInfo.retryCount,
-										"next_retry_in": nextRetryBackoff,
-										"error":         err.Error(),
-									})
-							}
-						} else {
-							// Other unexpected failure - reset retry count (might be transient)
-							sh.retryTracker.Delete(msg.ID)
-							// Still failing - log but don't ACK, will retry again later
-							logger.WithStream(streamName, "consume").
-								Warnf(streamCtx, "Pending message %s still failing: %v (will retry later)", msg.ID, err)
-						}
-					} else {
-						// Successfully processed - clear retry tracking
-						sh.retryTracker.Delete(msg.ID)
-						retried++
-						logger.WithStream(streamName, "consume").
-							Infof(streamCtx, "Successfully retried pending message %s", msg.ID)
-					}
+			// Filter messages that have been idle long enough
+			var messageIDs []string
+			for _, p := range pending {
+				if p.Idle >= minIdleTime {
+					messageIDs = append(messageIDs, p.ID)
 				}
 			}
 
-			if retried > 0 || acked > 0 || skipped > 0 {
-				logger.WithStream(streamName, "consume").
-					InfoWithFields(streamCtx, "Processed pending messages", map[string]interface{}{
-						"retried_count": retried,
-						"acked_count":   acked,
-						"skipped_count": skipped,
-					})
+			if len(messageIDs) == 0 {
+				// No messages to claim, wait a bit
+				time.Sleep(1 * time.Second)
+				continue
 			}
 
-			// If all messages were skipped and we have an earliest retry time, sleep until then
-			// This avoids constantly checking messages that are all in backoff
-			if skipped > 0 && retried == 0 && acked == 0 && earliestRetryTime != nil {
-				sleepDuration := time.Until(*earliestRetryTime)
-				// Cap sleep at 30 seconds to ensure we check for new messages periodically
-				maxSleep := 30 * time.Second
-				if sleepDuration > 0 && sleepDuration < maxSleep {
+			// Claim messages to the retry consumer
+			claimed, err := client.XClaim(ctx, &redis.XClaimArgs{
+				Stream:   streamName,
+				Group:    sh.groupName,
+				Consumer: retryConsumerName,
+				MinIdle:  minIdleTime,
+				Messages: messageIDs,
+			}).Result()
+
+			if err != nil {
+				logger.WithStream(streamName, "consume").
+					Errorf(streamCtx, "Error claiming messages: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			// Process claimed messages
+			for _, msg := range claimed {
+				ackFn := func(ctx context.Context, msg redis.XMessage) error {
+					return sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
+				}
+
+				err := internal.TraceEventProcessing(streamCtx, streamName, msg, handlerFn, ackFn)
+				if err != nil {
+					// Check if it's a database lock error
+					if isDatabaseLockError(err) {
+						logger.WithStream(streamName, "consume").
+							Warnf(streamCtx, "Database lock error on retry for message %s: %v (will retry later)", msg.ID, err)
+					} else {
+						logger.WithStream(streamName, "consume").
+							Errorf(streamCtx, "Error handling retry event %s: %v", msg.ID, err)
+					}
+				} else {
 					logger.WithStream(streamName, "consume").
-						Debugf(streamCtx, "All messages in backoff, sleeping for %v until earliest retry", sleepDuration)
-					time.Sleep(sleepDuration)
-				} else if sleepDuration > maxSleep {
-					// If earliest retry is more than 30s away, sleep for maxSleep
-					time.Sleep(maxSleep)
+						Infof(streamCtx, "Successfully retried pending message %s", msg.ID)
 				}
 			}
 		}

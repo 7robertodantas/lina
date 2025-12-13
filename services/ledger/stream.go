@@ -19,6 +19,14 @@ import (
 )
 
 const (
+	// Redis key prefix for tracking processed messages
+	// Format: processed:message:{stream_name}:{message_id}
+	processedMessageKeyPrefix = "processed:message"
+	// TTL for processed message keys
+	processedMessageTTL = 1 * time.Hour
+)
+
+const (
 	authorizationExpiredReason    = "AUTHORIZATION_EXPIRED"
 	lightningInvoiceSettledReason = "LIGHTNING_INVOICE_SETTLED"
 )
@@ -210,6 +218,26 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 
 // handleConsumptionEvent processes a DeviceConsumptionRecorded event
 func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.XMessage) error {
+	streamName := "event.consumption"
+
+	// Check idempotency FIRST using Redis: atomically check and mark message as being processed
+	// This prevents duplicate processing when the same message is picked up by both
+	// the main consumer (">") and pending retry ("0") before ACK completes
+	// Uses SET NX (set if not exists) for atomic check-and-set operation
+	alreadyProcessed, err := sh.isMessageProcessed(ctx, streamName, msg.ID)
+	if err != nil {
+		// Log error but continue processing (Redis check failure shouldn't block processing)
+		logger.WithStream(streamName, "consume").
+			Warnf(ctx, "Failed to check message idempotency in Redis: %v, continuing anyway", err)
+	} else if alreadyProcessed {
+		// Message already processed or being processed by another goroutine, skip (idempotency)
+		logger.WithStream(streamName, "consume").
+			DebugWithFields(ctx, "Message already processed, skipping (idempotency)", map[string]interface{}{
+				"message_id": msg.ID,
+			})
+		return nil
+	}
+
 	// Extract event JSON from message
 	eventJSON, ok := msg.Values["event"].(string)
 	if !ok {
@@ -225,7 +253,7 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 
 	// Check event type
 	if consumptionEvent.GetType() != consumptionpb.ConsumptionEventType_CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED {
-		logger.WithStream("event.consumption", "consume").
+		logger.WithStream(streamName, "consume").
 			Debugf(ctx, "Skipping event type: %v", consumptionEvent.GetType())
 		return nil
 	}
@@ -235,14 +263,77 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 		return fmt.Errorf("missing device_consumption_recorded payload")
 	}
 
-	logger.WithStream("event.consumption", "consume").
+	// Begin transaction for processing
+	tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	logger.WithStream(streamName, "consume").
 		WithDeviceID(recorded.GetDeviceId()).
 		InfoWithFields(ctx, "Consumption received", map[string]interface{}{
+			"message_id": msg.ID,
 			"debit_msat": recorded.GetDebitMsat(),
 		})
 
-	// Process the consumption: debit from authorization
-	return sh.processConsumption(ctx, recorded)
+	// Process the consumption: debit from authorization (uses the same transaction)
+	// Returns results needed for publishing events after commit
+	processResult, err := sh.processConsumptionWithTx(ctx, tx, recorded)
+	if err != nil {
+		return err
+	}
+
+	// Commit transaction (processing)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Mark message as processed in Redis after successful commit
+	// Use Redis SET with expiration to track processed messages
+	if err := sh.markMessageProcessed(ctx, streamName, msg.ID); err != nil {
+		// Log error but don't fail - Redis tracking is best-effort
+		logger.WithStream(streamName, "consume").
+			Warnf(ctx, "Failed to mark message as processed in Redis: %v", err)
+	}
+
+	// Publish events after successful commit
+	sh.publishConsumptionEvents(ctx, processResult)
+
+	return nil
+}
+
+// isMessageProcessed checks if a message has already been processed using Redis
+// Uses atomic SET NX to check and mark in one operation
+// Returns: (alreadyProcessed, error)
+// If alreadyProcessed is true, the message was already being processed by another goroutine
+func (sh *StreamHandler) isMessageProcessed(ctx context.Context, streamName, messageID string) (bool, error) {
+	key := fmt.Sprintf("%s:%s:%s", processedMessageKeyPrefix, streamName, messageID)
+	client := sh.streamClient.Client()
+
+	// Use SET NX (set if not exists) to atomically check and mark
+	// This prevents race conditions where two goroutines both check and both proceed
+	set, err := client.SetNX(ctx, key, "1", processedMessageTTL).Result()
+	if err != nil {
+		return false, err
+	}
+
+	// If set is false, the key already existed (message already processed or being processed)
+	return !set, nil
+}
+
+// markMessageProcessed marks a message as processed in Redis with TTL
+// Note: This is now called after successful processing, but the atomic check in
+// isMessageProcessed already prevents duplicates. This just ensures the key persists.
+func (sh *StreamHandler) markMessageProcessed(ctx context.Context, streamName, messageID string) error {
+	key := fmt.Sprintf("%s:%s:%s", processedMessageKeyPrefix, streamName, messageID)
+	client := sh.streamClient.Client()
+
+	// Use SET with expiration to automatically clean up old entries
+	// This extends/refreshes the TTL after successful processing
+	return client.Set(ctx, key, "1", processedMessageTTL).Err()
 }
 
 // ExpectedFailureError indicates an expected failure that should be ACKed
@@ -259,23 +350,55 @@ func (e *ExpectedFailureError) Unwrap() error {
 	return e.Err
 }
 
-// processConsumption debits from an authorization and updates its status
-func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consumptionpb.DeviceConsumptionRecordedEvent) error {
-	deviceID := recorded.GetDeviceId()
-	if deviceID == "" {
-		return fmt.Errorf("missing device_id in consumption event")
-	}
+// processConsumptionResult holds the results of processing a consumption for event publishing
+type processConsumptionResult struct {
+	authorizationID string
+	deviceID        string
+	actualDebit     int64
+	newRemaining    int64
+	newStatus       string
+	overflowEntry   *EntryResponse
+}
 
-	tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{})
+// processConsumption debits from an authorization and updates its status
+// This is a wrapper that creates its own transaction (for backward compatibility)
+// Note: This function is kept for compatibility but handleConsumptionEvent now uses processConsumptionWithTx directly
+func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consumptionpb.DeviceConsumptionRecordedEvent) error {
+	tx, err := sh.repo.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	result, err := sh.processConsumptionWithTx(ctx, tx, recorded)
+	if err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	// Publish events after successful commit
+	sh.publishConsumptionEvents(ctx, result)
+
+	return nil
+}
+
+// processConsumptionWithTx debits from an authorization using the provided transaction
+// Returns processConsumptionResult with information needed for event publishing
+func (sh *StreamHandler) processConsumptionWithTx(ctx context.Context, tx *sql.Tx, recorded *consumptionpb.DeviceConsumptionRecordedEvent) (*processConsumptionResult, error) {
+	deviceID := recorded.GetDeviceId()
+	if deviceID == "" {
+		return nil, fmt.Errorf("missing device_id in consumption event")
+	}
+
 	// Find active authorization for the device
 	// Order by created_at DESC to get the most recent active authorization
 	now := time.Now().Format(time.RFC3339)
-	authorizationID, remainingMsat, grantedMsat, overflowMsat, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
+	authorizationID, remainingMsat, _, _, _, _, err := sh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// No active authorization found - publish failed event
@@ -290,117 +413,110 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 					Error(ctx, "Failed to publish AuthorizationDebitFailed event", err)
 			}
 			// Return ExpectedFailureError so the consumer knows to ACK this message
-			return &ExpectedFailureError{Err: fmt.Errorf("no active authorization found for device %s", deviceID)}
+			return nil, &ExpectedFailureError{Err: fmt.Errorf("no active authorization found for device %s", deviceID)}
 		}
-		return fmt.Errorf("failed to get authorization: %w", err)
+		return nil, fmt.Errorf("failed to get authorization: %w", err)
 	}
 
-	debitAmount := recorded.GetDebitMsat()
-	if debitAmount <= 0 {
-		return fmt.Errorf("invalid debit amount: %d", debitAmount)
+	requestedDebit := recorded.GetDebitMsat()
+	if requestedDebit <= 0 {
+		return nil, fmt.Errorf("invalid debit amount: %d", requestedDebit)
 	}
 
-	// Check if we have enough remaining
-	if remainingMsat < debitAmount {
+	// Use atomic update to consume from authorization
+	// This reduces lock contention by doing calculation and update in database
+	// The ConsumeAuthorization function handles insufficient funds by consuming what's available
+	newRemaining, _, _, newStatus, err := sh.repo.ConsumeAuthorization(ctx, tx, authorizationID, requestedDebit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to consume authorization: %w", err)
+	}
+
+	// Calculate actual debit amount (may be less if insufficient remaining)
+	actualDebit := requestedDebit
+	if remainingMsat < requestedDebit {
+		actualDebit = remainingMsat
 		logger.WithDeviceID(deviceID).
 			WarnWithFields(ctx, "Insufficient remaining in authorization", map[string]interface{}{
 				"authorization_id": authorizationID,
 				"remaining_msat":   remainingMsat,
-				"requested_msat":   debitAmount,
+				"requested_msat":   requestedDebit,
+				"actual_debit":     actualDebit,
 			})
-		// Still debit what we can, but mark as completed
-		debitAmount = remainingMsat
-	}
-
-	// Update authorization: subtract debit amount
-	newRemaining := remainingMsat - debitAmount
-	newStatus := "active"
-	if newRemaining <= 0 {
-		newStatus = "completed"
-	}
-
-	currentConsumed := grantedMsat - remainingMsat
-	if currentConsumed < 0 {
-		currentConsumed = 0
-	}
-	newConsumed := currentConsumed + debitAmount
-	if newConsumed > grantedMsat {
-		newConsumed = grantedMsat
-	}
-
-	overflowDelta := recorded.GetDebitMsat() - debitAmount
-	if overflowDelta < 0 {
-		overflowDelta = 0
-	}
-	newOverflow := overflowMsat + overflowDelta
-
-	if err := sh.repo.UpdateAuthorization(ctx, tx, authorizationID, newRemaining, newConsumed, newOverflow, newStatus); err != nil {
-		return fmt.Errorf("failed to update authorization: %w", err)
 	}
 
 	// Create debit entry for overflow if any
+	// Calculate overflow delta (difference between requested and what was actually consumed from remaining)
+	overflowDelta := requestedDebit - actualDebit
 	var overflowEntry *EntryResponse
-	if newOverflow > 0 {
+	if overflowDelta > 0 {
 		entry, err := sh.repo.ApplyDebit(ctx, tx, DebitRequest{
 			DeviceID:      deviceID,
-			AmountMsat:    newOverflow,
+			AmountMsat:    overflowDelta,
 			Reason:        "AUTHORIZATION_OVERFLOW",
 			CorrelationID: authorizationID,
 			AllowNegative: true,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to apply overflow debit: %w", err)
+			return nil, fmt.Errorf("failed to apply overflow debit: %w", err)
 		}
 		overflowEntry = &entry
 	}
 
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
+	return &processConsumptionResult{
+		authorizationID: authorizationID,
+		deviceID:        deviceID,
+		actualDebit:     actualDebit,
+		newRemaining:    newRemaining,
+		newStatus:       newStatus,
+		overflowEntry:   overflowEntry,
+	}, nil
+}
 
-	// Publish events based on new status
+// publishConsumptionEvents publishes events after successful consumption processing
+func (sh *StreamHandler) publishConsumptionEvents(ctx context.Context, result *processConsumptionResult) {
 	timestamp := time.Now().Format(time.RFC3339)
 
 	// Publish AuthorizationDebited event
-	if err := sh.PublishAuthorizationDebited(ctx, authorizationID, deviceID, debitAmount, newRemaining, timestamp); err != nil {
-		logger.WithDeviceID(deviceID).
+	if err := sh.PublishAuthorizationDebited(ctx, result.authorizationID, result.deviceID, result.actualDebit, result.newRemaining, timestamp); err != nil {
+		logger.WithDeviceID(result.deviceID).
 			WithStream("event.ledger", "produce").
 			Error(ctx, "Failed to publish AuthorizationDebited event", err)
 	}
 
-	if newStatus == "completed" {
+	if result.newStatus == "completed" {
 		// Publish AuthorizationCompleted event
-		if err := sh.PublishAuthorizationCompleted(ctx, authorizationID, deviceID, timestamp); err != nil {
-			logger.WithDeviceID(deviceID).
+		if err := sh.PublishAuthorizationCompleted(ctx, result.authorizationID, result.deviceID, timestamp); err != nil {
+			logger.WithDeviceID(result.deviceID).
 				WithStream("event.ledger", "produce").
 				Error(ctx, "Failed to publish AuthorizationCompleted event", err)
 		}
 	}
 
 	// Publish DeviceDebited event for overflow if any
-	if overflowEntry != nil {
-		overflowTimestamp := time.Unix(overflowEntry.CreatedAt, 0).UTC().Format(time.RFC3339)
-		if err := sh.PublishDeviceDebited(ctx, deviceID, authorizationID, overflowEntry.AmountMsat, overflowEntry.BalanceAfter, overflowTimestamp); err != nil {
-			logger.WithDeviceID(deviceID).
+	if result.overflowEntry != nil {
+		overflowTimestamp := time.Unix(result.overflowEntry.CreatedAt, 0).UTC().Format(time.RFC3339)
+		if err := sh.PublishDeviceDebited(ctx, result.deviceID, result.authorizationID, result.overflowEntry.AmountMsat, result.overflowEntry.BalanceAfter, overflowTimestamp); err != nil {
+			logger.WithDeviceID(result.deviceID).
 				WithStream("event.ledger", "produce").
 				Error(ctx, "Failed to publish DeviceDebited event for overflow", err)
 		}
 	}
-
-	return nil
 }
 
 // startPendingMessageRetry continuously retries pending messages that failed to process
 // This handles transient failures (e.g., temporary DB issues) that might resolve later
-// Uses blocking reads to process pending messages immediately when they become available
+// Uses XPENDING + XCLAIM to claim messages from the main consumer that have been pending too long
 // handlerFn is the function to call for processing each message
 func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamName string, handlerFn func(context.Context, redis.XMessage) error) {
+	retryConsumerName := sh.consumerName + "-retry"
 	logger.WithStream(streamName, "consume").
 		Info(ctx, "Starting pending message retry mechanism (continuous)")
 
 	// Cleanup old retry tracking entries periodically
 	go sh.cleanupRetryTracker(ctx)
+
+	client := sh.streamClient.Client()
+	minIdleTime := 5 * time.Second // Only claim messages that have been pending for at least 5 seconds
 
 	for {
 		select {
@@ -409,157 +525,77 @@ func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamNam
 				Info(ctx, "Stopping pending message retry")
 			return
 		default:
-			// Read pending messages with blocking read
-			// Using "0" instead of ">" reads from pending entries
-			// Block: 5 seconds - will wait for pending messages or timeout
-			streams, err := sh.streamClient.XReadGroupWithSpan(ctx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
+			// Use XPENDING to find messages pending for the main consumer
+			// Then use XCLAIM to claim them to the retry consumer
+			// This avoids the issue where reading from "0" with the same consumer name
+			// would see messages currently being processed by the main consumer
+			pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+				Stream:   streamName,
 				Group:    sh.groupName,
-				Consumer: sh.consumerName,
-				Streams:  []string{streamName, "0"}, // "0" reads pending messages
-				Count:    10,                        // Process up to 10 pending messages at a time
-				Block:    5 * time.Second,           // Blocking - waits for pending messages or times out
-			})
+				Start:    "-",
+				End:      "+",
+				Count:    10,
+				Consumer: sh.consumerName, // Only look at messages pending for the main consumer
+			}).Result()
 
 			if err != nil {
 				if err == redis.Nil {
-					// No pending messages, continue loop to check again
+					// No pending messages, wait a bit before checking again
+					time.Sleep(1 * time.Second)
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Errorf(ctx, "Error reading pending messages: %v", err)
+					Errorf(ctx, "Error checking pending messages: %v", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// Process pending messages
-			retried := 0
-			acked := 0
-			skipped := 0
-			now := time.Now()
-			var earliestRetryTime *time.Time // Track earliest retry time among skipped messages
-
-			for _, stream := range streams {
-				for _, msg := range stream.Messages {
-					ackFn := func(ctx context.Context, msg redis.XMessage) error {
-						return sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
-					}
-
-					// Check if we should retry this message based on backoff
-					// This checks if enough time has passed since the last retry attempt
-					retryInfo, shouldRetry := sh.shouldRetryMessageWithInfo(ctx, msg.ID, now)
-					if !shouldRetry {
-						skipped++
-						// Track earliest retry time for optimization
-						if retryInfo != nil && retryInfo.retryCount > 0 {
-							backoffDuration := sh.calculateBackoffDuration(retryInfo.retryCount)
-							nextRetryTime := retryInfo.lastRetryAt.Add(backoffDuration)
-							if earliestRetryTime == nil || nextRetryTime.Before(*earliestRetryTime) {
-								earliestRetryTime = &nextRetryTime
-							}
-						}
-						continue
-					}
-
-					// Retry info already obtained from shouldRetryMessageWithInfo above
-					attemptTime := time.Now()
-
-					// Retry processing the message
-					err := internal.TraceEventProcessing(ctx, streamName, msg, handlerFn, ackFn)
-					if err != nil {
-						// Check if this is an expected failure
-						var expectedErr *ExpectedFailureError
-						if errors.As(err, &expectedErr) {
-							// Expected failure - apply backoff and retry limit
-							retryInfo.retryCount++
-							retryInfo.lastRetryAt = attemptTime // Set when failure occurred
-
-							const maxRetries = 10 // Maximum retries before giving up
-							if retryInfo.retryCount >= maxRetries {
-								// Max retries reached - ACK the message to stop retrying
-								if ackErr := ackFn(ctx, msg); ackErr != nil {
-									logger.WithStream(streamName, "consume").
-										Errorf(ctx, "Failed to ACK max-retry message %s: %v", msg.ID, ackErr)
-								} else {
-									acked++
-									sh.retryTracker.Delete(msg.ID) // Clean up tracking
-									logger.WithStream(streamName, "consume").
-										WarnWithFields(ctx, "Max retries reached for expected failure, ACKed message", map[string]interface{}{
-											"message_id":  msg.ID,
-											"retry_count": retryInfo.retryCount,
-											"error":       expectedErr.Error(),
-										})
-								}
-							} else {
-								// Will retry later with backoff - message stays in pending
-								// Log the backoff for the NEXT retry (retryCount + 1)
-								nextRetryBackoff := sh.calculateBackoffDuration(retryInfo.retryCount + 1)
-								logger.WithStream(streamName, "consume").
-									DebugWithFields(ctx, "Expected failure, will retry with backoff", map[string]interface{}{
-										"message_id":    msg.ID,
-										"retry_count":   retryInfo.retryCount,
-										"next_retry_in": nextRetryBackoff,
-										"error":         expectedErr.Error(),
-									})
-							}
-						} else {
-							// Unexpected failure - check if it's a database lock error
-							if isDatabaseLockError(err) {
-								// Database lock error - apply backoff to avoid contention
-								retryInfo.retryCount++
-								retryInfo.lastRetryAt = attemptTime // Set when failure occurred
-
-								// Will retry later with backoff - message stays in pending
-								// Log the backoff for the NEXT retry (retryCount + 1)
-								nextRetryBackoff := sh.calculateBackoffDuration(retryInfo.retryCount + 1)
-								logger.WithStream(streamName, "consume").
-									WarnWithFields(ctx, "Database lock error, will retry with backoff", map[string]interface{}{
-										"message_id":    msg.ID,
-										"retry_count":   retryInfo.retryCount,
-										"next_retry_in": nextRetryBackoff,
-										"error":         err.Error(),
-									})
-							} else {
-								// Other unexpected failure - reset retry count (might be transient)
-								sh.retryTracker.Delete(msg.ID)
-								// Still failing - log but don't ACK, will retry again later
-								logger.WithStream(streamName, "consume").
-									Warnf(ctx, "Pending message %s still failing: %v (will retry later)", msg.ID, err)
-							}
-						}
-					} else {
-						// Successfully processed - clear retry tracking
-						sh.retryTracker.Delete(msg.ID)
-						retried++
-						logger.WithStream(streamName, "consume").
-							Infof(ctx, "Successfully retried pending message %s", msg.ID)
-					}
+			// Filter messages that have been idle long enough
+			var messageIDs []string
+			for _, p := range pending {
+				if p.Idle >= minIdleTime {
+					messageIDs = append(messageIDs, p.ID)
 				}
 			}
 
-			if retried > 0 || acked > 0 || skipped > 0 {
-				logger.WithStream(streamName, "consume").
-					InfoWithFields(ctx, "Processed pending messages", map[string]interface{}{
-						"retried_count": retried,
-						"acked_count":   acked,
-						"skipped_count": skipped,
-					})
+			if len(messageIDs) == 0 {
+				// No messages to claim, wait a bit
+				time.Sleep(1 * time.Second)
+				continue
 			}
 
-			// If all messages were skipped and we have an earliest retry time, sleep until then
-			// This avoids constantly checking messages that are all in backoff
-			if skipped > 0 && retried == 0 && acked == 0 && earliestRetryTime != nil {
-				sleepDuration := time.Until(*earliestRetryTime)
-				// Cap sleep at 30 seconds to ensure we check for new messages periodically
-				maxSleep := 30 * time.Second
-				if sleepDuration > 0 && sleepDuration < maxSleep {
-					logger.WithStream(streamName, "consume").
-						Debugf(ctx, "All messages in backoff, sleeping for %v until earliest retry", sleepDuration)
-					time.Sleep(sleepDuration)
-				} else if sleepDuration > maxSleep {
-					// If earliest retry is more than 30s away, sleep for maxSleep
-					logger.WithStream(streamName, "consume").
-						Debugf(ctx, "Earliest retry is %v away, sleeping for %v", sleepDuration, maxSleep)
-					time.Sleep(maxSleep)
+			// Claim messages to the retry consumer
+			claimed, err := client.XClaim(ctx, &redis.XClaimArgs{
+				Stream:   streamName,
+				Group:    sh.groupName,
+				Consumer: retryConsumerName,
+				MinIdle:  minIdleTime,
+				Messages: messageIDs,
+			}).Result()
+
+			if err != nil {
+				logger.WithStream(streamName, "consume").
+					Errorf(ctx, "Error claiming messages: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			// Process claimed messages
+			for _, msg := range claimed {
+				ackFn := func(ctx context.Context, msg redis.XMessage) error {
+					return sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
+				}
+
+				err := internal.TraceEventProcessing(ctx, streamName, msg, handlerFn, ackFn)
+				if err != nil {
+					var expectedErr *ExpectedFailureError
+					if errors.As(err, &expectedErr) {
+						logger.WithStream(streamName, "consume").
+							Debugf(ctx, "Expected failure on retry, message will go back to pending: %v", expectedErr.Err)
+					} else {
+						logger.WithStream(streamName, "consume").
+							Errorf(ctx, "Error handling retry event %s: %v", msg.ID, err)
+					}
 				}
 			}
 		}
