@@ -321,7 +321,6 @@ func (d *DeviceContext) EnsureAuthorizationActive() {
 
 	// Check if authorization is expired
 	if expiresAt != nil && time.Now().After(*expiresAt) {
-		log.Printf("[%s] Authorization expired, requesting new one", d.DeviceID)
 		d.mu.Lock()
 		d.HasActiveAuthorization = false
 		d.mu.Unlock()
@@ -330,9 +329,18 @@ func (d *DeviceContext) EnsureAuthorizationActive() {
 
 	// Request authorization if needed
 	if !hasAuth && !pending {
-		log.Printf("[%s] No active authorization, requesting one", d.DeviceID)
+		if expiresAt != nil && time.Now().After(*expiresAt) {
+			log.Printf("[%s] Authorization expired, requesting new one", d.DeviceID)
+		} else {
+			log.Printf("[%s] No active authorization, requesting one", d.DeviceID)
+		}
 		if err := d.RequestAuthorization("MAINTAIN_ACTIVE"); err != nil {
 			log.Printf("[%s] Failed to request authorization: %v", d.DeviceID, err)
+		}
+	} else if !hasAuth && pending {
+		// Log when we skip requesting because one is already pending
+		if expiresAt != nil && time.Now().After(*expiresAt) {
+			log.Printf("[%s] Authorization expired, but request already pending", d.DeviceID)
 		}
 	}
 }
