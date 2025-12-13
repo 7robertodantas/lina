@@ -57,24 +57,11 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 			report_id TEXT PRIMARY KEY,
 			device_id TEXT NOT NULL,
 			debit_msat INTEGER NOT NULL,
+			fractional_msat REAL NOT NULL,
 			measure REAL NOT NULL,
 			price_per_unit_msat INTEGER NOT NULL,
 			unit TEXT NOT NULL,
 			timestamp TEXT NOT NULL,
-			created_at INTEGER NOT NULL
-		)`,
-		// Device accumulation ledger - append-only log of fractional msat accumulations per device
-		// Each entry represents either:
-		// - A new fractional amount added (type='add')
-		// - A consumption of accumulated amount when debited (type='consume')
-		// accumulated_balance_msat stores the running balance AFTER this entry for O(1) lookups
-		`CREATE TABLE IF NOT EXISTS device_accumulation_ledger (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			device_id TEXT NOT NULL,
-			report_id TEXT NOT NULL,
-			type TEXT NOT NULL CHECK(type IN ('add', 'consume')),
-			amount_msat REAL NOT NULL,
-			accumulated_balance_msat REAL NOT NULL,
 			created_at INTEGER NOT NULL
 		)`,
 		// Outbox table - minimal table for transactional outbox pattern
@@ -91,8 +78,6 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 		`CREATE INDEX IF NOT EXISTS idx_device_id ON consumption_records (device_id)`,
 		// Index for consumption_outbox
 		`CREATE INDEX IF NOT EXISTS idx_published_created ON consumption_outbox (published, created_at)`,
-		// Index for device_accumulation_ledger
-		`CREATE INDEX IF NOT EXISTS idx_device_ledger ON device_accumulation_ledger (device_id, created_at)`,
 	}
 
 	repo := &ConsumptionRepository{
@@ -145,7 +130,8 @@ func (r *ConsumptionRepository) CheckReportExists(ctx context.Context, tx *sql.T
 
 // CreateConsumptionRecord creates a new consumption record and outbox entry in a transaction
 // Only creates outbox entry if debitMsat >= 1 (actual debit will occur)
-func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx *sql.Tx, reportID, deviceID string, debitMsat int64, measure float64, pricePerUnitMsat int64, unit, timestamp string, traceContext map[string]string) error {
+// fractionalMsat is the fractional part that was rounded up (for auditability)
+func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx *sql.Tx, reportID, deviceID string, debitMsat int64, fractionalMsat float64, measure float64, pricePerUnitMsat int64, unit, timestamp string, traceContext map[string]string) error {
 	now := time.Now().Unix()
 
 	// Insert into consumption_records
@@ -155,13 +141,14 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 		attribute.String("report.id", reportID),
 		attribute.String("device.id", deviceID),
 		attribute.Int64("debit_msat", debitMsat),
+		attribute.Float64("fractional_msat", fractionalMsat),
 	}
 	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create consumption record", attrs, tx, `
 		INSERT INTO consumption_records (
-			report_id, device_id, debit_msat,
+			report_id, device_id, debit_msat, fractional_msat,
 			measure, price_per_unit_msat, unit, timestamp, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		reportID, deviceID, debitMsat,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		reportID, deviceID, debitMsat, fractionalMsat,
 		measure, pricePerUnitMsat, unit, timestamp, now,
 	)
 	if err != nil {
@@ -286,78 +273,6 @@ func (r *ConsumptionRepository) CleanupOutbox(ctx context.Context, retentionDays
 	return rowsAffected, nil
 }
 
-// GetDeviceAccumulatedAmount retrieves the current accumulated fractional msat for a device
-// by reading the most recent ledger entry's balance (O(1) lookup)
-func (r *ConsumptionRepository) GetDeviceAccumulatedAmount(ctx context.Context, tx *sql.Tx, deviceID string) (float64, error) {
-	query := `
-		SELECT accumulated_balance_msat
-		FROM device_accumulation_ledger
-		WHERE device_id = ?
-		ORDER BY id DESC
-		LIMIT 1`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "device_accumulation_ledger"),
-		attribute.String("device.id", deviceID),
-	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get device accumulated amount", attrs, tx, query, deviceID)
-
-	var balance sql.NullFloat64
-	err := row.Scan(&balance)
-
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// No entries yet for this device
-			return 0.0, nil
-		}
-		return 0.0, fmt.Errorf("failed to get device accumulated amount: %w", err)
-	}
-
-	if !balance.Valid {
-		return 0.0, nil
-	}
-
-	return balance.Float64, nil
-}
-
-// AppendAccumulationLedger appends an entry to the device accumulation ledger
-// type should be 'add' (adding fractional msat) or 'consume' (consuming accumulated amount)
-// newBalance is the running balance AFTER this entry (pre-calculated by caller)
-func (r *ConsumptionRepository) AppendAccumulationLedger(ctx context.Context, tx *sql.Tx, deviceID, reportID, entryType string, amountMsat, newBalance float64) error {
-	if entryType != "add" && entryType != "consume" {
-		return fmt.Errorf("invalid ledger entry type: %s (must be 'add' or 'consume')", entryType)
-	}
-
-	if amountMsat < 0 {
-		return fmt.Errorf("amount_msat cannot be negative: %f", amountMsat)
-	}
-
-	if newBalance < 0 {
-		return fmt.Errorf("accumulated_balance_msat cannot be negative: %f", newBalance)
-	}
-
-	now := time.Now().Unix()
-	query := `
-		INSERT INTO device_accumulation_ledger (device_id, report_id, type, amount_msat, accumulated_balance_msat, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "INSERT"),
-		attribute.String("db.table", "device_accumulation_ledger"),
-		attribute.String("device.id", deviceID),
-		attribute.String("report.id", reportID),
-		attribute.String("entry.type", entryType),
-		attribute.Float64("amount_msat", amountMsat),
-		attribute.Float64("new_balance_msat", newBalance),
-	}
-	if _, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] append accumulation ledger", attrs, tx, query,
-		deviceID, reportID, entryType, amountMsat, newBalance, now,
-	); err != nil {
-		return fmt.Errorf("failed to append to accumulation ledger: %w", err)
-	}
-
-	return nil
-}
-
 // BeginTx starts a new transaction
 func (r *ConsumptionRepository) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
 	return r.db.BeginTx(ctx, opts)
@@ -375,6 +290,7 @@ func (r *ConsumptionRepository) ListDeviceConsumptions(ctx context.Context, devi
 			c.report_id, 
 			c.device_id, 
 			c.debit_msat, 
+			c.fractional_msat,
 			c.measure, 
 			c.price_per_unit_msat, 
 			c.unit, 
@@ -411,6 +327,7 @@ func (r *ConsumptionRepository) ListDeviceConsumptions(ctx context.Context, devi
 			&resp.ReportID,
 			&resp.DeviceID,
 			&resp.DebitMsat,
+			&resp.FractionalMsat,
 			&resp.Measure,
 			&resp.PricePerUnitMsat,
 			&resp.Unit,
@@ -432,61 +349,6 @@ func (r *ConsumptionRepository) ListDeviceConsumptions(ctx context.Context, devi
 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating consumptions: %w", err)
-	}
-
-	return results, nil
-}
-
-// ListDeviceAccumulations retrieves accumulation ledger entries for a device
-func (r *ConsumptionRepository) ListDeviceAccumulations(ctx context.Context, deviceID string, limit int) ([]AccumulationResponse, error) {
-	query := `
-		SELECT 
-			id, 
-			device_id, 
-			report_id, 
-			type, 
-			amount_msat, 
-			accumulated_balance_msat, 
-			created_at
-		FROM device_accumulation_ledger
-		WHERE device_id = ?
-		ORDER BY created_at DESC
-		LIMIT ?
-	`
-
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "device_accumulation_ledger"),
-		attribute.String("device.id", deviceID),
-		attribute.Int("limit", limit),
-	}
-	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list device accumulations", attrs, r.db, query, deviceID, limit)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query device accumulations: %w", err)
-	}
-	defer rows.Close()
-
-	var results []AccumulationResponse
-	for rows.Next() {
-		var resp AccumulationResponse
-
-		if err := rows.Scan(
-			&resp.ID,
-			&resp.DeviceID,
-			&resp.ReportID,
-			&resp.Type,
-			&resp.AmountMsat,
-			&resp.AccumulatedBalanceMsat,
-			&resp.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("failed to scan accumulation: %w", err)
-		}
-
-		results = append(results, resp)
-	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating accumulations: %w", err)
 	}
 
 	return results, nil

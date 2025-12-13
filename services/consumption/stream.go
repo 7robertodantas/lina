@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -190,66 +191,34 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 		return nil
 	}
 
-	// Get current accumulated fractional msat for this device from ledger
-	accumulated, err := sh.repository.GetDeviceAccumulatedAmount(ctx, tx, deviceID)
-	if err != nil {
-		return err
-	}
-
 	logger.WithDeviceID(deviceID).
 		InfoWithFields(ctx, "Processing report", map[string]interface{}{
-			"report_id":        reportID,
-			"measure":          measure,
-			"unit":             usage.GetUnit(),
-			"price_msat":       pricePerUnitMsat,
-			"accumulated_msat": accumulated,
+			"report_id":  reportID,
+			"measure":    measure,
+			"unit":       usage.GetUnit(),
+			"price_msat": pricePerUnitMsat,
 		})
 
 	// Calculate exact debit amount from this usage report
 	usageDebitMsat := float64(pricePerUnitMsat) * measure
 
-	// Calculate total including previously accumulated amount
-	totalMsat := accumulated + usageDebitMsat
+	// Calculate fractional part (for auditability)
+	integerPart := int64(usageDebitMsat)
+	fractionalMsat := usageDebitMsat - float64(integerPart)
 
-	// Extract integer part for actual debit (we can only debit whole msats >= 1)
-	actualDebitMsat := int64(totalMsat)
-
-	// Remaining fractional part stays in accumulator
-	remainingFractionalMsat := totalMsat - float64(actualDebitMsat)
-
-	// Append to accumulation ledger:
-	// 1. Add the new usage amount
-	balanceAfterAdd := accumulated + usageDebitMsat
-	if err := sh.repository.AppendAccumulationLedger(ctx, tx, deviceID, reportID, "add", usageDebitMsat, balanceAfterAdd); err != nil {
-		return err
-	}
-	logger.WithDeviceID(deviceID).
-		DebugWithFields(ctx, "Ledger: added amount", map[string]interface{}{
-			"amount_msat":  usageDebitMsat,
-			"balance_msat": balanceAfterAdd,
-		})
-
-	// 2. If we can debit (actualDebitMsat >= 1), record consumption
-	if actualDebitMsat >= 1 {
-		// We're consuming the integer part, leaving the fractional remainder
-		consumedMsat := float64(actualDebitMsat)
-		balanceAfterConsume := balanceAfterAdd - consumedMsat
-		if err := sh.repository.AppendAccumulationLedger(ctx, tx, deviceID, reportID, "consume", consumedMsat, balanceAfterConsume); err != nil {
-			return err
-		}
-		logger.WithDeviceID(deviceID).
-			DebugWithFields(ctx, "Ledger: consumed amount", map[string]interface{}{
-				"consumed_msat": consumedMsat,
-				"balance_msat":  balanceAfterConsume,
-			})
+	// SIMPLIFIED: Round up to next integer - fractional amounts are treated as 1 msat
+	// No accumulation ledger needed - we round up and charge immediately
+	debitMsat := int64(math.Ceil(usageDebitMsat))
+	if debitMsat < 1 {
+		debitMsat = 1 // Minimum 1 msat
 	}
 
 	// Extract trace context to store in database
 	carrier := make(propagation.MapCarrier)
 	consumptionPropagator.Inject(ctx, carrier)
 
-	// Insert into consumption_records and optionally outbox (only if actualDebitMsat >= 1)
-	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, actualDebitMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
+	// Create consumption record with rounded-up amount and fractional part for auditability
+	err = sh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
 	if err != nil {
 		return err
 	}
@@ -259,44 +228,36 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	if actualDebitMsat >= 1 {
+	// Publish consumption event
+	// Extract parent context from stored trace context
+	publishCtx := ctx
+	if len(carrier) > 0 {
+		publishCarrier := propagation.MapCarrier(carrier)
+		publishCtx = consumptionPropagator.Extract(ctx, publishCarrier)
+	}
+
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Consumption recorded", map[string]interface{}{
+			"report_id":     reportID,
+			"usage_msat":    usageDebitMsat,
+			"debit_msat":    debitMsat,
+			"rounded_up_by": debitMsat - int64(usageDebitMsat),
+		})
+
+	if err := sh.publishConsumptionEvent(publishCtx, reportID, deviceID, debitMsat, usage.GetTimestamp()); err != nil {
 		logger.WithDeviceID(deviceID).
-			InfoWithFields(ctx, "Consumption recorded", map[string]interface{}{
-				"report_id":                 reportID,
-				"debit_msat":                actualDebitMsat,
-				"remaining_fractional_msat": remainingFractionalMsat,
-			})
-
-		// Try to publish immediately after successful commit
-		// Extract parent context from stored trace context
-		publishCtx := ctx
-		if len(carrier) > 0 {
-			publishCarrier := propagation.MapCarrier(carrier)
-			publishCtx = consumptionPropagator.Extract(ctx, publishCarrier)
-		}
-
-		if err := sh.publishConsumptionEvent(publishCtx, reportID, deviceID, actualDebitMsat, usage.GetTimestamp()); err != nil {
-			logger.WithDeviceID(deviceID).
-				Warnf(ctx, "Failed to publish immediately, triggering outbox retry: %v", err)
-			// Non-blocking send to trigger outbox processing
-			select {
-			case sh.outboxTrigger <- reportID:
-			default:
-			}
-		} else {
-			// Successfully published, mark as published in outbox
-			if err := sh.repository.MarkOutboxAsPublished(ctx, reportID); err != nil {
-				logger.WithDeviceID(deviceID).
-					Warnf(ctx, "Failed to mark as published: %v", err)
-			}
+			Warnf(ctx, "Failed to publish immediately, triggering outbox retry: %v", err)
+		// Non-blocking send to trigger outbox processing
+		select {
+		case sh.outboxTrigger <- reportID:
+		default:
 		}
 	} else {
-		logger.WithDeviceID(deviceID).
-			InfoWithFields(ctx, "Consumption accumulated", map[string]interface{}{
-				"report_id":              reportID,
-				"usage_msat":             usageDebitMsat,
-				"total_accumulated_msat": totalMsat,
-			})
+		// Successfully published, mark as published in outbox
+		if err := sh.repository.MarkOutboxAsPublished(ctx, reportID); err != nil {
+			logger.WithDeviceID(deviceID).
+				Warnf(ctx, "Failed to mark as published: %v", err)
+		}
 	}
 
 	return nil
