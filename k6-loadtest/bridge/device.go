@@ -317,6 +317,7 @@ func (d *DeviceContext) EnsureAuthorizationActive() {
 	hasAuth := d.HasActiveAuthorization
 	expiresAt := d.AuthorizationExpiresAt
 	pending := d.PendingAuthorization
+	lastRequestTime := d.LastAuthorizationRequest
 	d.mu.RUnlock()
 
 	// Check if authorization is expired
@@ -325,6 +326,20 @@ func (d *DeviceContext) EnsureAuthorizationActive() {
 		d.HasActiveAuthorization = false
 		d.mu.Unlock()
 		hasAuth = false
+	}
+
+	// Check if pending request has timed out (no response after 60 seconds)
+	// This handles cases where the request was lost, backend is stuck, or response was lost
+	const pendingTimeout = 60 * time.Second
+	if pending && time.Since(lastRequestTime) > pendingTimeout {
+		log.Printf("[%s] Authorization request pending for %v (timeout: %v), clearing pending flag and retrying",
+			d.DeviceID, time.Since(lastRequestTime), pendingTimeout)
+		d.mu.Lock()
+		d.PendingAuthorization = false
+		d.CurrentAuthorizationRequestID = "" // Clear request_id to generate new one
+		d.AuthorizationRetryCount = 0
+		d.mu.Unlock()
+		pending = false // Update local variable to allow retry below
 	}
 
 	// Request authorization if needed
@@ -340,7 +355,8 @@ func (d *DeviceContext) EnsureAuthorizationActive() {
 	} else if !hasAuth && pending {
 		// Log when we skip requesting because one is already pending
 		if expiresAt != nil && time.Now().After(*expiresAt) {
-			log.Printf("[%s] Authorization expired, but request already pending", d.DeviceID)
+			log.Printf("[%s] Authorization expired, but request already pending (pending for %v)",
+				d.DeviceID, time.Since(lastRequestTime))
 		}
 	}
 }
