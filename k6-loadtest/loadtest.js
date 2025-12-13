@@ -12,6 +12,9 @@ const devicePaused = new Counter('device_paused'); // Times device was paused (S
 const deviceConnected = new Counter('device_connected'); // Successful device connections
 const deviceConnectionFailed = new Counter('device_connection_failed'); // Failed device connections
 
+// Initialize metrics to 0 to ensure they appear in results even if never used
+// Note: k6 only shows metrics that have been used, but initializing helps with visibility
+
 // --- Configuration ---
 export const options = {
   setupTimeout: '10m', // Allow up to 10 minutes for setup (device pre-registration)
@@ -20,7 +23,7 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '1m', target: 5 },   // warmup
+        { duration: '2m', target: 100 },   // warmup
         // { duration: '1m', target: 5000 },
         // { duration: '1m', target: 10000 },
         // { duration: '1m', target: 20000 },
@@ -42,7 +45,7 @@ const BRIDGE_BASE_URL = __ENV.BRIDGE_BASE_URL || 'http://localhost:3000';
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // seconds between reports
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
-const MAX_VUS = parseInt(__ENV.MAX_VUS || '5');
+const MAX_VUS = parseInt(__ENV.MAX_VUS || '100');
 
 // --- Helpers ---
 function generateDeviceID(vuID) {
@@ -60,7 +63,7 @@ function getISOTimestamp() {
 
 // --- Setup ---
 export function setup() {
-  console.log(`Starting load test setup: pre-registering ${MAX_VUS} devices...`);
+  console.log(`Starting load test setup: pre-registering and connecting ${MAX_VUS} devices...`);
 
   // Step 1: Register all devices using batch endpoint
   const batchPayload = JSON.stringify({
@@ -102,12 +105,69 @@ export function setup() {
     };
   }
 
-  console.log(`Setup complete: ${registered} devices registered`);
+  // Step 2: Connect all devices to the bridge in batches (initialize: invoice + authorization)
+  console.log(`Connecting ${MAX_VUS} devices to bridge in batches...`);
+  const deviceIDs = [];
+  let totalConnected = 0;
+  let totalFailed = 0;
+
+  // Prepare all devices
+  for (let id = 1; id <= MAX_VUS; id++) {
+    const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
+    deviceIDs.push(deviceID);
+  }
+
+  // Connect devices in chunks for better performance
+  const chunkSize = 10; // Connect 10 devices at a time
+  for (let i = 0; i < deviceIDs.length; i += chunkSize) {
+    const chunk = deviceIDs.slice(i, i + chunkSize);
+    const devices = chunk.map(deviceID => ({
+      deviceId: deviceID,
+      secret: `${deviceID}_password`,
+    }));
+
+    const batchPayload = JSON.stringify({ devices });
+
+    const batchRes = http.post(
+      `${BRIDGE_BASE_URL}/devices/batch/connect`,
+      batchPayload,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: '120s', // Allow time for invoice + authorization
+      }
+    );
+
+    if (batchRes.status === 200) {
+      const result = JSON.parse(batchRes.body);
+      totalConnected += result.connected;
+      totalFailed += result.failed;
+
+      // Log progress
+      const progress = Math.min(i + chunkSize, deviceIDs.length);
+      console.log(`Connected batch: ${result.connected}/${chunk.length} (total: ${totalConnected}/${progress})`);
+
+      // Log any failures
+      if (result.failed > 0) {
+        const failedDevices = result.results.filter(r => !r.success);
+        failedDevices.forEach(f => {
+          console.error(`Failed to connect ${f.deviceId}: ${f.error}`);
+        });
+      }
+    } else {
+      // Entire batch failed
+      totalFailed += chunk.length;
+      console.error(`Batch connect failed: ${batchRes.status} - ${batchRes.body}`);
+    }
+  }
+
+  console.log(`Setup complete: ${registered} registered, ${totalConnected} connected, ${totalFailed} failed`);
   return {
     registered,
     skipped: 0,
-    failed: 0,
+    failed: totalFailed,
     total: MAX_VUS,
+    connected: totalConnected,
+    deviceIDs,
   };
 }
 
@@ -115,34 +175,8 @@ export function setup() {
 export default function () {
   const vuID = __VU;
   const deviceID = generateDeviceID(vuID);
-  const deviceSecret = `${deviceID}_password`;
 
-  // Connect device on first iteration only
-  if (__ITER === 0) {
-    console.log(`[VU ${vuID}] Connecting device ${deviceID}...`);
-    const connectPayload = JSON.stringify({
-      secret: deviceSecret,
-    });
-
-    const connectRes = http.post(
-      `${BRIDGE_BASE_URL}/devices/${deviceID}/connect`,
-      connectPayload,
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: '120s', // Allow time for invoice + authorization
-      }
-    );
-
-    if (connectRes.status === 200) {
-      deviceConnected.add(1);
-      console.log(`[VU ${vuID}] Device ${deviceID} connected and initialized`);
-    } else {
-      deviceConnectionFailed.add(1);
-      console.error(`[VU ${vuID}] Failed to connect ${deviceID}: ${connectRes.status} - ${connectRes.body}`);
-      // Continue anyway - might retry on next iteration or fail gracefully
-    }
-  }
-
+  // Device should already be connected from setup
   // k6 calls this function in a loop - each call sends one usage report
   // The bridge handles all the MQTT logic, authorization maintenance, etc.
 
@@ -167,18 +201,22 @@ export default function () {
   if (usageRes.status === 200) {
     usageReported.add(1);
     usageReportRate.add(1);
+    // Ensure device_paused metric is always visible (initialize to 0 if not paused)
+    devicePaused.add(0);
   } else if (usageRes.status === 423) {
     // 423 = Locked/Reporting disabled (STOP/PAUSE command received)
     // Device is paused, not failed - k6 will continue calling this function
     devicePaused.add(1);
   } else {
     usageReportFailed.add(1);
+    // Ensure device_paused metric is always visible (initialize to 0 if not paused)
+    devicePaused.add(0);
     console.error(`[VU ${vuID}] Usage report failed: ${usageRes.status} - ${usageRes.body}`);
   }
 
   // Sleep for a random interval between 0.1 and 1.0 seconds
   // This creates realistic, desynchronized load patterns
-  const sleepDuration = 0.1 + Math.random() * 0.9; // Random between 0.1 and 1.0 seconds
+  const sleepDuration = 0.1 + Math.random() * 0.5; // Random between 0.1 and 1.0 seconds
   sleep(sleepDuration);
 }
 

@@ -39,6 +39,7 @@ func main() {
 
 	// Use a single wildcard route and dispatch based on the action
 	r.POST("/devices/:deviceId/*action", handleDeviceRoute)
+	r.POST("/devices/batch/connect", handleBatchConnect)
 
 	fmt.Printf("MQTT Proxy running on :3000 (broker: %s)\n", mqttBroker)
 	log.Fatal(r.Run(":3000"))
@@ -124,6 +125,122 @@ func handleConnect(c *gin.Context) {
 	go maintainAuthorization(deviceCtx)
 
 	c.Status(200)
+}
+
+func handleBatchConnect(c *gin.Context) {
+	var req struct {
+		Devices []struct {
+			DeviceID string `json:"deviceId" binding:"required"`
+			Secret   string `json:"secret" binding:"required"`
+		} `json:"devices" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(req.Devices) == 0 {
+		c.JSON(400, gin.H{"error": "at least one device is required"})
+		return
+	}
+
+	type deviceResult struct {
+		DeviceID string `json:"deviceId"`
+		Success  bool   `json:"success"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	results := make([]deviceResult, len(req.Devices))
+	var wg sync.WaitGroup
+
+	// Connect all devices in parallel
+	for i, device := range req.Devices {
+		wg.Add(1)
+		go func(idx int, devID, secret string) {
+			defer wg.Done()
+
+			opts := mqtt.NewClientOptions()
+			opts.AddBroker(mqttBroker)
+			opts.SetClientID(devID)
+			opts.SetUsername(devID)
+			opts.SetPassword(secret)
+
+			// Configure TLS with certificate verification disabled
+			tlsConfig := &tls.Config{
+				InsecureSkipVerify: true,
+			}
+			opts.SetTLSConfig(tlsConfig)
+
+			client := mqtt.NewClient(opts)
+			if token := client.Connect(); token.Wait() && token.Error() != nil {
+				results[idx] = deviceResult{
+					DeviceID: devID,
+					Success:  false,
+					Error:    token.Error().Error(),
+				}
+				return
+			}
+
+			// Create device context
+			deviceCtx := NewDeviceContext(devID, secret, client)
+
+			// Subscribe to topics
+			if err := deviceCtx.SubscribeToTopics(); err != nil {
+				client.Disconnect(250)
+				results[idx] = deviceResult{
+					DeviceID: devID,
+					Success:  false,
+					Error:    fmt.Sprintf("failed to subscribe: %v", err),
+				}
+				return
+			}
+
+			// Initialize device (request invoice, wait, request authorization, wait)
+			if err := deviceCtx.Initialize(); err != nil {
+				client.Disconnect(250)
+				results[idx] = deviceResult{
+					DeviceID: devID,
+					Success:  false,
+					Error:    fmt.Sprintf("initialization failed: %v", err),
+				}
+				return
+			}
+
+			// Store session
+			sessMux.Lock()
+			sessions[devID] = &DeviceSession{
+				Client:    client,
+				DeviceCtx: deviceCtx,
+			}
+			sessMux.Unlock()
+
+			// Start background goroutine to maintain authorization
+			go maintainAuthorization(deviceCtx)
+
+			results[idx] = deviceResult{
+				DeviceID: devID,
+				Success:  true,
+			}
+		}(i, device.DeviceID, device.Secret)
+	}
+
+	// Wait for all connections to complete
+	wg.Wait()
+
+	// Count successes and failures
+	successCount := 0
+	for _, result := range results {
+		if result.Success {
+			successCount++
+		}
+	}
+
+	c.JSON(200, gin.H{
+		"connected": successCount,
+		"failed":    len(req.Devices) - successCount,
+		"total":     len(req.Devices),
+		"results":   results,
+	})
 }
 
 func handleDisconnect(c *gin.Context) {

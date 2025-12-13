@@ -22,15 +22,17 @@ type DeviceContext struct {
 	Client   mqtt.Client
 
 	// State
-	AvailableMsat          int64
-	HasActiveAuthorization bool
-	AuthorizationID        string
-	AuthorizationExpiresAt *time.Time
-	PendingAuthorization   bool
-	PendingInvoice         bool
-	Initialized            bool
-	ReportingEnabled       bool // Controls whether usage reports should be sent
-	InitComplete           chan bool
+	AvailableMsat                 int64
+	HasActiveAuthorization        bool
+	AuthorizationID               string
+	AuthorizationExpiresAt        *time.Time
+	PendingAuthorization          bool
+	CurrentAuthorizationRequestID string // Store request_id for idempotent retries
+	AuthorizationRetryCount       int    // Track retry attempts with same request_id
+	PendingInvoice                bool
+	Initialized                   bool
+	ReportingEnabled              bool // Controls whether usage reports should be sent
+	InitComplete                  chan bool
 
 	// Configuration
 	AuthorizeRequestMsat int64
@@ -112,7 +114,7 @@ func (d *DeviceContext) SubscribeToTopics() error {
 	}
 
 	// Small delay to ensure subscriptions are ready
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
@@ -120,75 +122,80 @@ func (d *DeviceContext) SubscribeToTopics() error {
 func (d *DeviceContext) Initialize() error {
 	log.Printf("[%s] Starting initialization", d.DeviceID)
 
-	// Wait a bit for initial balance message (if any)
-	time.Sleep(2 * time.Second)
+	// Wait briefly for initial balance message (if any) - reduced from 2s to 500ms
+	time.Sleep(100 * time.Millisecond)
 
-	// Step 1: Check if we need invoice
+	// Step 1: Check if we need invoice and request it if needed
 	d.mu.RLock()
 	needsInvoice := d.AvailableMsat < d.InvoiceAmountMsat
 	currentBalance := d.AvailableMsat
 	d.mu.RUnlock()
 
+	// Request invoice and authorization in parallel for speed
+	// Authorization will be rejected if no funds, but will succeed once invoice settles
+	invoiceRequested := false
 	if needsInvoice {
-		log.Printf("[%s] Requesting invoice (current balance: %d msat, need: %d msat)", d.DeviceID, currentBalance, d.InvoiceAmountMsat)
+		log.Printf("[%s] Requesting invoice (current balance: %d msat)", d.DeviceID, currentBalance)
 		if err := d.RequestInvoice("INITIALIZATION"); err != nil {
 			return fmt.Errorf("failed to request invoice: %v", err)
 		}
-
-		// Wait for invoice to be settled (with timeout)
-		// We wait for settlement because that's when funds are actually available
-		timeout := time.After(60 * time.Second)
-		ticker := time.NewTicker(100 * time.Millisecond)
-		defer ticker.Stop()
-
-	waitForInvoice:
-		for {
-			select {
-			case <-timeout:
-				// If timeout, check if we have balance anyway and proceed
-				d.mu.RLock()
-				hasBalance := d.AvailableMsat >= d.AuthorizeRequestMsat
-				d.mu.RUnlock()
-				if !hasBalance {
-					return fmt.Errorf("timeout waiting for invoice settlement")
-				}
-				log.Printf("[%s] Timeout waiting for invoice, but have balance (%d msat), proceeding", d.DeviceID, d.AvailableMsat)
-				break waitForInvoice
-			case <-ticker.C:
-				d.mu.RLock()
-				pending := d.PendingInvoice
-				hasBalance := d.AvailableMsat >= d.AuthorizeRequestMsat
-				d.mu.RUnlock()
-				// If invoice is no longer pending and we have sufficient balance, proceed
-				if !pending && hasBalance {
-					log.Printf("[%s] Invoice settled, balance available: %d msat", d.DeviceID, d.AvailableMsat)
-					break waitForInvoice
-				}
-			}
-		}
-	} else {
-		log.Printf("[%s] Sufficient balance already available: %d msat", d.DeviceID, currentBalance)
+		invoiceRequested = true
 	}
 
-	// Step 2: Request authorization
+	// Request authorization immediately (in parallel with invoice)
+	// If no funds, it will be rejected, but invoice handler will retry
 	log.Printf("[%s] Requesting authorization", d.DeviceID)
-	if err := d.RequestAuthorization("INITIALIZATION"); err != nil {
-		return fmt.Errorf("failed to request authorization: %v", err)
-	}
+	_ = d.RequestAuthorization("INITIALIZATION") // Ignore errors, will retry if needed
 
-	// Wait for authorization (with timeout)
-	timeout := time.After(30 * time.Second)
+	// Wait for both invoice settlement (if requested) and authorization
+	// Use a combined timeout and check both conditions
+	// Increased timeout to handle MQTT publish delays
+	timeout := time.After(90 * time.Second)
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+
+	lastRetryTime := time.Now()
+	retryInterval := 2 * time.Second // Retry authorization every 2 seconds if we have balance but no auth
 
 	for {
 		select {
 		case <-timeout:
-			return fmt.Errorf("timeout waiting for authorization")
+			d.mu.RLock()
+			hasAuth := d.HasActiveAuthorization
+			hasBalance := d.AvailableMsat >= d.AuthorizeRequestMsat
+			pendingInvoice := d.PendingInvoice
+			d.mu.RUnlock()
+
+			if !hasAuth {
+				if !hasBalance && pendingInvoice {
+					return fmt.Errorf("timeout waiting for invoice settlement and authorization")
+				} else if !hasBalance {
+					return fmt.Errorf("timeout waiting for authorization (insufficient balance)")
+				} else {
+					return fmt.Errorf("timeout waiting for authorization (have balance: %d msat)", d.AvailableMsat)
+				}
+			}
+			// Has auth, proceed
+			log.Printf("[%s] Authorization received (timeout check)", d.DeviceID)
+			d.mu.Lock()
+			d.Initialized = true
+			d.mu.Unlock()
+			log.Printf("[%s] Initialization complete", d.DeviceID)
+			return nil
+
 		case <-ticker.C:
 			d.mu.RLock()
 			hasAuth := d.HasActiveAuthorization
+			hasBalance := d.AvailableMsat >= d.AuthorizeRequestMsat
+			pendingInvoice := d.PendingInvoice
 			d.mu.RUnlock()
+
+			// If we requested invoice, wait for it to settle
+			if invoiceRequested && pendingInvoice && !hasBalance {
+				continue // Still waiting for invoice
+			}
+
+			// Check if we have authorization
 			if hasAuth {
 				log.Printf("[%s] Authorization received", d.DeviceID)
 				d.mu.Lock()
@@ -197,6 +204,18 @@ func (d *DeviceContext) Initialize() error {
 				log.Printf("[%s] Initialization complete", d.DeviceID)
 				return nil
 			}
+
+			// If we have balance but no auth, keep requesting authorization
+			// Backend is idempotent, so multiple requests are safe
+			if hasBalance && time.Since(lastRetryTime) >= retryInterval {
+				log.Printf("[%s] Have balance (%d msat) but no authorization, requesting authorization", d.DeviceID, d.AvailableMsat)
+				if err := d.RequestAuthorization("INITIALIZATION_RETRY"); err != nil {
+					log.Printf("[%s] Authorization request failed: %v", d.DeviceID, err)
+				}
+				lastRetryTime = time.Now()
+			}
+
+			// Continue waiting
 		}
 	}
 }
@@ -238,22 +257,31 @@ func (d *DeviceContext) RequestInvoice(reason string) error {
 }
 
 // RequestAuthorization sends an authorization request
+// Backend is idempotent, so multiple requests with same request_id are safe
+// After 3 retries with the same request_id, generate a new one
 func (d *DeviceContext) RequestAuthorization(reason string) error {
 	d.mu.Lock()
-	if d.PendingAuthorization {
-		d.mu.Unlock()
-		// Don't error if already pending - just log and return success
-		log.Printf("[%s] Authorization request skipped - already pending (reason: %s)", d.DeviceID, reason)
-		return nil
+	// Check if we should generate a new request_id (after 3 retries)
+	requestID := d.CurrentAuthorizationRequestID
+	if requestID == "" {
+		// First request - generate new request_id
+		requestID = generateRequestID()
+		d.CurrentAuthorizationRequestID = requestID
+		d.AuthorizationRetryCount = 0
+	} else if d.AuthorizationRetryCount >= 3 {
+		// After 3 retries, generate new request_id
+		log.Printf("[%s] Generating new request_id after 3 retries (old: %s)", d.DeviceID, requestID)
+		requestID = generateRequestID()
+		d.CurrentAuthorizationRequestID = requestID
+		d.AuthorizationRetryCount = 0
+	} else {
+		// Increment retry count when reusing existing request_id
+		d.AuthorizationRetryCount++
 	}
-	// No rate limiting - the pending check is sufficient to prevent duplicate requests
-	// Rate limiting was causing issues during initialization when invoice settlement
-	// triggers a request and then initialization immediately requests again
 	d.PendingAuthorization = true
 	d.LastAuthorizationRequest = time.Now()
 	d.mu.Unlock()
 
-	requestID := generateRequestID()
 	payload := map[string]interface{}{
 		"device_id":    d.DeviceID,
 		"request_id":   requestID,
@@ -339,6 +367,8 @@ func (d *DeviceContext) handleAuthorizeResponse(payload []byte) {
 
 	d.mu.Lock()
 	d.PendingAuthorization = false
+	d.CurrentAuthorizationRequestID = "" // Clear request_id after response
+	d.AuthorizationRetryCount = 0        // Reset retry count after response
 	d.mu.Unlock()
 
 	log.Printf("[%s] Authorization response: %s", d.DeviceID, msg.Status.String())
