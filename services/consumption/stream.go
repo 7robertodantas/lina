@@ -56,6 +56,9 @@ func (sh *StreamHandler) StartDeviceConsumer(ctx context.Context) error {
 	logger.WithStream(streamName, "consume").
 		Info(streamCtx, "Starting device event consumer")
 
+	// Start pending message retry mechanism in a separate goroutine
+	go sh.startPendingMessageRetry(ctx, streamName, sh.handleDeviceEvent)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -286,6 +289,77 @@ func (sh *StreamHandler) processUsageReport(ctx context.Context, usage *devicepb
 	}
 
 	return nil
+}
+
+// startPendingMessageRetry continuously retries pending messages that failed to process
+// This handles transient failures (e.g., temporary DB issues) that might resolve later
+// Uses blocking reads to process pending messages immediately when they become available
+// handlerFn is the function to call for processing each message
+func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamName string, handlerFn func(context.Context, redis.XMessage) error) {
+	streamCtx := sh.streamClient.Context()
+	logger.WithStream(streamName, "consume").
+		Info(streamCtx, "Starting pending message retry mechanism (continuous)")
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.WithStream(streamName, "consume").
+				Info(streamCtx, "Stopping pending message retry")
+			return
+		default:
+			// Read pending messages with blocking read
+			// Using "0" instead of ">" reads from pending entries
+			// Block: 5 seconds - will wait for pending messages or timeout
+			streams, err := sh.streamClient.XReadGroupWithSpan(streamCtx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
+				Group:    sh.groupName,
+				Consumer: sh.consumerName,
+				Streams:  []string{streamName, "0"}, // "0" reads pending messages
+				Count:    10,                        // Process up to 10 pending messages at a time
+				Block:    5 * time.Second,           // Blocking - waits for pending messages or times out
+			})
+
+			if err != nil {
+				if err == redis.Nil {
+					// No pending messages, continue loop to check again
+					continue
+				}
+				logger.WithStream(streamName, "consume").
+					Errorf(streamCtx, "Error reading pending messages: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			// Process pending messages
+			retried := 0
+			for _, stream := range streams {
+				for _, msg := range stream.Messages {
+					ackFn := func(ctx context.Context, msg redis.XMessage) error {
+						return sh.streamClient.XAckWithSpan(streamCtx, streamName, sh.groupName, msg.ID, &msg)
+					}
+
+					// Retry processing the message
+					err := internal.TraceEventProcessing(streamCtx, streamName, msg, handlerFn, ackFn)
+					if err != nil {
+						// Still failing - log but don't ACK, will retry again later
+						logger.WithStream(streamName, "consume").
+							Warnf(streamCtx, "Pending message %s still failing: %v (will retry later)", msg.ID, err)
+					} else {
+						// Successfully processed
+						retried++
+						logger.WithStream(streamName, "consume").
+							Infof(streamCtx, "Successfully retried pending message %s", msg.ID)
+					}
+				}
+			}
+
+			if retried > 0 {
+				logger.WithStream(streamName, "consume").
+					InfoWithFields(streamCtx, "Retried pending messages", map[string]interface{}{
+						"retried_count": retried,
+					})
+			}
+		}
+	}
 }
 
 // StartOutboxPublisher processes outbox on-demand + periodic safety check

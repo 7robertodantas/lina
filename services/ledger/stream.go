@@ -53,6 +53,9 @@ func (sh *StreamHandler) StartLightningConsumer(ctx context.Context) error {
 	logger.WithStream(streamName, "consume").
 		Info(ctx, "Starting lightning consumer")
 
+	// Start pending message retry mechanism in a separate goroutine
+	go sh.startPendingMessageRetry(ctx, streamName, sh.handleLightningEvent)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -135,6 +138,9 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 	logger.WithStream(streamName, "consume").
 		Info(ctx, "Starting consumption consumer")
 
+	// Start pending message retry mechanism in a separate goroutine
+	go sh.startPendingMessageRetry(ctx, streamName, sh.handleConsumptionEvent)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -170,9 +176,25 @@ func (sh *StreamHandler) StartConsumptionConsumer(ctx context.Context) error {
 					}
 
 					// TraceEventProcessing now handles both processing and ack within same span
-					if err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleConsumptionEvent, ackFn); err != nil {
-						logger.WithStream(streamName, "consume").
-							Errorf(ctx, "Error handling consumption event %s: %v", msg.ID, err)
+					err := internal.TraceEventProcessing(ctx, streamName, msg, sh.handleConsumptionEvent, ackFn)
+					if err != nil {
+						// Check if this is an expected failure that should be ACKed
+						var expectedErr *ExpectedFailureError
+						if errors.As(err, &expectedErr) {
+							// Expected failure - we've already handled it (published failed event)
+							// ACK the message so it doesn't accumulate in pending
+							if ackErr := ackFn(ctx, msg); ackErr != nil {
+								logger.WithStream(streamName, "consume").
+									Errorf(ctx, "Failed to ACK expected failure for message %s: %v", msg.ID, ackErr)
+							} else {
+								logger.WithStream(streamName, "consume").
+									Infof(ctx, "ACKed expected failure for message %s: %v", msg.ID, expectedErr.Err)
+							}
+						} else {
+							// Unexpected failure - don't ACK, let it go to pending for retry
+							logger.WithStream(streamName, "consume").
+								Errorf(ctx, "Error handling consumption event %s: %v", msg.ID, err)
+						}
 					}
 				}
 			}
@@ -217,6 +239,20 @@ func (sh *StreamHandler) handleConsumptionEvent(ctx context.Context, msg redis.X
 	return sh.processConsumption(ctx, recorded)
 }
 
+// ExpectedFailureError indicates an expected failure that should be ACKed
+// (e.g., no active authorization - we've already published a failed event)
+type ExpectedFailureError struct {
+	Err error
+}
+
+func (e *ExpectedFailureError) Error() string {
+	return e.Err.Error()
+}
+
+func (e *ExpectedFailureError) Unwrap() error {
+	return e.Err
+}
+
 // processConsumption debits from an authorization and updates its status
 func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consumptionpb.DeviceConsumptionRecordedEvent) error {
 	deviceID := recorded.GetDeviceId()
@@ -237,6 +273,8 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			// No active authorization found - publish failed event
+			// This is an expected failure scenario (device may not have authorization yet)
+			// We've handled it appropriately by publishing the failed event, so we should ACK the message
 			logger.WithDeviceID(deviceID).
 				Warn(ctx, "No active authorization found")
 			timestamp := time.Now().Format(time.RFC3339)
@@ -245,7 +283,8 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 					WithStream("event.ledger", "produce").
 					Error(ctx, "Failed to publish AuthorizationDebitFailed event", err)
 			}
-			return fmt.Errorf("no active authorization found for device %s", deviceID)
+			// Return ExpectedFailureError so the consumer knows to ACK this message
+			return &ExpectedFailureError{Err: fmt.Errorf("no active authorization found for device %s", deviceID)}
 		}
 		return fmt.Errorf("failed to get authorization: %w", err)
 	}
@@ -344,6 +383,90 @@ func (sh *StreamHandler) processConsumption(ctx context.Context, recorded *consu
 	}
 
 	return nil
+}
+
+// startPendingMessageRetry continuously retries pending messages that failed to process
+// This handles transient failures (e.g., temporary DB issues) that might resolve later
+// Uses blocking reads to process pending messages immediately when they become available
+// handlerFn is the function to call for processing each message
+func (sh *StreamHandler) startPendingMessageRetry(ctx context.Context, streamName string, handlerFn func(context.Context, redis.XMessage) error) {
+	logger.WithStream(streamName, "consume").
+		Info(ctx, "Starting pending message retry mechanism (continuous)")
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.WithStream(streamName, "consume").
+				Info(ctx, "Stopping pending message retry")
+			return
+		default:
+			// Read pending messages with blocking read
+			// Using "0" instead of ">" reads from pending entries
+			// Block: 5 seconds - will wait for pending messages or timeout
+			streams, err := sh.streamClient.XReadGroupWithSpan(ctx, streamName, sh.groupName, sh.consumerName, &redis.XReadGroupArgs{
+				Group:    sh.groupName,
+				Consumer: sh.consumerName,
+				Streams:  []string{streamName, "0"}, // "0" reads pending messages
+				Count:    10,                        // Process up to 10 pending messages at a time
+				Block:    5 * time.Second,           // Blocking - waits for pending messages or times out
+			})
+
+			if err != nil {
+				if err == redis.Nil {
+					// No pending messages, continue loop to check again
+					continue
+				}
+				logger.WithStream(streamName, "consume").
+					Errorf(ctx, "Error reading pending messages: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			// Process pending messages
+			retried := 0
+			for _, stream := range streams {
+				for _, msg := range stream.Messages {
+					ackFn := func(ctx context.Context, msg redis.XMessage) error {
+						return sh.streamClient.XAckWithSpan(ctx, streamName, sh.groupName, msg.ID, &msg)
+					}
+
+					// Retry processing the message
+					err := internal.TraceEventProcessing(ctx, streamName, msg, handlerFn, ackFn)
+					if err != nil {
+						// Check if this is an expected failure
+						var expectedErr *ExpectedFailureError
+						if errors.As(err, &expectedErr) {
+							// Expected failure - ACK it
+							if ackErr := ackFn(ctx, msg); ackErr != nil {
+								logger.WithStream(streamName, "consume").
+									Errorf(ctx, "Failed to ACK expected failure for pending message %s: %v", msg.ID, ackErr)
+							} else {
+								retried++
+								logger.WithStream(streamName, "consume").
+									Infof(ctx, "Retried and ACKed expected failure for pending message %s", msg.ID)
+							}
+						} else {
+							// Still failing - log but don't ACK, will retry again later
+							logger.WithStream(streamName, "consume").
+								Warnf(ctx, "Pending message %s still failing: %v (will retry later)", msg.ID, err)
+						}
+					} else {
+						// Successfully processed
+						retried++
+						logger.WithStream(streamName, "consume").
+							Infof(ctx, "Successfully retried pending message %s", msg.ID)
+					}
+				}
+			}
+
+			if retried > 0 {
+				logger.WithStream(streamName, "consume").
+					InfoWithFields(ctx, "Retried pending messages", map[string]interface{}{
+						"retried_count": retried,
+					})
+			}
+		}
+	}
 }
 
 // processInvoiceSettled credits the device balance when an invoice settles

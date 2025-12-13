@@ -289,6 +289,7 @@ func (r *DeviceRepository) BatchExists(ctx context.Context, idStart, idEnd, idPa
 }
 
 // CreateDevicesBatch inserts multiple devices in a single transaction
+// Uses INSERT OR IGNORE to skip devices that already exist
 func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*Device) error {
 	if len(devices) == 0 {
 		return nil
@@ -301,9 +302,9 @@ func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*De
 	}
 	defer tx.Rollback()
 
-	// Prepare statement for batch insert
+	// Prepare statement for batch insert with OR IGNORE to skip existing devices
 	query := `
-	INSERT INTO devices (
+	INSERT OR IGNORE INTO devices (
 		device_id, measurement_unit, unit_price_msat, reporting_strategy,
 		reporting_interval, heartbeat_interval, authorize_request_msat, timestamp
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
@@ -314,9 +315,10 @@ func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*De
 	}
 	defer stmt.Close()
 
-	// Insert all devices
+	// Insert all devices (existing ones will be ignored)
+	insertedCount := 0
 	for _, device := range devices {
-		_, err := stmt.ExecContext(ctx,
+		result, err := stmt.ExecContext(ctx,
 			device.DeviceID,
 			device.MeasurementUnit,
 			device.UnitPriceMsat,
@@ -327,7 +329,16 @@ func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*De
 			device.Timestamp.Format(time.RFC3339),
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert device %s: %w", device.DeviceID, err)
+			// Log error but continue with other devices
+			logger.WithDeviceID(device.DeviceID).
+				Errorf(ctx, "Failed to insert device (non-constraint error): %v", err)
+			continue
+		}
+
+		// Check if row was actually inserted (rowsAffected > 0)
+		rowsAffected, err := result.RowsAffected()
+		if err == nil && rowsAffected > 0 {
+			insertedCount++
 		}
 	}
 
@@ -336,7 +347,12 @@ func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*De
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	logger.Infof(ctx, "Batch created %d devices in database", len(devices))
+	skippedCount := len(devices) - insertedCount
+	if skippedCount > 0 {
+		logger.Infof(ctx, "Batch processed %d devices: %d inserted, %d skipped (already exist)", len(devices), insertedCount, skippedCount)
+	} else {
+		logger.Infof(ctx, "Batch created %d devices in database", insertedCount)
+	}
 	return nil
 }
 
