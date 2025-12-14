@@ -337,10 +337,11 @@ func (di *DeviceInterface) subscribeToTopics() {
 // It waits for subscriptions, sends heartbeat and authorization request, then calls OnConnected
 func (di *DeviceInterface) completeConnectionSequence() {
 	ctx := context.Background()
-	const timeout = 15 * time.Second
+	const connectionTimeout = 5 * time.Second
+	const subscriptionTimeout = 3 * time.Second
 
-	// Wait for MQTT connection to be established
-	if err := di.waitForConnection(timeout); err != nil {
+	// Wait for MQTT connection to be established (should be quick since we're already connecting)
+	if err := di.waitForConnection(connectionTimeout); err != nil {
 		if errors.Is(err, errConnectionTimeout) {
 			di.callbacks.OnLog("MQTT connection timeout during startup - reverting to OFFLINE", "error")
 			di.setDeviceStatus("OFFLINE")
@@ -352,12 +353,12 @@ func (di *DeviceInterface) completeConnectionSequence() {
 		return
 	}
 
-	// Wait for subscriptions to be ready
+	// Wait for subscriptions to be ready (should be quick after connection)
 	select {
 	case <-di.subscriptionsReady:
 		logger.WithDeviceID(di.deviceID).
 			Info(ctx, "Subscriptions ready, proceeding with startup sequence on device mqtt")
-	case <-time.After(10 * time.Second):
+	case <-time.After(subscriptionTimeout):
 		di.callbacks.OnLog("Timeout waiting for subscriptions - reverting to OFFLINE", "error")
 		di.setDeviceStatus("OFFLINE")
 		di.callbacks.OnDeviceStatus("OFFLINE")
@@ -381,9 +382,15 @@ func (di *DeviceInterface) completeConnectionSequence() {
 
 // waitForConnection waits for the MQTT connection to be established
 func (di *DeviceInterface) waitForConnection(timeout time.Duration) error {
+	// Check immediately first (connection might already be established)
+	if di.IsConnected() {
+		return nil
+	}
+
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	ticker := time.NewTicker(200 * time.Millisecond)
+	// Use a faster ticker for more responsive checking
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		if di.IsConnected() {

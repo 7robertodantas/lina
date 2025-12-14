@@ -29,9 +29,9 @@ export const options = {
   scenarios: {
     devices: {
       executor: 'ramping-vus',
-      startVUs: 0,
+      startVUs: MAX_VUS, // Start all VUs immediately after setup (devices are already connected)
       stages: [
-        { duration: '2m', target: 5 },   // warmup
+        { duration: '2m', target: MAX_VUS },   // warmup
         // { duration: '1m', target: 500 },   // warmup
         // { duration: '1m', target: 1000 },   // warmup
         // { duration: '1m', target: 5000 },
@@ -162,7 +162,8 @@ export function setup() {
     }
   }
 
-  console.log(`Setup complete: ${registered} registered, ${totalConnected} connected, ${totalFailed} failed`);
+  const setupEndTime = new Date().toISOString();
+  console.log(`[${setupEndTime}] Setup complete: ${registered} registered, ${totalConnected} connected, ${totalFailed} failed`);
   return {
     registered,
     skipped: 0,
@@ -170,6 +171,7 @@ export function setup() {
     total: MAX_VUS,
     connected: totalConnected,
     deviceIDs,
+    setupEndTime,
   };
 }
 
@@ -177,6 +179,12 @@ export function setup() {
 export default function () {
   const vuID = __VU;
   const deviceID = generateDeviceID(vuID);
+
+  // Log first iteration of each VU to see time difference from setup
+  if (__ITER === 0) {
+    const firstIterationTime = new Date().toISOString();
+    console.log(`[${firstIterationTime}] VU ${vuID} (${deviceID}) - First iteration started`);
+  }
 
   // Device should already be connected from setup
   // k6 calls this function in a loop - each call sends one usage report
