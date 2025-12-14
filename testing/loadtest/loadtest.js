@@ -1,7 +1,7 @@
 import { Counter, Rate } from 'k6/metrics';
 import http from 'k6/http';
 import { randomString } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
-import { sleep } from 'k6';
+import { sleep, check } from 'k6';
 
 // --- Metrics ---
 // Domain-specific metrics for device load testing
@@ -21,32 +21,36 @@ const HTTPDEVICE_BASE_URL = __ENV.HTTPDEVICE_BASE_URL || 'http://localhost:3002'
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // seconds between reports
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
-const MAX_VUS = parseInt(__ENV.MAX_VUS || '5');
+
+// Define load test stages
+const loadTestStages = [
+  { duration: '1m', target: 100 },   // warmup
+  { duration: '1m', target: 500 },  
+  { duration: '1m', target: 1000 },  // peak
+  { duration: '5m', target: 1000 },  // plateau at max
+  { duration: '5m', target: 0 },      // ramp down
+];
+
+// Calculate maximum VU count from stages (for setup - register all devices that will be used)
+const maxVUsFromStages = Math.max(...loadTestStages.map(stage => stage.target || 0));
+const VUsCount = maxVUsFromStages;
 
 // --- Configuration ---
 export const options = {
-  setupTimeout: '10m', // Allow up to 10 minutes for setup (device pre-registration)
+  setupTimeout: '5m', // Allow up to 5 minutes for setup (device batch registration)
   scenarios: {
     devices: {
       executor: 'ramping-vus',
-      startVUs: MAX_VUS, // Start all VUs immediately after setup (devices are already connected)
-      stages: [
-        { duration: '2m', target: MAX_VUS },   // warmup
-        // { duration: '1m', target: 500 },   // warmup
-        // { duration: '1m', target: 1000 },   // warmup
-        // { duration: '1m', target: 5000 },
-        // { duration: '1m', target: 10000 },
-        // { duration: '1m', target: 20000 },
-        // { duration: '1m', target: 40000 },
-        // { duration: '1m', target: 60000 },
-        // { duration: '1m', target: 80000 },
-        // { duration: '1m', target: 100000 }, // peak
-        // { duration: '5m', target: 100000 },// plateau at max
-        { duration: '1m', target: 0 },      // ramp down
-      ],
+      startVUs: 0,
+      stages: loadTestStages,
       gracefulRampDown: '2m',
+      tags: { type: 'loadtest' },
     },
   },
+  thresholds: {
+    'http_req_duration{type:loadtest}': ['p(99)<300', 'p(99.9)<500', 'max<1000'],
+  },
+  summaryTrendStats: ['min', 'med', 'avg', 'p(90)', 'p(95)', 'p(99)', 'p(99.9)', 'max'],
 };
 
 // --- Helpers ---
@@ -65,14 +69,24 @@ function getISOTimestamp() {
 
 // --- Setup ---
 export function setup() {
-  console.log(`Starting load test setup: pre-registering and connecting ${MAX_VUS} devices...`);
+  const vuSource = __ENV.VUS ? 'VUS environment variable' : `maximum from stages (${maxVUsFromStages})`;
+  console.log(`Starting load test setup: pre-registering ${VUsCount} devices in batch (${vuSource})...`);
 
-  // Step 1: Register all devices using batch endpoint
+  // Generate device IDs
+  const deviceIDs = [];
+  for (let id = 1; id <= VUsCount; id++) {
+    const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
+    deviceIDs.push(deviceID);
+  }
+
+  console.log(`Generated ${deviceIDs.length} device IDs (range: k6_device_000001 to k6_device_${String(VUsCount).padStart(6, '0')})`);
+
+  // Register all devices using batch endpoint
   const batchPayload = JSON.stringify({
     device_id_pattern: 'k6_device_{id}',
     device_secret_pattern: 'k6_device_{id}_password',
     id_start: 1,
-    id_end: MAX_VUS,
+    id_end: VUsCount,
     id_padding: 6,
     measurement_unit: 'kWh',
     unit_price_msat: UNIT_PRICE_MSAT,
@@ -83,6 +97,7 @@ export function setup() {
     timestamp: getISOTimestamp(),
   });
 
+  console.log(`Registering ${VUsCount} devices via batch endpoint...`);
   const batchRes = http.post(
     `${API_BASE_URL}${API_DEVICES_BATCH_ENDPOINT}`,
     batchPayload,
@@ -91,87 +106,25 @@ export function setup() {
 
   let registered = 0;
   if (batchRes.status === 204) {
-    console.log(`Batch already exists (204 No Content) - all ${MAX_VUS} devices are already registered`);
-    registered = MAX_VUS;
+    console.log(`Batch already exists (204 No Content) - all ${VUsCount} devices are already registered`);
+    registered = VUsCount;
   } else if (batchRes.status === 201) {
     const response = JSON.parse(batchRes.body);
-    console.log(`Batch creation successful: ${response.devices_created} devices created (range: ${response.id_range})`);
+    console.log(`Batch registration successful: ${response.devices_created} devices created (range: ${response.id_range})`);
     registered = response.devices_created;
   } else {
     console.error(`Failed to register device batch: ${batchRes.status} - ${batchRes.body}`);
     return {
+      deviceIDs: [],
       registered: 0,
-      skipped: 0,
-      failed: MAX_VUS,
-      total: MAX_VUS,
     };
   }
 
-  // Step 2: Connect all devices to httpdevice in batches (initialize: invoice + authorization)
-  console.log(`Connecting ${MAX_VUS} devices to httpdevice in batches...`);
-  const deviceIDs = [];
-  let totalConnected = 0;
-  let totalFailed = 0;
-
-  // Prepare all devices
-  for (let id = 1; id <= MAX_VUS; id++) {
-    const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
-    deviceIDs.push(deviceID);
-  }
-
-  // Connect devices in chunks for better performance
-  const chunkSize = 10; // Connect 10 devices at a time
-  for (let i = 0; i < deviceIDs.length; i += chunkSize) {
-    const chunk = deviceIDs.slice(i, i + chunkSize);
-    const devices = chunk.map(deviceID => ({
-      deviceId: deviceID,
-      secret: `${deviceID}_password`,
-    }));
-
-    const batchPayload = JSON.stringify({ devices });
-
-    const batchRes = http.post(
-      `${HTTPDEVICE_BASE_URL}/devices/batch/connect`,
-      batchPayload,
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: '120s', // Allow time for invoice + authorization
-      }
-    );
-
-    if (batchRes.status === 200) {
-      const result = JSON.parse(batchRes.body);
-      totalConnected += result.connected;
-      totalFailed += result.failed;
-
-      // Log progress
-      const progress = Math.min(i + chunkSize, deviceIDs.length);
-      console.log(`Connected batch: ${result.connected}/${chunk.length} (total: ${totalConnected}/${progress})`);
-
-      // Log any failures
-      if (result.failed > 0) {
-        const failedDevices = result.results.filter(r => !r.success);
-        failedDevices.forEach(f => {
-          console.error(`Failed to connect ${f.deviceId}: ${f.error}`);
-        });
-      }
-    } else {
-      // Entire batch failed
-      totalFailed += chunk.length;
-      console.error(`Batch connect failed: ${batchRes.status} - ${batchRes.body}`);
-    }
-  }
-
   const setupEndTime = new Date().toISOString();
-  console.log(`[${setupEndTime}] Setup complete: ${registered} registered, ${totalConnected} connected, ${totalFailed} failed`);
+  console.log(`[${setupEndTime}] Setup complete: ${registered}/${VUsCount} devices registered`);
   return {
-    registered,
-    skipped: 0,
-    failed: totalFailed,
-    total: MAX_VUS,
-    connected: totalConnected,
     deviceIDs,
-    setupEndTime,
+    registered,
   };
 }
 
@@ -180,13 +133,34 @@ export default function () {
   const vuID = __VU;
   const deviceID = generateDeviceID(vuID);
 
-  // Log first iteration of each VU to see time difference from setup
+  // Connect device on first iteration
   if (__ITER === 0) {
     const firstIterationTime = new Date().toISOString();
-    console.log(`[${firstIterationTime}] VU ${vuID} (${deviceID}) - First iteration started`);
+    console.log(`[${firstIterationTime}] VU ${vuID} (${deviceID}) - First iteration started, connecting...`);
+
+    const deviceSecret = `${deviceID}_password`;
+    const connectPayload = JSON.stringify({
+      secret: deviceSecret,
+    });
+
+    const connectRes = http.post(
+      `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/connect`,
+      connectPayload,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: '120s', // Allow time for invoice + authorization
+      }
+    );
+
+    if (check(connectRes, { 'Device connected': (r) => r.status === 200 })) {
+      deviceConnected.add(1);
+      console.log(`VU ${vuID} successfully connected device ${deviceID}`);
+    } else {
+      deviceConnectionFailed.add(1);
+      console.error(`VU ${vuID} failed to connect device ${deviceID}: ${connectRes.status} - ${connectRes.body}`);
+    }
   }
 
-  // Device should already be connected from setup
   // k6 calls this function in a loop - each call sends one usage report
   // The httpdevice handles all the MQTT logic, authorization maintenance, etc.
 
@@ -234,45 +208,60 @@ export default function () {
 
 // --- Teardown ---
 export function teardown(data) {
-  // console.log("Disconnecting all devices...");
+  console.log("Disconnecting all devices...");
 
-  // const deviceIDs = data?.deviceIDs || [];
-  // let disconnected = 0;
-  // let failed = 0;
+  let deviceIDs = data?.deviceIDs || [];
+  
+  // Fallback: generate device IDs if not in data
+  if (deviceIDs.length === 0) {
+    console.log("No device IDs in data, generating device IDs...");
+    for (let id = 1; id <= VUsCount; id++) {
+      const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
+      deviceIDs.push(deviceID);
+    }
+  }
 
-  // // Disconnect all devices
-  // if (deviceIDs.length > 0) {
-  //   // Disconnect sequentially
-  //   for (const deviceID of deviceIDs) {
-  //     const res = http.post(
-  //       `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/disconnect`,
-  //       '',
-  //       { timeout: '10s' }
-  //     );
-  //     if (res.status === 200) {
-  //       disconnected++;
-  //     } else if (res.status !== 404) { // 404 is OK, device wasn't connected
-  //       failed++;
-  //     }
-  //   }
-  // } else {
-  //   // Fallback: try to disconnect devices 1 to MAX_VUS
-  //   console.log("No device IDs in data, attempting to disconnect all devices...");
-  //   for (let id = 1; id <= MAX_VUS; id++) {
-  //     const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
-  //     const res = http.post(
-  //       `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/disconnect`,
-  //       '',
-  //       { timeout: '10s' }
-  //     );
-  //     if (res.status === 200) {
-  //       disconnected++;
-  //     } else if (res.status !== 404) { // 404 is OK, device wasn't connected
-  //       failed++;
-  //     }
-  //   }
-  // }
+  let totalDisconnected = 0;
+  let totalFailed = 0;
 
-  // console.log(`Teardown complete: ${disconnected} disconnected, ${failed} failed`);
+  // Disconnect devices in chunks for better performance
+  const chunkSize = 10; // Disconnect 10 devices at a time
+  for (let i = 0; i < deviceIDs.length; i += chunkSize) {
+    const chunk = deviceIDs.slice(i, i + chunkSize);
+    const batchPayload = JSON.stringify({ deviceIds: chunk });
+
+    const batchRes = http.post(
+      `${HTTPDEVICE_BASE_URL}/devices/batch/disconnect`,
+      batchPayload,
+      {
+        headers: { 'Content-Type': 'application/json' },
+        timeout: '30s',
+      }
+    );
+
+    if (batchRes.status === 200) {
+      const result = JSON.parse(batchRes.body);
+      totalDisconnected += result.disconnected;
+      totalFailed += result.failed;
+
+      // Log progress
+      const progress = Math.min(i + chunkSize, deviceIDs.length);
+      console.log(`Disconnected batch: ${result.disconnected}/${chunk.length} (total: ${totalDisconnected}/${progress})`);
+
+      // Log any failures
+      if (result.failed > 0) {
+        const failedDevices = result.results.filter(r => !r.success);
+        failedDevices.forEach(f => {
+          console.error(`Failed to disconnect ${f.deviceId}: ${f.error || 'unknown error'}`);
+        });
+      }
+    } else {
+      // Entire batch failed
+      totalFailed += chunk.length;
+      console.error(`Batch disconnect failed: ${batchRes.status} - ${batchRes.body}`);
+    }
+  }
+
+  console.log(`Teardown complete: ${totalDisconnected} disconnected, ${totalFailed} failed`);
   console.log("Load test finished.");
 }

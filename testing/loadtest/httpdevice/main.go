@@ -26,9 +26,11 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	// Register batch routes BEFORE wildcard route (order matters in Gin)
+	r.POST("/devices/batch/connect", handleBatchConnect)
+	r.POST("/devices/batch/disconnect", handleBatchDisconnect)
 	// Use a single wildcard route and dispatch based on the action
 	r.POST("/devices/:deviceId/*action", handleDeviceRoute)
-	r.POST("/devices/batch/connect", handleBatchConnect)
 
 	listenAddr := ":" + config.HTTPPort
 	fmt.Printf("HTTP Device service running on %s (broker: %s)\n", listenAddr, config.MQTTBroker)
@@ -259,6 +261,81 @@ func handleBatchConnect(c *gin.Context) {
 		"failed":    len(req.Devices) - successCount,
 		"total":     len(req.Devices),
 		"results":   results,
+	})
+}
+
+func handleBatchDisconnect(c *gin.Context) {
+	var req struct {
+		DeviceIDs []string `json:"deviceIds" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(req.DeviceIDs) == 0 {
+		c.JSON(400, gin.H{"error": "at least one device ID is required"})
+		return
+	}
+
+	type deviceResult struct {
+		DeviceID string `json:"deviceId"`
+		Success  bool   `json:"success"`
+		Error    string `json:"error,omitempty"`
+	}
+
+	results := make([]deviceResult, len(req.DeviceIDs))
+	var wg sync.WaitGroup
+
+	// Disconnect all devices in parallel
+	for i, deviceID := range req.DeviceIDs {
+		wg.Add(1)
+		go func(idx int, devID string) {
+			defer wg.Done()
+
+			sessMux.Lock()
+			session, exists := sessions[devID]
+			if exists {
+				delete(sessions, devID)
+			}
+			sessMux.Unlock()
+
+			if !exists {
+				// Device wasn't connected, count as success (idempotent)
+				results[idx] = deviceResult{
+					DeviceID: devID,
+					Success:  true,
+				}
+				return
+			}
+
+			// Disconnect device
+			session.Device.Disconnect()
+			log.Printf("[%s] Device disconnected", devID)
+
+			results[idx] = deviceResult{
+				DeviceID: devID,
+				Success:  true,
+			}
+		}(i, deviceID)
+	}
+
+	// Wait for all disconnections to complete
+	wg.Wait()
+
+	// Count successes and failures
+	successCount := 0
+	for _, result := range results {
+		if result.Success {
+			successCount++
+		}
+	}
+
+	c.JSON(200, gin.H{
+		"disconnected": successCount,
+		"failed":       len(req.DeviceIDs) - successCount,
+		"total":        len(req.DeviceIDs),
+		"results":      results,
 	})
 }
 

@@ -20,10 +20,10 @@ import (
 
 const (
 	// Redis key prefix for tracking processed messages
-	// Format: processed:message:{stream_name}:{message_id}
-	processedMessageKeyPrefix = "processed:message"
+	// Format: ledger:processed:message:{stream_name}:{message_id}
+	processedMessageKeyPrefix = "ledger:processed:message"
 	// TTL for processed message keys
-	processedMessageTTL = 1 * time.Hour
+	processedMessageTTL = 30 * time.Second
 )
 
 const (
