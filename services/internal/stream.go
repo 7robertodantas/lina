@@ -22,6 +22,8 @@ var (
 	propagator   = otel.GetTextMapPropagator() // Get the global propagator
 )
 
+var logger = NewLogger("internal")
+
 // StreamClient wraps the Redis client for stream operations
 type StreamClient struct {
 	client *redis.Client
@@ -51,6 +53,7 @@ func NewStreamClient(ctx context.Context, config StreamConfig) (*StreamClient, e
 		DB:       config.DB,
 	}
 
+	logger.Infof(ctx, "Connecting to Redis at %s", addr)
 	client := redis.NewClient(opts)
 
 	// Add OpenTelemetry metrics instrumentation
@@ -64,6 +67,8 @@ func NewStreamClient(ctx context.Context, config StreamConfig) (*StreamClient, e
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
+
+	logger.Info(ctx, "Connected to Redis")
 
 	return &StreamClient{
 		client: client,

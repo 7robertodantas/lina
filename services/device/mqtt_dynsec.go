@@ -11,16 +11,16 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
-// DynSecService handles dynamic security plugin operations via MQTT topic API
-type DynSecService struct {
+// MQTTDynSecService handles dynamic security plugin operations via MQTT topic API
+type MQTTDynSecService struct {
 	client      mqtt.Client
 	responseCh  chan map[string]interface{}
 	commandID   int
 	commandIDMu sync.Mutex
 }
 
-// NewDynSecService creates a new dynamic security service using MQTT topic API
-func NewDynSecService(ctx context.Context, cfg Config) (*DynSecService, error) {
+// NewMQTTDynSecService creates a new dynamic security service using MQTT topic API
+func NewMQTTDynSecService(ctx context.Context, cfg Config) (*MQTTDynSecService, error) {
 	broker := cfg.MQTTBroker
 	useTLS := cfg.MQTTUseTLS
 
@@ -61,7 +61,7 @@ func NewDynSecService(ctx context.Context, cfg Config) (*DynSecService, error) {
 		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", err)
 	}
 
-	service := &DynSecService{
+	service := &MQTTDynSecService{
 		client:     client,
 		responseCh: make(chan map[string]interface{}, 100), // Increased buffer to handle multiple concurrent commands
 		commandID:  1,
@@ -82,25 +82,25 @@ func NewDynSecService(ctx context.Context, cfg Config) (*DynSecService, error) {
 }
 
 // handleResponse handles responses from the dynamic security plugin
-func (d *DynSecService) handleResponse(client mqtt.Client, msg mqtt.Message) {
+func (mds *MQTTDynSecService) handleResponse(client mqtt.Client, msg mqtt.Message) {
 	var response map[string]interface{}
 	if err := json.Unmarshal(msg.Payload(), &response); err != nil {
 		logger.Error(context.Background(), "Failed to parse dynamic security response on southbound mqtt", err)
 		return
 	}
 	select {
-	case d.responseCh <- response:
+	case mds.responseCh <- response:
 	default:
 		logger.Warn(context.Background(), "Response channel full, dropping dynamic security response on southbound mqtt")
 	}
 }
 
 // getNextCommandID returns the next command ID
-func (d *DynSecService) getNextCommandID() int {
-	d.commandIDMu.Lock()
-	defer d.commandIDMu.Unlock()
-	id := d.commandID
-	d.commandID++
+func (mds *MQTTDynSecService) getNextCommandID() int {
+	mds.commandIDMu.Lock()
+	defer mds.commandIDMu.Unlock()
+	id := mds.commandID
+	mds.commandID++
 	return id
 }
 
@@ -115,8 +115,8 @@ func isAlreadyExistsError(errMsg string) bool {
 }
 
 // listRoles lists all roles using the dynamic security API
-func (d *DynSecService) listRoles(ctx context.Context) ([]string, error) {
-	commandID := d.getNextCommandID()
+func (mds *MQTTDynSecService) listRoles(ctx context.Context) ([]string, error) {
+	commandID := mds.getNextCommandID()
 	command := map[string]interface{}{
 		"command": commandID,
 		"commands": []map[string]interface{}{
@@ -129,7 +129,7 @@ func (d *DynSecService) listRoles(ctx context.Context) ([]string, error) {
 	// Drain old responses
 	for {
 		select {
-		case <-d.responseCh:
+		case <-mds.responseCh:
 		default:
 			goto sendCommand
 		}
@@ -146,7 +146,7 @@ sendCommand:
 		"command_id": commandID,
 	})
 
-	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	token := mds.client.Publish(controlTopic, 1, false, commandJSON)
 	if !token.WaitTimeout(5 * time.Second) {
 		return nil, fmt.Errorf("timeout publishing listRoles command")
 	}
@@ -156,7 +156,7 @@ sendCommand:
 
 	timeout := time.After(10 * time.Second)
 	select {
-	case response := <-d.responseCh:
+	case response := <-mds.responseCh:
 		// Parse response format: response["responses"][0]["data"]["roles"]
 		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
 			if respMap, ok := resp[0].(map[string]interface{}); ok {
@@ -195,8 +195,8 @@ sendCommand:
 }
 
 // listClients lists all clients using the dynamic security API
-func (d *DynSecService) listClients(ctx context.Context) ([]string, error) {
-	commandID := d.getNextCommandID()
+func (mds *MQTTDynSecService) listClients(ctx context.Context) ([]string, error) {
+	commandID := mds.getNextCommandID()
 	command := map[string]interface{}{
 		"command": commandID,
 		"commands": []map[string]interface{}{
@@ -209,7 +209,7 @@ func (d *DynSecService) listClients(ctx context.Context) ([]string, error) {
 	// Drain old responses
 	for {
 		select {
-		case <-d.responseCh:
+		case <-mds.responseCh:
 		default:
 			goto sendCommand
 		}
@@ -226,7 +226,7 @@ sendCommand:
 		"command_id": commandID,
 	})
 
-	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	token := mds.client.Publish(controlTopic, 1, false, commandJSON)
 	if !token.WaitTimeout(5 * time.Second) {
 		return nil, fmt.Errorf("timeout publishing listClients command")
 	}
@@ -236,7 +236,7 @@ sendCommand:
 
 	timeout := time.After(10 * time.Second)
 	select {
-	case response := <-d.responseCh:
+	case response := <-mds.responseCh:
 		// Parse response format: response["responses"][0]["data"]["clients"]
 		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
 			if respMap, ok := resp[0].(map[string]interface{}); ok {
@@ -276,8 +276,8 @@ sendCommand:
 }
 
 // roleExists checks if a role exists
-func (d *DynSecService) roleExists(ctx context.Context, roleName string) (bool, error) {
-	roles, err := d.listRoles(ctx)
+func (mds *MQTTDynSecService) roleExists(ctx context.Context, roleName string) (bool, error) {
+	roles, err := mds.listRoles(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -290,8 +290,8 @@ func (d *DynSecService) roleExists(ctx context.Context, roleName string) (bool, 
 }
 
 // clientExists checks if a client exists
-func (d *DynSecService) clientExists(ctx context.Context, username string) (bool, error) {
-	clients, err := d.listClients(ctx)
+func (mds *MQTTDynSecService) clientExists(ctx context.Context, username string) (bool, error) {
+	clients, err := mds.listClients(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -304,8 +304,8 @@ func (d *DynSecService) clientExists(ctx context.Context, username string) (bool
 }
 
 // listGroups lists all groups using the dynamic security API
-func (d *DynSecService) listGroups(ctx context.Context) ([]string, error) {
-	commandID := d.getNextCommandID()
+func (mds *MQTTDynSecService) listGroups(ctx context.Context) ([]string, error) {
+	commandID := mds.getNextCommandID()
 	command := map[string]interface{}{
 		"command": commandID,
 		"commands": []map[string]interface{}{
@@ -318,7 +318,7 @@ func (d *DynSecService) listGroups(ctx context.Context) ([]string, error) {
 	// Drain old responses
 	for {
 		select {
-		case <-d.responseCh:
+		case <-mds.responseCh:
 		default:
 			goto sendCommand
 		}
@@ -335,7 +335,7 @@ sendCommand:
 		"command_id": commandID,
 	})
 
-	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	token := mds.client.Publish(controlTopic, 1, false, commandJSON)
 	if !token.WaitTimeout(5 * time.Second) {
 		return nil, fmt.Errorf("timeout publishing listGroups command")
 	}
@@ -345,7 +345,7 @@ sendCommand:
 
 	timeout := time.After(10 * time.Second)
 	select {
-	case response := <-d.responseCh:
+	case response := <-mds.responseCh:
 		// Parse response format: response["responses"][0]["data"]["groups"]
 		if resp, ok := response["responses"].([]interface{}); ok && len(resp) > 0 {
 			if respMap, ok := resp[0].(map[string]interface{}); ok {
@@ -384,8 +384,8 @@ sendCommand:
 }
 
 // groupExists checks if a group exists
-func (d *DynSecService) groupExists(ctx context.Context, groupName string) (bool, error) {
-	groups, err := d.listGroups(ctx)
+func (mds *MQTTDynSecService) groupExists(ctx context.Context, groupName string) (bool, error) {
+	groups, err := mds.listGroups(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -398,8 +398,8 @@ func (d *DynSecService) groupExists(ctx context.Context, groupName string) (bool
 }
 
 // executeCommand sends a command to the dynamic security plugin and waits for response
-func (d *DynSecService) executeCommand(ctx context.Context, command map[string]interface{}) error {
-	commandID := d.getNextCommandID()
+func (mds *MQTTDynSecService) executeCommand(ctx context.Context, command map[string]interface{}) error {
+	commandID := mds.getNextCommandID()
 	command["command"] = commandID
 
 	// Drain any old responses from the channel to ensure we get the response for this command
@@ -407,7 +407,7 @@ func (d *DynSecService) executeCommand(ctx context.Context, command map[string]i
 	drained := 0
 	for {
 		select {
-		case <-d.responseCh:
+		case <-mds.responseCh:
 			drained++
 			if drained == 1 {
 				logger.Debugf(ctx, "Draining old responses before command %d on southbound mqtt", commandID)
@@ -437,7 +437,7 @@ sendCommand:
 		"command":    string(commandJSON),
 	})
 
-	token := d.client.Publish(controlTopic, 1, false, commandJSON)
+	token := mds.client.Publish(controlTopic, 1, false, commandJSON)
 	if !token.WaitTimeout(5 * time.Second) {
 		return fmt.Errorf("timeout publishing command")
 	}
@@ -452,7 +452,7 @@ sendCommand:
 	timeout := time.After(10 * time.Second)
 
 	select {
-	case response := <-d.responseCh:
+	case response := <-mds.responseCh:
 		// Log the full response for debugging
 		responseJSON, _ := json.MarshalIndent(response, "", "  ")
 		logger.DebugWithFields(ctx, "Received dynamic security response on southbound mqtt", map[string]interface{}{
@@ -517,7 +517,7 @@ sendCommand:
 
 // ProvisionDevice provisions a new device with dynamic security
 // It creates a role, client, and sets up ACL rules for the device
-func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password string) error {
+func (mds *MQTTDynSecService) ProvisionDevice(ctx context.Context, deviceID, password string) error {
 	logger.WithDeviceID(deviceID).
 		Info(ctx, "Provisioning device on southbound mqtt")
 
@@ -530,7 +530,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 		DebugWithFields(ctx, "Checking if role exists on southbound mqtt", map[string]interface{}{
 			"role_name": roleName,
 		})
-	roleExists, err := d.roleExists(ctx, roleName)
+	roleExists, err := mds.roleExists(ctx, roleName)
 	if err != nil {
 		logger.WithDeviceID(deviceID).
 			Warnf(ctx, "Failed to check if role exists on southbound mqtt, will attempt to create: %v", err)
@@ -550,7 +550,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, createRoleCmd); err != nil {
+		if err := mds.executeCommand(ctx, createRoleCmd); err != nil {
 			return fmt.Errorf("failed to create role %s: %w", roleName, err)
 		}
 		logger.WithDeviceID(deviceID).
@@ -596,7 +596,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 	addPublishACLCmd := map[string]interface{}{
 		"commands": publishACLCommands,
 	}
-	if err := d.executeCommand(ctx, addPublishACLCmd); err != nil {
+	if err := mds.executeCommand(ctx, addPublishACLCmd); err != nil {
 		logger.WithDeviceID(deviceID).
 			Error(ctx, "Failed to add publish ACLs on southbound mqtt", err)
 		return fmt.Errorf("failed to add publish ACLs: %w", err)
@@ -639,7 +639,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 	addSubscribeACLCmd := map[string]interface{}{
 		"commands": subscribeACLCommands,
 	}
-	if err := d.executeCommand(ctx, addSubscribeACLCmd); err != nil {
+	if err := mds.executeCommand(ctx, addSubscribeACLCmd); err != nil {
 		logger.WithDeviceID(deviceID).
 			Error(ctx, "Failed to add subscribe ACLs on southbound mqtt", err)
 		return fmt.Errorf("failed to add subscribe ACLs: %w", err)
@@ -650,7 +650,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 		DebugWithFields(ctx, "Checking if client exists on southbound mqtt", map[string]interface{}{
 			"client_username": clientUsername,
 		})
-	clientExists, err := d.clientExists(ctx, clientUsername)
+	clientExists, err := mds.clientExists(ctx, clientUsername)
 	if err != nil {
 		logger.WithDeviceID(deviceID).
 			Warnf(ctx, "Failed to check if client exists on southbound mqtt, will attempt to create: %v", err)
@@ -679,7 +679,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, createClientCmd); err != nil {
+		if err := mds.executeCommand(ctx, createClientCmd); err != nil {
 			return fmt.Errorf("failed to create client %s: %w", clientUsername, err)
 		}
 		logger.WithDeviceID(deviceID).
@@ -701,7 +701,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, setPasswordCmd); err != nil {
+		if err := mds.executeCommand(ctx, setPasswordCmd); err != nil {
 			logger.WithDeviceID(deviceID).
 				Warnf(ctx, "Failed to update password for device client on southbound mqtt: %v", err)
 			// Continue anyway - password might already be correct
@@ -723,7 +723,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, addRoleCmd); err != nil {
+		if err := mds.executeCommand(ctx, addRoleCmd); err != nil {
 			// "Internal error" from addClientRole usually means role or client doesn't exist, or role already assigned
 			errStr := err.Error()
 			if strings.Contains(strings.ToLower(errStr), "internal error") {
@@ -745,7 +745,7 @@ func (d *DynSecService) ProvisionDevice(ctx context.Context, deviceID, password 
 }
 
 // GetDeviceCredentials returns the credentials for a provisioned device
-func (d *DynSecService) GetDeviceCredentials(deviceID string) (username, password string) {
+func (mds *MQTTDynSecService) GetDeviceCredentials(deviceID string) (username, password string) {
 	username = deviceID
 	password = fmt.Sprintf("%s_password", deviceID)
 	return username, password
@@ -753,7 +753,7 @@ func (d *DynSecService) GetDeviceCredentials(deviceID string) (username, passwor
 
 // ProvisionDevicesBatch provisions multiple devices in batch using the shared devices_any_role
 // All devices are assigned to the same role which is created once during service initialization
-func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*Device, deviceSecrets map[string]string, groupName, roleName, deviceIDPattern string) error {
+func (mds *MQTTDynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*Device, deviceSecrets map[string]string, groupName, roleName, deviceIDPattern string) error {
 	if len(devices) == 0 {
 		return nil
 	}
@@ -796,7 +796,7 @@ func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*De
 		createClientsCmd := map[string]interface{}{
 			"commands": createClientCommands,
 		}
-		if err := d.executeCommand(ctx, createClientsCmd); err != nil {
+		if err := mds.executeCommand(ctx, createClientsCmd); err != nil {
 			logger.Warnf(ctx, "Some clients in chunk %d-%d may have failed to create (non-fatal if already exist): %v", chunkStart, chunkEnd-1, err)
 		} else {
 			logger.Infof(ctx, "Created client chunk %d-%d with role %s (%d clients)", chunkStart, chunkEnd-1, sharedRoleName, len(chunk))
@@ -813,7 +813,7 @@ func (d *DynSecService) ProvisionDevicesBatch(ctx context.Context, devices []*De
 }
 
 // ProvisionDeviceService provisions the device service user with ACLs to subscribe to device topics
-func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, password string) error {
+func (mds *MQTTDynSecService) ProvisionDeviceService(ctx context.Context, username, password string) error {
 	if username == "" {
 		return fmt.Errorf("device service username is required")
 	}
@@ -824,7 +824,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 	logger.DebugWithFields(ctx, "Checking if device service role exists on southbound mqtt", map[string]interface{}{
 		"role_name": roleName,
 	})
-	roleExists, err := d.roleExists(ctx, roleName)
+	roleExists, err := mds.roleExists(ctx, roleName)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to check if role exists on southbound mqtt, will attempt to create: %v", err)
 		roleExists = false
@@ -842,7 +842,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, createRoleCmd); err != nil {
+		if err := mds.executeCommand(ctx, createRoleCmd); err != nil {
 			return fmt.Errorf("failed to create device service role %s: %w", roleName, err)
 		}
 		logger.InfoWithFields(ctx, "Device service role created successfully on southbound mqtt", map[string]interface{}{
@@ -884,7 +884,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 	addSubscribeACLCmd := map[string]interface{}{
 		"commands": subscribeACLCommands,
 	}
-	if err := d.executeCommand(ctx, addSubscribeACLCmd); err != nil {
+	if err := mds.executeCommand(ctx, addSubscribeACLCmd); err != nil {
 		logger.Error(ctx, "Failed to add subscribe ACLs on southbound mqtt", err)
 		// Continue even if some ACLs already exist
 	}
@@ -921,7 +921,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 	addPublishACLCmd := map[string]interface{}{
 		"commands": publishACLCommands,
 	}
-	if err := d.executeCommand(ctx, addPublishACLCmd); err != nil {
+	if err := mds.executeCommand(ctx, addPublishACLCmd); err != nil {
 		logger.Error(ctx, "Failed to add publish ACLs on southbound mqtt", err)
 		// Continue even if some ACLs already exist
 	}
@@ -930,7 +930,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 	logger.InfoWithFields(ctx, "Checking if device service client exists on southbound mqtt", map[string]interface{}{
 		"username": username,
 	})
-	clientExists, err := d.clientExists(ctx, username)
+	clientExists, err := mds.clientExists(ctx, username)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to check if client exists on southbound mqtt, will attempt to create: %v", err)
 		clientExists = false
@@ -957,7 +957,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, createClientCmd); err != nil {
+		if err := mds.executeCommand(ctx, createClientCmd); err != nil {
 			return fmt.Errorf("failed to create device service client %s: %w", username, err)
 		}
 		logger.InfoWithFields(ctx, "Device service client created successfully with role on southbound mqtt", map[string]interface{}{
@@ -977,7 +977,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, setPasswordCmd); err != nil {
+		if err := mds.executeCommand(ctx, setPasswordCmd); err != nil {
 			logger.Warnf(ctx, "Failed to update password for device service client on southbound mqtt: %v", err)
 		}
 
@@ -996,7 +996,7 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, addRoleCmd); err != nil {
+		if err := mds.executeCommand(ctx, addRoleCmd); err != nil {
 			logger.Warnf(ctx, "Failed to assign role to device service client on southbound mqtt: %v (role might already be assigned)", err)
 			// Continue even if role is already assigned
 		}
@@ -1010,14 +1010,14 @@ func (d *DynSecService) ProvisionDeviceService(ctx context.Context, username, pa
 
 // ProvisionDevicesAnyRole provisions a shared role for all devices with ACLs to publish and subscribe
 // This role is used for batch-provisioned devices instead of creating a role per batch
-func (d *DynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
+func (mds *MQTTDynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
 	roleName := "devices_any_role"
 
 	// Step 1: Check if role exists, create if missing
 	logger.DebugWithFields(ctx, "Checking if devices any role exists on southbound mqtt", map[string]interface{}{
 		"role_name": roleName,
 	})
-	roleExists, err := d.roleExists(ctx, roleName)
+	roleExists, err := mds.roleExists(ctx, roleName)
 	if err != nil {
 		logger.Warnf(ctx, "Failed to check if role exists on southbound mqtt, will attempt to create: %v", err)
 		roleExists = false
@@ -1035,7 +1035,7 @@ func (d *DynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
 				},
 			},
 		}
-		if err := d.executeCommand(ctx, createRoleCmd); err != nil {
+		if err := mds.executeCommand(ctx, createRoleCmd); err != nil {
 			return fmt.Errorf("failed to create devices any role %s: %w", roleName, err)
 		}
 		logger.InfoWithFields(ctx, "Devices any role created successfully on southbound mqtt", map[string]interface{}{
@@ -1080,7 +1080,7 @@ func (d *DynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
 	addSubscribeACLCmd := map[string]interface{}{
 		"commands": subscribeACLCommands,
 	}
-	if err := d.executeCommand(ctx, addSubscribeACLCmd); err != nil {
+	if err := mds.executeCommand(ctx, addSubscribeACLCmd); err != nil {
 		logger.Error(ctx, "Failed to add subscribe ACLs on southbound mqtt", err)
 		// Continue even if some ACLs already exist
 	} else {
@@ -1119,7 +1119,7 @@ func (d *DynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
 	addPublishACLCmd := map[string]interface{}{
 		"commands": publishACLCommands,
 	}
-	if err := d.executeCommand(ctx, addPublishACLCmd); err != nil {
+	if err := mds.executeCommand(ctx, addPublishACLCmd); err != nil {
 		logger.Error(ctx, "Failed to add publish ACLs on southbound mqtt", err)
 		// Continue even if some ACLs already exist
 	} else {
@@ -1135,9 +1135,9 @@ func (d *DynSecService) ProvisionDevicesAnyRole(ctx context.Context) error {
 }
 
 // Disconnect disconnects from the MQTT broker
-func (d *DynSecService) Disconnect(ctx context.Context) {
-	if d.client != nil {
-		d.client.Disconnect(250)
+func (mds *MQTTDynSecService) Disconnect(ctx context.Context) {
+	if mds.client != nil {
+		mds.client.Disconnect(250)
 		logger.Info(ctx, "Disconnected from MQTT broker (dynamic security service) on southbound mqtt")
 	}
 }

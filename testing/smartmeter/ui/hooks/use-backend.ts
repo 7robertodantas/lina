@@ -90,8 +90,6 @@ export function useBackend() {
         console.log("[Backend] Message received:", message.type, message.payload)
         
         if (message.type === "state") {
-          console.log("[Backend] State update - appliances:", message.payload.appliances?.length)
-          console.log("[Backend] State update - deviceStatus:", message.payload.deviceStatus)
           setState(message.payload as DeviceState)
         }
       } catch (error) {

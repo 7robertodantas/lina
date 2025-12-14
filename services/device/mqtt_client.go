@@ -157,7 +157,7 @@ func ConnectMQTT(ctx context.Context, opts *MQTTConnectionOptions, cfg Config) (
 	}
 
 	brokerURL := fmt.Sprintf("%s://%s:%d", opts.Protocol, opts.Broker, opts.Port)
-	logger.Infof(ctx, "Attempting to connect to MQTT broker at %s on southbound mqtt", brokerURL)
+	logger.Infof(ctx, "Connecting to MQTT broker at %s", brokerURL)
 
 	client := mqtt.NewClient(mqttOpts)
 	token := client.Connect()
@@ -183,7 +183,7 @@ func ConnectMQTT(ctx context.Context, opts *MQTTConnectionOptions, cfg Config) (
 		return nil, fmt.Errorf("failed to connect to MQTT broker: %w", token.Error())
 	}
 
-	logger.Infof(ctx, "Connected to MQTT broker at %s on southbound mqtt", brokerURL)
+	logger.Info(ctx, "Connected to MQTT broker")
 	return client, nil
 }
 

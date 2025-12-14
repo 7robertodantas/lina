@@ -46,13 +46,13 @@ type CreateDevicesBatchRequest struct {
 type NorthboundInterface struct {
 	router     *gin.Engine
 	repo       *DeviceRepository
-	dynSec     *DynSecService
+	dynSec     *MQTTDynSecService
 	mqttClient *MQTTClient
 	server     *http.Server
 }
 
 // NewNorthboundInterface creates a new northbound interface
-func NewNorthboundInterface(repo *DeviceRepository, dynSec *DynSecService, mqttClient *MQTTClient) *NorthboundInterface {
+func NewNorthboundInterface(repo *DeviceRepository, dynSec *MQTTDynSecService, mqttClient *MQTTClient) *NorthboundInterface {
 	router := gin.Default()
 
 	// Add OpenTelemetry middleware for automatic route-based span naming

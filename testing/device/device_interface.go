@@ -252,6 +252,12 @@ func (di *DeviceInterface) Connect(deviceID, deviceSecret string) {
 		di.setMQTTStatus("disconnected")
 		di.callbacks.OnMQTTStatus("disconnected")
 		di.callbacks.OnLog("MQTT connection lost: "+err.Error(), "error")
+		// Set device status to OFFLINE when connection is lost
+		currentStatus := di.ctx.getDeviceStatus()
+		if currentStatus != "OFFLINE" {
+			di.setDeviceStatus("OFFLINE")
+			di.callbacks.OnDeviceStatus("OFFLINE")
+		}
 	})
 
 	di.mqttClient = mqtt.NewClient(opts)
@@ -269,6 +275,9 @@ func (di *DeviceInterface) Connect(deviceID, deviceSecret string) {
 		di.setMQTTStatus("error")
 		di.callbacks.OnMQTTStatus("error")
 		di.callbacks.OnLog("MQTT connection failed: "+errMsg, "error")
+		// Set device status back to OFFLINE when connection fails
+		di.setDeviceStatus("OFFLINE")
+		di.callbacks.OnDeviceStatus("OFFLINE")
 		if isMQTTAuthError(errMsg) {
 			di.callbacks.OnLog("MQTT credentials rejected: shutting down", "error")
 			// Call shutdown if callback supports it

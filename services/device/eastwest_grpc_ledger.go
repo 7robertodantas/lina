@@ -7,9 +7,7 @@ import (
 
 	internalpkg "github.com/robertodantas/lnpay/internal"
 	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
-	lightningpb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
 	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
@@ -20,12 +18,6 @@ import (
 // LedgerClient wraps the gRPC client for the ledger service
 type LedgerClient struct {
 	client ledgerpb.LedgerServiceClient
-	conn   *grpc.ClientConn
-}
-
-// LightningClient wraps the gRPC client for the lightning service
-type LightningClient struct {
-	client lightningpb.LightningServiceClient
 	conn   *grpc.ClientConn
 }
 
@@ -61,7 +53,7 @@ func NewLedgerClient(ctx context.Context, cfg Config) (*LedgerClient, error) {
 
 	client := ledgerpb.NewLedgerServiceClient(conn)
 
-	logger.Infof(ctx, "Connected to ledger gRPC service at %s via eastwest gRPC", addr)
+	logger.Info(ctx, "Connected to ledger service")
 
 	return &LedgerClient{
 		client: client,
@@ -71,14 +63,6 @@ func NewLedgerClient(ctx context.Context, cfg Config) (*LedgerClient, error) {
 
 // Close closes the gRPC connection
 func (c *LedgerClient) Close() error {
-	if c.conn != nil {
-		return c.conn.Close()
-	}
-	return nil
-}
-
-// Close closes the gRPC connection
-func (c *LightningClient) Close() error {
 	if c.conn != nil {
 		return c.conn.Close()
 	}
@@ -97,59 +81,6 @@ func (c *LedgerClient) CreateOrGetAuthorization(ctx context.Context, deviceID st
 	resp, err := c.client.CreateOrGetAuthorization(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create or get authorization: %w", err)
-	}
-
-	return resp, nil
-}
-
-// NewLightningClient creates a new gRPC client connection to the lightning service
-func NewLightningClient(ctx context.Context, cfg Config) (*LightningClient, error) {
-	host := cfg.LightningGRPCHost
-	port := cfg.LightningGRPCPort
-
-	addr := fmt.Sprintf("%s:%d", host, port)
-	logger.Infof(ctx, "Connecting to lightning gRPC service at %s via eastwest gRPC", addr)
-
-	keepaliveParams := keepalive.ClientParameters{
-		Time:                30 * time.Second,
-		Timeout:             10 * time.Second,
-		PermitWithoutStream: true,
-	}
-
-	conn, err := grpc.NewClient(
-		addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler(
-			otelgrpc.WithPropagators(otel.GetTextMapPropagator()),
-		)),
-		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("device-service")),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create lightning gRPC client: %w", err)
-	}
-
-	client := lightningpb.NewLightningServiceClient(conn)
-
-	logger.Infof(ctx, "Connected to lightning gRPC service at %s via eastwest gRPC", addr)
-
-	return &LightningClient{
-		client: client,
-		conn:   conn,
-	}, nil
-}
-
-// CreateInvoice requests a new invoice from the lightning service
-func (c *LightningClient) CreateInvoice(ctx context.Context, deviceID string, amountMsat int64, reason string) (*lightningmodel.CreateInvoiceResponse, error) {
-	req := &lightningmodel.CreateInvoiceRequest{
-		DeviceId:   deviceID,
-		AmountMsat: amountMsat,
-		Reason:     reason,
-	}
-
-	resp, err := c.client.CreateInvoice(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create invoice: %w", err)
 	}
 
 	return resp, nil

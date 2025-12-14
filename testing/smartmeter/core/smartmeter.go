@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"math/rand"
 	"sync"
@@ -15,16 +16,17 @@ import (
 // SmartMeter encapsulates all meter-specific logic and state
 // It implements DeviceCallback directly
 type SmartMeter struct {
-	mu                   sync.RWMutex
-	meterState           SmartMeterState
-	device               *devicepkg.DeviceInterface
-	powerUpdateTicker    *time.Ticker
-	usageTicker          *time.Ticker
-	savedApplianceStates map[string]bool
-	stateChangeCallback  func(DeviceState)
-	logCallback          func(message, logType string)
-	deviceSecret         string
-	deviceID             string
+	mu                       sync.RWMutex
+	meterState               SmartMeterState
+	device                   *devicepkg.DeviceInterface
+	powerUpdateTicker        *time.Ticker
+	usageTicker              *time.Ticker
+	currentReportingInterval int32 // Track current reporting interval to detect changes
+	savedApplianceStates     map[string]bool
+	stateChangeCallback      func(DeviceState)
+	logCallback              func(message, logType string)
+	deviceSecret             string
+	deviceID                 string
 }
 
 // NewSmartMeter creates a new smart meter instance
@@ -235,6 +237,20 @@ func (m *SmartMeter) GetDeviceConfig() *DeviceConfig {
 // OnConfigUpdated is called when device configuration is updated
 // DeviceInterface has already updated the DeviceContext and restarted heartbeat if needed
 func (m *SmartMeter) OnConfigUpdated(config *DeviceConfig) {
+	// Check if reporting interval changed and restart usage ticker if needed
+	m.mu.Lock()
+	oldInterval := m.currentReportingInterval
+	newInterval := int32(60) // Default
+	if config != nil && config.ReportingInterval > 0 {
+		newInterval = config.ReportingInterval
+	}
+	m.mu.Unlock()
+
+	// Restart usage ticker if interval changed
+	if oldInterval != newInterval {
+		m.restartUsageTicker(newInterval)
+	}
+
 	m.notifyStateChange()
 }
 
@@ -452,8 +468,14 @@ func (m *SmartMeter) startSimulationLoops() {
 
 	// Usage reporting ticker
 	config := m.device.GetDeviceConfig()
-	reportingInterval := time.Duration(config.ReportingInterval) * time.Second
-	m.usageTicker = time.NewTicker(reportingInterval)
+	// Use default of 60 seconds if config is nil (e.g., when MQTT connection fails)
+	defaultReportingInterval := int32(60)
+	reportingInterval := defaultReportingInterval
+	if config != nil && config.ReportingInterval > 0 {
+		reportingInterval = config.ReportingInterval
+	}
+	m.currentReportingInterval = reportingInterval
+	m.usageTicker = time.NewTicker(time.Duration(reportingInterval) * time.Second)
 	go func() {
 		for range m.usageTicker.C {
 			shouldReport, reportID, kWh := m.ReportUsage()
@@ -462,6 +484,35 @@ func (m *SmartMeter) startSimulationLoops() {
 			}
 		}
 	}()
+}
+
+// restartUsageTicker restarts the usage ticker with a new interval
+func (m *SmartMeter) restartUsageTicker(interval int32) {
+	m.mu.Lock()
+
+	// Stop existing ticker if any
+	if m.usageTicker != nil {
+		m.usageTicker.Stop()
+		m.usageTicker = nil
+	}
+
+	// Update stored interval
+	m.currentReportingInterval = interval
+
+	// Start with new interval
+	m.usageTicker = time.NewTicker(time.Duration(interval) * time.Second)
+	m.mu.Unlock()
+
+	go func() {
+		for range m.usageTicker.C {
+			shouldReport, reportID, kWh := m.ReportUsage()
+			if shouldReport {
+				m.device.PublishUsageReport(reportID, kWh)
+			}
+		}
+	}()
+
+	m.Log(fmt.Sprintf("Usage reporting interval updated to %d seconds", interval), "info")
 }
 
 // ReportUsage generates and reports usage (should be called by the usage ticker)
@@ -475,7 +526,12 @@ func (m *SmartMeter) ReportUsage() (shouldReport bool, reportID string, kWhConsu
 
 	// Calculate kWh consumed in this interval
 	config := m.device.GetDeviceConfig()
-	intervalSeconds := float64(config.ReportingInterval)
+	// Use default of 60 seconds if config is nil (e.g., when MQTT connection fails)
+	defaultReportingInterval := float64(60)
+	intervalSeconds := defaultReportingInterval
+	if config != nil && config.ReportingInterval > 0 {
+		intervalSeconds = float64(config.ReportingInterval)
+	}
 	kWhConsumed = (float64(m.meterState.InstantPower) / 1000.0) * (intervalSeconds / 3600.0)
 
 	// Update total consumption
