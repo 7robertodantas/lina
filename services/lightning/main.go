@@ -83,16 +83,16 @@ func main() {
 		"active_channels": info.NumActiveChannels,
 	})
 
-	// Create LND event stream
-	lndEventStream := NewLNDEventStream(lndClient)
-	if err := lndEventStream.Start(serviceCtx); err != nil {
-		logger.Fatal(serviceCtx, "Failed to start LND event stream", err)
-	}
-
 	// Create stream publisher (publishes to Redis)
-	streamPublisher := NewStreamPublisher(streamClient, lndEventStream)
-	if err := streamPublisher.Start(serviceCtx); err != nil {
-		logger.Fatal(serviceCtx, "Failed to start stream publisher", err)
+	streamPublisher := NewEastWestStreamPublisher(streamClient)
+
+	// Create LND stream handler
+	lndStreamHandler := NewLNDStreamHandler(streamPublisher)
+
+	// Create LND event stream interface
+	lndStreamInterface := NewLNDStreamInterface(lndClient, lndStreamHandler)
+	if err := lndStreamInterface.Start(serviceCtx); err != nil {
+		logger.Fatal(serviceCtx, "Failed to start LND event stream", err)
 	}
 
 	// Create northbound REST interface
@@ -115,7 +115,7 @@ func main() {
 		grpcServer := grpc.NewServer(
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		)
-		eastWestServer := NewEastWestServer(lndClient, streamPublisher)
+		eastWestServer := NewEastWestGRPCServer(lndClient, streamPublisher)
 		lightningpb.RegisterLightningServiceServer(grpcServer, eastWestServer)
 
 		logger.Infof(ctx, "gRPC server listening on %s via eastwest gRPC", cfg.GRPCAddr)

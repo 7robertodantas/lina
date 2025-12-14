@@ -13,21 +13,21 @@ import (
 
 const defaultInvoiceExpirySeconds = 3600
 
-// EastWestServer implements the LightningService gRPC server using the shared proto models.
-type EastWestServer struct {
+// EastWestGRPCServer implements the LightningService gRPC server using the shared proto models.
+type EastWestGRPCServer struct {
 	lightningservicepb.UnimplementedLightningServiceServer
 	lndClient       *LNDClient
-	streamPublisher *StreamPublisher
+	streamPublisher *EastWestStreamPublisher
 }
 
-func NewEastWestServer(lndClient *LNDClient, streamPublisher *StreamPublisher) *EastWestServer {
-	return &EastWestServer{
+func NewEastWestGRPCServer(lndClient *LNDClient, streamPublisher *EastWestStreamPublisher) *EastWestGRPCServer {
+	return &EastWestGRPCServer{
 		lndClient:       lndClient,
 		streamPublisher: streamPublisher,
 	}
 }
 
-func (s *EastWestServer) CreateInvoice(ctx context.Context, req *lightningmodel.CreateInvoiceRequest) (*lightningmodel.CreateInvoiceResponse, error) {
+func (s *EastWestGRPCServer) CreateInvoice(ctx context.Context, req *lightningmodel.CreateInvoiceRequest) (*lightningmodel.CreateInvoiceResponse, error) {
 	if req == nil {
 		return nil, status.Error(codes.InvalidArgument, "request is required")
 	}

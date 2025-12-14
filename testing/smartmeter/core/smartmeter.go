@@ -78,6 +78,18 @@ func (m *SmartMeter) SetLogCallback(cb func(message, logType string)) {
 	m.logCallback = cb
 }
 
+// ensureAppliancesInitialized ensures appliances are initialized (must be called with lock held)
+// Note: This method should NOT call m.Log() as it would cause a deadlock (Log also acquires the lock)
+func (m *SmartMeter) ensureAppliancesInitialized() {
+	if len(m.meterState.Appliances) == 0 {
+		appliances := make([]Appliance, len(defaultAppliances))
+		copy(appliances, defaultAppliances)
+		m.meterState.Appliances = appliances
+		// Use logger directly to avoid deadlock (can't call m.Log() while holding lock)
+		logger.Warn(context.Background(), "Appliances were empty, re-initialized from defaults")
+	}
+}
+
 // GetState returns a copy of the current state (combines DeviceContext and SmartMeterState)
 func (m *SmartMeter) GetState() DeviceState {
 	m.mu.RLock()
@@ -85,10 +97,17 @@ func (m *SmartMeter) GetState() DeviceState {
 
 	ctx := m.device.GetDeviceContext()
 
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
+
+	// Make a copy of appliances to avoid race conditions
+	appliancesCopy := make([]Appliance, len(m.meterState.Appliances))
+	copy(appliancesCopy, m.meterState.Appliances)
+
 	return DeviceState{
 		DeviceID:             ctx.DeviceID,
 		DeviceStatus:         ctx.DeviceStatus,
-		Appliances:           m.meterState.Appliances,
+		Appliances:           appliancesCopy,
 		Balance:              ctx.Balance,
 		Config:               ctx.Config,
 		TotalConsumption:     m.meterState.TotalConsumption,
@@ -122,11 +141,18 @@ func (m *SmartMeter) GetStateJSON() json.RawMessage {
 
 	ctx := m.device.GetDeviceContext()
 
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
+
+	// Make a copy of appliances to avoid race conditions
+	appliancesCopy := make([]Appliance, len(m.meterState.Appliances))
+	copy(appliancesCopy, m.meterState.Appliances)
+
 	// Convert to JSON-friendly format
 	stateJSON := DeviceStateJSON{
 		DeviceID:             ctx.DeviceID,
 		DeviceStatus:         ctx.DeviceStatus,
-		Appliances:           m.meterState.Appliances,
+		Appliances:           appliancesCopy,
 		Balance:              ctx.Balance,
 		Config:               ctx.Config,
 		TotalConsumption:     m.meterState.TotalConsumption,
@@ -137,7 +163,11 @@ func (m *SmartMeter) GetStateJSON() json.RawMessage {
 		MQTTStatus:           ctx.MQTTStatus,
 	}
 
-	data, _ := json.Marshal(&stateJSON)
+	data, err := json.Marshal(&stateJSON)
+	if err != nil {
+		logger.Error(context.Background(), "Error marshaling state to JSON", err)
+		return json.RawMessage("{}")
+	}
 	return data
 }
 
@@ -301,6 +331,10 @@ func (m *SmartMeter) RequestTopUp(amountMsat int64) {
 // SmartMeter decides to halt consumption (keep device online) rather than shutdown
 func (m *SmartMeter) OnControlStop(reason string) {
 	m.mu.Lock()
+
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
+
 	// Save current appliance states before turning them off (only if not already saved)
 	if len(m.savedApplianceStates) == 0 {
 		for i := range m.meterState.Appliances {
@@ -323,6 +357,10 @@ func (m *SmartMeter) OnControlStop(reason string) {
 // DeviceInterface has already set default reason if empty and updated device status
 func (m *SmartMeter) OnControlPause(reason string) {
 	m.mu.Lock()
+
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
+
 	if m.device.GetDeviceStatus() == "ONLINE" {
 		// Turn off all appliances but keep connection
 		// Note: DeviceInterface should handle status changes, but PAUSE is device-specific
@@ -342,6 +380,10 @@ func (m *SmartMeter) OnControlPause(reason string) {
 func (m *SmartMeter) OnControlResume() {
 	// Restore previous appliance states that were saved when consumption was halted
 	m.mu.Lock()
+
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
+
 	if len(m.savedApplianceStates) == 0 {
 		m.mu.Unlock()
 		return
@@ -369,6 +411,9 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) {
 		return
 	}
 
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
+
 	var appliance *Appliance
 	for i := range m.meterState.Appliances {
 		if m.meterState.Appliances[i].ID == applianceID {
@@ -379,6 +424,7 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) {
 
 	if appliance == nil {
 		m.mu.Unlock()
+		m.Log(fmt.Sprintf("Appliance not found: %s", applianceID), "error")
 		return
 	}
 
@@ -553,6 +599,9 @@ func (m *SmartMeter) updatePowerReadings() {
 		m.mu.Unlock()
 		return
 	}
+
+	// Ensure appliances are initialized
+	m.ensureAppliancesInitialized()
 
 	totalPower := 0
 	for i := range m.meterState.Appliances {

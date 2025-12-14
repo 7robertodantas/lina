@@ -77,13 +77,33 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 	// Send initial state
 	state := h.meter.GetState()
-	logger.InfoWithFields(ctx, "Sending initial state via northbound REST", map[string]interface{}{
-		"appliance_count": len(state.Appliances),
-		"device_status":   state.DeviceStatus,
-	})
+	stateJSON := h.meter.GetStateJSON()
+	
+	// Parse JSON to verify appliances are included
+	var verifyState map[string]interface{}
+	if err := json.Unmarshal(stateJSON, &verifyState); err == nil {
+		if appliances, ok := verifyState["appliances"].([]interface{}); ok {
+			logger.InfoWithFields(ctx, "Sending initial state via northbound REST", map[string]interface{}{
+				"appliance_count": len(state.Appliances),
+				"appliance_count_in_json": len(appliances),
+				"device_status":   state.DeviceStatus,
+			})
+		} else {
+			logger.WarnWithFields(ctx, "Appliances not found in JSON state", map[string]interface{}{
+				"appliance_count": len(state.Appliances),
+				"device_status":   state.DeviceStatus,
+			})
+		}
+	} else {
+		logger.InfoWithFields(ctx, "Sending initial state via northbound REST", map[string]interface{}{
+			"appliance_count": len(state.Appliances),
+			"device_status":   state.DeviceStatus,
+		})
+	}
+	
 	h.sendToClient(conn, WSMessage{
 		Type:    "state",
-		Payload: h.meter.GetStateJSON(),
+		Payload: stateJSON,
 	})
 
 	// Cleanup on disconnect
