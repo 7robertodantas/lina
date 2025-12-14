@@ -956,6 +956,18 @@ func (di *DeviceInterface) IsConnected() bool {
 func (di *DeviceInterface) Disconnect() {
 	// Stop heartbeat before disconnecting
 	di.stopHeartbeat()
+
+	// Update MQTT status and device status before disconnecting
+	di.setMQTTStatus("disconnected")
+	di.callbacks.OnMQTTStatus("disconnected")
+
+	// Set device status to OFFLINE
+	currentStatus := di.ctx.getDeviceStatus()
+	if currentStatus != "OFFLINE" {
+		di.setDeviceStatus("OFFLINE")
+		di.callbacks.OnDeviceStatus("OFFLINE")
+	}
+
 	if di.mqttClient != nil && di.mqttClient.IsConnected() {
 		di.mqttClient.Disconnect(250)
 	}
