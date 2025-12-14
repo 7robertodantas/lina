@@ -533,65 +533,6 @@ func (sh *StreamHandler) cleanupOutbox(ctx context.Context) error {
 	return nil
 }
 
-// shouldRetryMessageWithInfo checks if enough time has passed and returns retry info
-// This allows callers to get retry info without an extra lookup
-func (sh *StreamHandler) shouldRetryMessageWithInfo(ctx context.Context, messageID string, now time.Time) (*messageRetryInfo, bool) {
-	retryInfo := sh.getOrCreateRetryInfo(messageID)
-
-	// First retry - allow immediately
-	if retryInfo.retryCount == 0 {
-		return retryInfo, true
-	}
-
-	// Calculate backoff duration based on retry count
-	backoffDuration := sh.calculateBackoffDuration(retryInfo.retryCount)
-
-	// Check if enough time has passed since last retry
-	timeSinceLastRetry := now.Sub(retryInfo.lastRetryAt)
-	shouldRetry := timeSinceLastRetry >= backoffDuration
-
-	// Only log debug messages occasionally to reduce noise (when close to retry or randomly)
-	// This reduces log spam when many messages are in backoff
-	if !shouldRetry {
-		remaining := backoffDuration - timeSinceLastRetry
-		// Only log if remaining time is less than 5 seconds (close to retry) or randomly (1% chance)
-		if remaining < 5*time.Second || now.UnixNano()%100 == 0 {
-			logger.WithStream("", "consume").
-				Debugf(ctx, "Message %s backoff not expired yet, remaining: %v (retry_count=%d)",
-					messageID, remaining, retryInfo.retryCount)
-		}
-	}
-
-	return retryInfo, shouldRetry
-}
-
-// calculateBackoffDuration calculates the backoff duration based on retry count
-func (sh *StreamHandler) calculateBackoffDuration(retryCount int) time.Duration {
-	// Exponential backoff: 2^retryCount seconds, capped at 5 minutes
-	backoffSeconds := 1 << retryCount // 2^retryCount
-	if backoffSeconds > 300 {         // Cap at 5 minutes
-		backoffSeconds = 300
-	}
-	return time.Duration(backoffSeconds) * time.Second
-}
-
-// getOrCreateRetryInfo gets or creates retry info for a message
-func (sh *StreamHandler) getOrCreateRetryInfo(messageID string) *messageRetryInfo {
-	// Try to get existing info
-	if val, ok := sh.retryTracker.Load(messageID); ok {
-		return val.(*messageRetryInfo)
-	}
-
-	// Create new retry info
-	info := &messageRetryInfo{
-		retryCount:  0,
-		lastRetryAt: time.Now(),
-		firstSeenAt: time.Now(),
-	}
-	sh.retryTracker.Store(messageID, info)
-	return info
-}
-
 // isDatabaseLockError checks if an error is a SQLite database lock error
 func isDatabaseLockError(err error) bool {
 	if err == nil {
