@@ -3,18 +3,19 @@ package main
 import (
 	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
 	"google.golang.org/protobuf/encoding/protojson"
+	devicepkg "github.com/robertodantas/lnpay/testing/device"
 )
 
-// Proto type aliases (single source of truth)
-// DeviceConfig represents the device configuration payload received via MQTT
-type DeviceConfig = mqttmodel.ConfigPayload
-type BalanceMessage = mqttmodel.BalancePayload
-type AuthorizeResponse = mqttmodel.AuthorizationResponsePayload
-type InvoiceResponse = mqttmodel.InvoiceResponsePayload
-type HeartbeatMessage = mqttmodel.HeartbeatPayload
-type AuthorizeRequest = mqttmodel.AuthorizationRequestPayload
-type UsageReport = mqttmodel.UsagePayload
-type InvoiceRequest = mqttmodel.InvoiceRequestPayload
+// Proto type aliases (re-exported from device package for convenience)
+type DeviceConfig = devicepkg.DeviceConfig
+type BalanceMessage = devicepkg.BalanceMessage
+type AuthorizeResponse = devicepkg.AuthorizeResponse
+type InvoiceResponse = devicepkg.InvoiceResponse
+type HeartbeatMessage = devicepkg.HeartbeatMessage
+type AuthorizeRequest = devicepkg.AuthorizeRequest
+type UsageReport = devicepkg.UsageReport
+type InvoiceRequest = devicepkg.InvoiceRequest
+type Authorization = devicepkg.Authorization
 
 // Domain types used across the simulator
 type Appliance struct {
@@ -36,6 +37,7 @@ type SmartMeterState struct {
 }
 
 // DeviceState combines DeviceContext and SmartMeterState for UI/API
+// Extends devicepkg.DeviceState with smartmeter-specific fields
 type DeviceState struct {
 	DeviceID             string           `json:"deviceId"`
 	DeviceStatus         string           `json:"deviceStatus"`
@@ -48,17 +50,6 @@ type DeviceState struct {
 	CurrentAuthorization *Authorization   `json:"currentAuthorization"`
 	Logs                 []LogEntry       `json:"logs"`
 	MQTTStatus           string           `json:"mqttStatus"`
-}
-
-type Authorization struct {
-	AuthorizationID string `json:"authorization_id"`
-	RequestID       string `json:"request_id"`
-	GrantedMsat     int64  `json:"granted_msat"`
-	RemainingMsat   int64  `json:"remaining_msat"`
-	IssuedAt        string `json:"issued_at"`
-	ExpiresAt       string `json:"expires_at"`
-	Status          string `json:"status"`
-	Reason          string `json:"reason"`
 }
 
 type LogEntry struct {

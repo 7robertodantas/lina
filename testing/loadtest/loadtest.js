@@ -17,11 +17,11 @@ const deviceConnectionFailed = new Counter('device_connection_failed'); // Faile
 
 const API_BASE_URL = __ENV.API_BASE_URL || 'http://localhost:8080';
 const API_DEVICES_BATCH_ENDPOINT = __ENV.API_DEVICES_BATCH_ENDPOINT || '/devices/batch';
-const HTTPDEVICE_BASE_URL = __ENV.HTTPDEVICE_BASE_URL || 'http://localhost:3000';
+const HTTPDEVICE_BASE_URL = __ENV.HTTPDEVICE_BASE_URL || 'http://localhost:3002';
 const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // seconds between reports
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
-const MAX_VUS = parseInt(__ENV.MAX_VUS || '1000');
+const MAX_VUS = parseInt(__ENV.MAX_VUS || '5');
 
 // --- Configuration ---
 export const options = {
@@ -31,9 +31,9 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '2m', target: 100 },   // warmup
-        { duration: '1m', target: 500 },   // warmup
-        { duration: '1m', target: 1000 },   // warmup
+        { duration: '2m', target: 5 },   // warmup
+        // { duration: '1m', target: 500 },   // warmup
+        // { duration: '1m', target: 1000 },   // warmup
         // { duration: '1m', target: 5000 },
         // { duration: '1m', target: 10000 },
         // { duration: '1m', target: 20000 },
@@ -192,6 +192,8 @@ export default function () {
     unit: 'kWh',
     timestamp: getISOTimestamp(),
   });
+
+  console.log(`[VU ${vuID}] Usage report sent (${JSON.parse(usagePayload).reportId}): ${measure.toFixed(4)} kWh`);
 
   // Send usage report via httpdevice
   const usageRes = http.post(

@@ -1,31 +1,20 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
-	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/gin-gonic/gin"
 )
 
-var mqttBroker = getEnv("MQTT_BROKER", "ssl://localhost:8883")
-
-func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return defaultValue
-}
+var config = LoadConfig()
 
 // Store active connections
 type DeviceSession struct {
-	Client    mqtt.Client
-	DeviceCtx *DeviceContext
+	Device *HTTPDevice
 }
 
 var (
@@ -41,8 +30,8 @@ func main() {
 	r.POST("/devices/:deviceId/*action", handleDeviceRoute)
 	r.POST("/devices/batch/connect", handleBatchConnect)
 
-	listenAddr := getEnv("LISTEN_ADDR", ":8080")
-	fmt.Printf("HTTP Device service running on %s (broker: %s)\n", listenAddr, mqttBroker)
+	listenAddr := ":" + config.HTTPPort
+	fmt.Printf("HTTP Device service running on %s (broker: %s)\n", listenAddr, config.MQTTBroker)
 	log.Fatal(r.Run(listenAddr))
 }
 
@@ -84,19 +73,19 @@ func handleConnect(c *gin.Context) {
 	existingSession, exists := sessions[deviceID]
 	sessMux.RUnlock()
 
-	if exists && existingSession.Client.IsConnected() {
+	if exists && existingSession.Device.IsConnected() {
 		// Device is already connected, skip reconnection
 		log.Printf("[%s] Device already connected, skipping reconnection", deviceID)
 		c.Status(200)
 		return
 	}
 
-	// If session exists but client is not connected, clean it up
+	// If session exists but device is not connected, clean it up
 	if exists {
 		log.Printf("[%s] Existing session found but not connected, cleaning up", deviceID)
 		sessMux.Lock()
-		if existingSession.Client.IsConnected() {
-			existingSession.Client.Disconnect(250)
+		if existingSession.Device.IsConnected() {
+			existingSession.Device.Disconnect()
 		}
 		delete(sessions, deviceID)
 		sessMux.Unlock()
@@ -104,52 +93,41 @@ func handleConnect(c *gin.Context) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(mqttBroker)
-	opts.SetClientID(deviceID)
-	opts.SetUsername(deviceID)
-	opts.SetPassword(req.Secret)
-	opts.SetCleanSession(true) // Ensure clean session to avoid conflicts
+	// Create HTTP device (DeviceInterface handles MQTT connection)
+	device := NewHTTPDevice(deviceID, req.Secret, config)
 
-	// Configure TLS with certificate verification disabled
-	tlsConfig := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	opts.SetTLSConfig(tlsConfig)
-
-	client := mqtt.NewClient(opts)
-	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		c.JSON(500, gin.H{"error": token.Error().Error()})
+	// Connect to MQTT broker
+	if err := device.Connect(); err != nil {
+		c.JSON(500, gin.H{"error": fmt.Sprintf("failed to connect: %v", err)})
 		return
 	}
 
-	// Create device context (broker URL is set in NewDeviceContext from mqttBroker)
-	deviceCtx := NewDeviceContext(deviceID, req.Secret, client)
-
-	// Subscribe to topics (this sets up message handlers)
-	if err := deviceCtx.SubscribeToTopics(); err != nil {
-		client.Disconnect(250)
-		c.JSON(500, gin.H{"error": fmt.Sprintf("failed to subscribe: %v", err)})
-		return
+	// Wait for connection to be established
+	timeout := time.After(10 * time.Second)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-timeout:
+			device.Disconnect()
+			c.JSON(500, gin.H{"error": "timeout waiting for MQTT connection"})
+			return
+		case <-ticker.C:
+			if device.IsConnected() {
+				goto connected
+			}
+		}
 	}
+connected:
 
-	// Initialize device (request invoice, wait, request authorization, wait)
-	if err := deviceCtx.Initialize(); err != nil {
-		client.Disconnect(250)
-		c.JSON(500, gin.H{"error": fmt.Sprintf("initialization failed: %v", err)})
-		return
-	}
+	// DeviceInterface automatically requests authorization after connection
 
 	// Store session
 	sessMux.Lock()
 	sessions[deviceID] = &DeviceSession{
-		Client:    client,
-		DeviceCtx: deviceCtx,
+		Device: device,
 	}
 	sessMux.Unlock()
-
-	// Start background goroutine to maintain authorization
-	go maintainAuthorization(deviceCtx)
 
 	c.Status(200)
 }
@@ -191,7 +169,7 @@ func handleBatchConnect(c *gin.Context) {
 			existingSession, exists := sessions[devID]
 			sessMux.RUnlock()
 
-			if exists && existingSession.Client.IsConnected() {
+			if exists && existingSession.Device.IsConnected() {
 				// Device is already connected, skip reconnection
 				log.Printf("[%s] Device already connected, skipping reconnection", devID)
 				results[idx] = deviceResult{
@@ -201,13 +179,12 @@ func handleBatchConnect(c *gin.Context) {
 				return
 			}
 
-			// If session exists but client is not connected, clean it up
+			// If session exists but device is not connected, clean it up
 			if exists {
 				log.Printf("[%s] Existing session found but not connected, cleaning up", devID)
 				sessMux.Lock()
-				// Disconnect if somehow still connected (shouldn't happen, but be safe)
-				if existingSession.Client.IsConnected() {
-					existingSession.Client.Disconnect(250)
+				if existingSession.Device.IsConnected() {
+					existingSession.Device.Disconnect()
 				}
 				delete(sessions, devID)
 				sessMux.Unlock()
@@ -215,64 +192,49 @@ func handleBatchConnect(c *gin.Context) {
 				time.Sleep(100 * time.Millisecond)
 			}
 
-			opts := mqtt.NewClientOptions()
-			opts.AddBroker(mqttBroker)
-			opts.SetClientID(devID)
-			opts.SetUsername(devID)
-			opts.SetPassword(secret)
-			opts.SetCleanSession(true) // Ensure clean session to avoid conflicts
+			// Create HTTP device (DeviceInterface handles MQTT connection)
+			device := NewHTTPDevice(devID, secret, config)
 
-			// Configure TLS with certificate verification disabled
-			tlsConfig := &tls.Config{
-				InsecureSkipVerify: true,
-			}
-			opts.SetTLSConfig(tlsConfig)
-
-			client := mqtt.NewClient(opts)
-			if token := client.Connect(); token.Wait() && token.Error() != nil {
+			// Connect to MQTT broker
+			if err := device.Connect(); err != nil {
 				results[idx] = deviceResult{
 					DeviceID: devID,
 					Success:  false,
-					Error:    token.Error().Error(),
+					Error:    fmt.Sprintf("failed to connect: %v", err),
 				}
 				return
 			}
 
-			// Create device context (broker URL is set in NewDeviceContext from mqttBroker)
-			deviceCtx := NewDeviceContext(devID, secret, client)
-
-			// Subscribe to topics
-			if err := deviceCtx.SubscribeToTopics(); err != nil {
-				client.Disconnect(250)
-				results[idx] = deviceResult{
-					DeviceID: devID,
-					Success:  false,
-					Error:    fmt.Sprintf("failed to subscribe: %v", err),
+			// Wait for connection to be established
+			timeout := time.After(10 * time.Second)
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+		connectionLoop:
+			for {
+				select {
+				case <-timeout:
+					device.Disconnect()
+					results[idx] = deviceResult{
+						DeviceID: devID,
+						Success:  false,
+						Error:    "timeout waiting for MQTT connection",
+					}
+					return
+				case <-ticker.C:
+					if device.IsConnected() {
+						break connectionLoop
+					}
 				}
-				return
 			}
 
-			// Initialize device (request invoice, wait, request authorization, wait)
-			if err := deviceCtx.Initialize(); err != nil {
-				client.Disconnect(250)
-				results[idx] = deviceResult{
-					DeviceID: devID,
-					Success:  false,
-					Error:    fmt.Sprintf("initialization failed: %v", err),
-				}
-				return
-			}
+			// DeviceInterface automatically requests authorization after connection
 
 			// Store session
 			sessMux.Lock()
 			sessions[devID] = &DeviceSession{
-				Client:    client,
-				DeviceCtx: deviceCtx,
+				Device: device,
 			}
 			sessMux.Unlock()
-
-			// Start background goroutine to maintain authorization
-			go maintainAuthorization(deviceCtx)
 
 			results[idx] = deviceResult{
 				DeviceID: devID,
@@ -319,24 +281,11 @@ func handleDisconnect(c *gin.Context) {
 		return
 	}
 
-	// Disconnect MQTT client
-	session.Client.Disconnect(250)
+	// Disconnect device
+	session.Device.Disconnect()
 	log.Printf("[%s] Device disconnected", deviceID)
 
 	c.Status(200)
-}
-
-// maintainAuthorization periodically ensures authorization is active
-func maintainAuthorization(ctx *DeviceContext) {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			ctx.EnsureAuthorizationActive()
-		}
-	}
 }
 
 func handleDevicePublish(c *gin.Context) {
@@ -349,13 +298,6 @@ func handleDevicePublish(c *gin.Context) {
 	// Use the request path directly as the MQTT topic
 	topic := c.Request.URL.Path
 
-	// Read request body as payload
-	payload, err := c.GetRawData()
-	if err != nil {
-		c.JSON(400, gin.H{"error": err.Error()})
-		return
-	}
-
 	sessMux.RLock()
 	session, exists := sessions[deviceID]
 	sessMux.RUnlock()
@@ -366,78 +308,58 @@ func handleDevicePublish(c *gin.Context) {
 	}
 
 	// Check if reporting is enabled (for usage reports)
-	if session.DeviceCtx != nil {
+	if session.Device != nil {
 		// For usage reports, check if reporting is enabled
 		if strings.Contains(topic, "/usage") {
-			session.DeviceCtx.mu.RLock()
-			reportingEnabled := session.DeviceCtx.ReportingEnabled
-			session.DeviceCtx.mu.RUnlock()
-
-			if !reportingEnabled {
+			if !session.Device.IsReportingEnabled() {
 				c.JSON(423, gin.H{"error": "reporting disabled (STOP/PAUSE command received)"})
 				return
 			}
 		}
-		// Ensure authorization is active before publishing usage reports
-		session.DeviceCtx.EnsureAuthorizationActive()
+		// DeviceInterface handles authorization automatically
 	}
 
-	// Check if client is connected before publishing
-	if !session.Client.IsConnected() {
-		log.Printf("[%s] Client not connected, attempting to reconnect before publish...", deviceID)
-		if err := session.DeviceCtx.reconnectClient(); err != nil {
-			c.JSON(500, gin.H{"error": fmt.Sprintf("failed to reconnect: %v", err)})
-			return
-		}
-		// Update session with reconnected client
-		sessMux.Lock()
-		session, exists = sessions[deviceID]
-		if exists {
-			// Update the client reference in the session
-			session.Client = session.DeviceCtx.Client
-		}
-		sessMux.Unlock()
-		if !exists {
-			c.JSON(404, gin.H{"error": "Device session lost after reconnect"})
-			return
-		}
+	// Check if device is connected before publishing
+	if !session.Device.IsConnected() {
+		c.JSON(500, gin.H{"error": "Device not connected"})
+		return
 	}
 
-	token := session.Client.Publish(topic, 1, false, string(payload))
-	token.Wait()
+	// Get the DeviceInterface
+	deviceInterface := session.Device.GetDeviceInterface()
+	if deviceInterface == nil || !deviceInterface.IsConnected() {
+		c.JSON(500, gin.H{"error": "Device interface not available"})
+		return
+	}
 
-	if token.Error() != nil {
-		err := token.Error()
-		errStr := err.Error()
-		// Check if error is "not Connected"
-		if strings.Contains(errStr, "not Connected") || strings.Contains(errStr, "not connected") {
-			log.Printf("[%s] Got 'not Connected' error on publish, attempting to reconnect...", deviceID)
-			if reconnectErr := session.DeviceCtx.reconnectClient(); reconnectErr != nil {
-				c.JSON(500, gin.H{"error": fmt.Sprintf("failed to reconnect after publish error: %v", reconnectErr)})
-				return
-			}
-			// Update session with reconnected client and retry publish
-			sessMux.Lock()
-			session, exists = sessions[deviceID]
-			if exists {
-				// Update the client reference in the session
-				session.Client = session.DeviceCtx.Client
-			}
-			sessMux.Unlock()
-			if !exists {
-				c.JSON(404, gin.H{"error": "Device session lost after reconnect"})
-				return
-			}
-			retryToken := session.Client.Publish(topic, 1, false, string(payload))
-			retryToken.Wait()
-			if retryToken.Error() != nil {
-				c.JSON(500, gin.H{"error": fmt.Sprintf("failed to publish after reconnect: %v", retryToken.Error())})
-				return
-			}
-			c.Status(200)
+	// For usage reports, parse JSON and use PublishUsageReport
+	if strings.Contains(topic, "/usage") {
+		// Read request body as JSON
+		var usagePayload struct {
+			ReportID string  `json:"reportId"`
+			Measure  float64 `json:"measure"`
+		}
+		if err := c.ShouldBindJSON(&usagePayload); err != nil {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("invalid JSON payload: %v", err)})
 			return
 		}
-		c.JSON(500, gin.H{"error": err.Error()})
+
+		// Use PublishUsageReport method
+		deviceInterface.PublishUsageReport(usagePayload.ReportID, usagePayload.Measure)
+		c.Status(200)
+		return
+	}
+
+	// For other topics, use generic Publish method
+	payload, err := c.GetRawData()
+	if err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Publish using DeviceInterface
+	if err := deviceInterface.Publish(topic, 1, false, payload); err != nil {
+		c.JSON(500, gin.H{"error": fmt.Sprintf("failed to publish: %v", err)})
 		return
 	}
 

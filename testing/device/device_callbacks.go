@@ -1,4 +1,4 @@
-package main
+package device
 
 // DeviceCallback defines callbacks that device implementations provide
 // to handle MQTT message events

@@ -1,4 +1,4 @@
-package main
+package device
 
 import (
 	"context"
@@ -12,11 +12,13 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/robertodantas/lnpay/internal"
 	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
 )
 
 var (
 	errConnectionTimeout = errors.New("connection timeout")
+	logger               = internal.NewLogger("device")
 )
 
 // deviceContext contains common device state shared across device types
@@ -221,7 +223,7 @@ func (di *DeviceInterface) Connect(deviceID, deviceSecret string) {
 
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(brokerURL)
-	opts.SetClientID(deviceID + "_device_" + generateID())
+	opts.SetClientID(deviceID + "_device_" + GenerateID())
 	opts.SetUsername(deviceID)
 	opts.SetPassword(deviceSecret)
 	opts.SetCleanSession(true)
@@ -399,7 +401,7 @@ func (di *DeviceInterface) waitForConnection(timeout time.Duration) error {
 func (di *DeviceInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Message) {
 	// Deserialize using proto model first
 	var config mqttmodel.ConfigPayload
-	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &config); err != nil {
+	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &config); err != nil {
 		di.callbacks.OnLog("Failed to parse config message: "+err.Error(), "error")
 		return
 	}
@@ -424,7 +426,7 @@ func (di *DeviceInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Mess
 func (di *DeviceInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.Message) {
 	// Deserialize using proto model first
 	var response mqttmodel.AuthorizationResponsePayload
-	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &response); err != nil {
+	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &response); err != nil {
 		di.callbacks.OnLog("Failed to parse authorize response: "+err.Error(), "error")
 		return
 	}
@@ -451,7 +453,7 @@ func (di *DeviceInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.
 		di.pendingAuthMu.Lock()
 		di.pendingAuthorization = false
 		di.pendingAuthMu.Unlock()
-		di.callbacks.OnLog("Authorization granted: "+formatMsat(response.GrantedMsat)+" msat (reserved)", "success")
+		di.callbacks.OnLog("Authorization granted: "+FormatMsat(response.GrantedMsat)+" msat (reserved)", "success")
 		di.callbacks.OnAuthorizationGranted(domainResponse)
 
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_ACTIVE:
@@ -473,7 +475,7 @@ func (di *DeviceInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.
 		di.pendingAuthMu.Lock()
 		di.pendingAuthorization = false
 		di.pendingAuthMu.Unlock()
-		di.callbacks.OnLog("Authorization active (existing): "+formatMsat(response.RemainingMsat)+" msat remaining (request_id: "+response.RequestId+")", "info")
+		di.callbacks.OnLog("Authorization active (existing): "+FormatMsat(response.RemainingMsat)+" msat remaining (request_id: "+response.RequestId+")", "info")
 		di.callbacks.OnAuthorizationActive(domainResponse)
 
 	case mqttmodel.AuthorizationStatus_AUTHORIZATION_STATUS_REJECTED:
@@ -505,7 +507,7 @@ func (di *DeviceInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.
 func (di *DeviceInterface) handleBalanceMessage(client mqtt.Client, msg mqtt.Message) {
 	// Deserialize using proto model first
 	var balance mqttmodel.BalancePayload
-	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &balance); err != nil {
+	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &balance); err != nil {
 		di.callbacks.OnLog("Failed to parse balance message: "+err.Error(), "error")
 		payloadStr := string(msg.Payload())
 		if len(payloadStr) > 200 {
@@ -525,7 +527,7 @@ func (di *DeviceInterface) handleBalanceMessage(client mqtt.Client, msg mqtt.Mes
 	di.checkAndRequestAuthorization(domainBalance)
 
 	// Then notify callback
-	di.callbacks.OnLog("Balance updated: "+formatMsat(balance.AvailableMsat)+" msat available", "info")
+	di.callbacks.OnLog("Balance updated: "+FormatMsat(balance.AvailableMsat)+" msat available", "info")
 	di.callbacks.OnBalanceUpdated(domainBalance)
 }
 
@@ -568,7 +570,7 @@ func (di *DeviceInterface) checkAndRequestAuthorization(balance *BalanceMessage)
 func (di *DeviceInterface) handleInvoiceResponse(client mqtt.Client, msg mqtt.Message) {
 	// Deserialize using proto model first
 	var response mqttmodel.InvoiceResponsePayload
-	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &response); err != nil {
+	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &response); err != nil {
 		di.callbacks.OnLog("Failed to parse invoice response: "+err.Error(), "error")
 		return
 	}
@@ -597,7 +599,7 @@ func (di *DeviceInterface) handleInvoiceResponse(client mqtt.Client, msg mqtt.Me
 func (di *DeviceInterface) handleInvoiceEvent(client mqtt.Client, msg mqtt.Message) {
 	// Deserialize using proto model first
 	var event mqttmodel.InvoiceEventPayload
-	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &event); err != nil {
+	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &event); err != nil {
 		di.callbacks.OnLog("Failed to parse invoice event: "+err.Error(), "error")
 		return
 	}
@@ -622,13 +624,13 @@ func (di *DeviceInterface) handleInvoiceEvent(client mqtt.Client, msg mqtt.Messa
 func (di *DeviceInterface) handleInvoiceSettled(invoiceID string, amountMsat int64) {
 	di.setInvoice(nil)
 	di.callbacks.OnInvoiceSettled(invoiceID, amountMsat)
-	amountMsg := formatMsat(amountMsat)
+	amountMsg := FormatMsat(amountMsat)
 	di.callbacks.OnLog(fmt.Sprintf("Invoice settled: %s (%s msats received)", invoiceID, amountMsg), "success")
 }
 
 func (di *DeviceInterface) handleControlMessage(client mqtt.Client, msg mqtt.Message) {
 	var control mqttmodel.ControlPayload
-	if err := protoUnmarshalOpts.Unmarshal(msg.Payload(), &control); err != nil {
+	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &control); err != nil {
 		di.callbacks.OnLog("Failed to parse control message: "+err.Error(), "error")
 		return
 	}
@@ -747,7 +749,7 @@ func (di *DeviceInterface) PublishHeartbeat(status mqttmodel.DeviceStatus) {
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	payload, err := protoMarshalOpts.Marshal(&heartbeat)
+	payload, err := ProtoMarshalOpts.Marshal(&heartbeat)
 	if err != nil {
 		di.callbacks.OnLog("Failed to marshal heartbeat: "+err.Error(), "error")
 		return
@@ -777,13 +779,13 @@ func (di *DeviceInterface) PublishAuthorizeRequest(reason string) {
 
 	request := AuthorizeRequest{
 		DeviceId:    di.deviceID,
-		RequestId:   generateID(),
+		RequestId:   GenerateID(),
 		RequestMsat: devCfg.AuthorizeRequestMsat,
 		Reason:      reason,
 		Timestamp:   time.Now().Format(time.RFC3339),
 	}
 
-	payload, err := protoMarshalOpts.Marshal(&request)
+	payload, err := ProtoMarshalOpts.Marshal(&request)
 	if err != nil {
 		// Clear pending flag on error
 		di.pendingAuthMu.Lock()
@@ -804,7 +806,7 @@ func (di *DeviceInterface) PublishAuthorizeRequest(reason string) {
 		msg := fmt.Sprintf(
 			"Authorization requested (%s): %s msat for %s",
 			request.RequestId,
-			formatMsat(request.RequestMsat),
+			FormatMsat(request.RequestMsat),
 			reason,
 		)
 		di.callbacks.OnLog(msg, "info")
@@ -813,11 +815,13 @@ func (di *DeviceInterface) PublishAuthorizeRequest(reason string) {
 
 func (di *DeviceInterface) PublishUsageReport(reportID string, kWhConsumed float64) {
 	if di.mqttClient == nil || !di.mqttClient.IsConnected() {
+		di.callbacks.OnLog("Cannot publish usage report: MQTT client not connected", "error")
 		return
 	}
 
 	devCfg := di.ctx.getConfig()
 	if devCfg == nil {
+		di.callbacks.OnLog("Cannot publish usage report: device config not available", "error")
 		return
 	}
 
@@ -830,28 +834,36 @@ func (di *DeviceInterface) PublishUsageReport(reportID string, kWhConsumed float
 		Timestamp: time.Now().Format(time.RFC3339),
 	}
 
-	payload, err := protoMarshalOpts.Marshal(&report)
+	payload, err := ProtoMarshalOpts.Marshal(&report)
 	if err != nil {
 		di.callbacks.OnLog("Failed to marshal usage report ("+reportID+"): "+err.Error(), "error")
 		return
 	}
 	topic := "/devices/" + di.deviceID + "/usage"
 
-	if token := di.mqttClient.Publish(topic, 1, false, payload); token.Wait() && token.Error() != nil {
+	// Publish asynchronously (fire-and-forget) to avoid blocking
+	// The MQTT client handles publishes in the background
+	token := di.mqttClient.Publish(topic, 1, false, payload)
+
+	// Check for immediate errors only (don't wait)
+	if token.Error() != nil {
 		di.callbacks.OnLog("Failed to publish usage report ("+reportID+"): "+token.Error().Error(), "error")
-	} else {
-		msg := fmt.Sprintf(
-			"Usage report sent (%s): %.4f %s",
-			reportID,
-			kWhConsumed,
-			report.Unit,
-		)
-		di.callbacks.OnLog(msg, "info")
+		return
 	}
+
+	// Log immediately - actual publish happens asynchronously
+	msg := fmt.Sprintf(
+		"Usage report sent (%s): %.4f %s",
+		reportID,
+		kWhConsumed,
+		report.Unit,
+	)
+	di.callbacks.OnLog(msg, "info")
 }
 
 func (di *DeviceInterface) PublishInvoiceRequest(requestID string, amountMsat int64, reason string) {
 	if di.mqttClient == nil || !di.mqttClient.IsConnected() {
+		di.callbacks.OnLog("Cannot publish invoice request: MQTT client not connected", "error")
 		return
 	}
 
@@ -869,7 +881,7 @@ func (di *DeviceInterface) PublishInvoiceRequest(requestID string, amountMsat in
 		Timestamp:  time.Now().Format(time.RFC3339),
 	}
 
-	payload, err := protoMarshalOpts.Marshal(&request)
+	payload, err := ProtoMarshalOpts.Marshal(&request)
 	if err != nil {
 		di.callbacks.OnLog("Failed to marshal invoice request ("+requestID+"): "+err.Error(), "error")
 		return
@@ -882,11 +894,41 @@ func (di *DeviceInterface) PublishInvoiceRequest(requestID string, amountMsat in
 		msg := fmt.Sprintf(
 			"Invoice request sent (%s): %s msat for %s",
 			requestID,
-			formatMsat(amountMsat),
+			FormatMsat(amountMsat),
 			reason,
 		)
 		di.callbacks.OnLog(msg, "info")
 	}
+}
+
+// Publish publishes an arbitrary message to an MQTT topic
+// For usage reports, this is fire-and-forget to avoid blocking HTTP handlers
+func (di *DeviceInterface) Publish(topic string, qos byte, retained bool, payload []byte) error {
+	if di.mqttClient == nil || !di.mqttClient.IsConnected() {
+		return fmt.Errorf("MQTT client not connected")
+	}
+
+	token := di.mqttClient.Publish(topic, qos, retained, payload)
+
+	// For usage reports, don't wait - fire and forget to avoid blocking HTTP handlers
+	// The MQTT client will handle the publish asynchronously
+	if strings.Contains(topic, "/usage") {
+		// Return immediately - publish happens in background
+		// Check for immediate errors only
+		if token.Error() != nil {
+			return fmt.Errorf("failed to publish to %s: %w", topic, token.Error())
+		}
+		return nil
+	}
+
+	// For other topics, wait with timeout
+	if !token.WaitTimeout(5 * time.Second) {
+		return fmt.Errorf("timeout publishing to %s", topic)
+	}
+	if token.Error() != nil {
+		return fmt.Errorf("failed to publish to %s: %w", topic, token.Error())
+	}
+	return nil
 }
 
 // IsConnected returns whether the MQTT client is connected

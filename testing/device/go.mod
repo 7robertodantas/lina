@@ -1,12 +1,11 @@
-module github.com/robertodantas/lnpay/simulator/smartmeter
+module github.com/robertodantas/lnpay/testing/device
 
 go 1.25.4
 
 require (
-	github.com/gorilla/websocket v1.5.3
+	github.com/eclipse/paho.mqtt.golang v1.5.1
 	github.com/robertodantas/lnpay/internal v0.0.0
 	github.com/robertodantas/lnpay/services/proto v0.0.0
-	github.com/robertodantas/lnpay/testing/device v0.0.0
 	google.golang.org/protobuf v1.36.8
 )
 
@@ -14,10 +13,10 @@ require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
-	github.com/eclipse/paho.mqtt.golang v1.5.1 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.27.2 // indirect
 	github.com/redis/go-redis/extra/rediscmd/v9 v9.17.0 // indirect
 	github.com/redis/go-redis/extra/redisotel/v9 v9.17.0 // indirect
@@ -39,8 +38,6 @@ require (
 	google.golang.org/grpc v1.75.0 // indirect
 )
 
-replace github.com/robertodantas/lnpay/services/proto => ../../../services/proto
+replace github.com/robertodantas/lnpay/services/proto => ../../services/proto
 
-replace github.com/robertodantas/lnpay/internal => ../../../services/internal
-
-replace github.com/robertodantas/lnpay/testing/device => ../../device
+replace github.com/robertodantas/lnpay/internal => ../../services/internal

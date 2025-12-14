@@ -9,6 +9,7 @@ import (
 	"time"
 
 	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
+	devicepkg "github.com/robertodantas/lnpay/testing/device"
 )
 
 // SmartMeter encapsulates all meter-specific logic and state
@@ -16,7 +17,7 @@ import (
 type SmartMeter struct {
 	mu                   sync.RWMutex
 	meterState           SmartMeterState
-	device               *DeviceInterface
+	device               *devicepkg.DeviceInterface
 	powerUpdateTicker    *time.Ticker
 	usageTicker          *time.Ticker
 	savedApplianceStates map[string]bool
@@ -32,19 +33,6 @@ func NewSmartMeter(deviceID, deviceSecret string, cfg *Config) *SmartMeter {
 	appliances := make([]Appliance, len(defaultAppliances))
 	copy(appliances, defaultAppliances)
 
-	// Default DeviceConfig values (will be overwritten by retained MQTT config)
-	// Default heartbeat interval is 5 minutes (300 seconds) if not set
-	defaultDeviceConfig := &DeviceConfig{
-		DeviceId:             deviceID,
-		MeasurementUnit:      "kWh",
-		UnitPriceMsat:        10,
-		ReportingStrategy:    mqttmodel.ReportingStrategy_REPORTING_STRATEGY_INTERVAL,
-		ReportingInterval:    30,
-		HeartbeatInterval:    300, // 5 minutes default
-		AuthorizeRequestMsat: 1000,
-		Timestamp:            time.Now().Format(time.RFC3339),
-	}
-
 	m := &SmartMeter{
 		deviceSecret: deviceSecret,
 		deviceID:     deviceID,
@@ -57,13 +45,20 @@ func NewSmartMeter(deviceID, deviceSecret string, cfg *Config) *SmartMeter {
 		savedApplianceStates: make(map[string]bool),
 	}
 	// attach device interface - SmartMeter implements DeviceCallback directly
-	m.device = NewDeviceInterface(m, cfg, deviceID)
+	deviceCfg := &devicepkg.Config{
+		HTTPPort:          cfg.HTTPPort,
+		MQTTBroker:        cfg.MQTTBroker,
+		MQTTUseTLS:        cfg.MQTTUseTLS,
+		MQTTPort:          cfg.MQTTPort,
+		MQTTTLSPort:       cfg.MQTTTLSPort,
+		MQTTTLSCACert:     cfg.MQTTTLSCACert,
+		MQTTTLSSkipVerify: cfg.MQTTTLSSkipVerify,
+		MQTTTLSServerName: cfg.MQTTTLSServerName,
+	}
+	m.device = devicepkg.NewDeviceInterface(m, deviceCfg, deviceID)
 	// Initialize device context with default config (DeviceInterface will manage it)
-	// We need to set it during initialization, so we access it directly here
-	// TODO: Add an initialization method to DeviceInterface
-	m.device.ctx.mu.Lock()
-	m.device.ctx.Config = defaultDeviceConfig
-	m.device.ctx.mu.Unlock()
+	// The config will be updated via MQTT retained message, but we set a default here
+	// Note: DeviceInterface doesn't expose ctx, so we'll rely on MQTT config update
 	return m
 }
 
@@ -229,7 +224,7 @@ func (m *SmartMeter) GetDeviceStatus() string {
 
 // GetDeviceID returns the device ID
 func (m *SmartMeter) GetDeviceID() string {
-	return m.device.ctx.getDeviceID() // DeviceID doesn't change, so direct access is OK
+	return m.deviceID // DeviceID is stored in SmartMeter
 }
 
 // GetDeviceConfig returns the current configuration

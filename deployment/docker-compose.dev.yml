@@ -166,6 +166,26 @@ services:
         condition: service_healthy        
     restart: unless-stopped
 
+  httpdevice:
+    build:
+      context: ..
+      dockerfile: testing/loadtest/httpdevice/Dockerfile
+    container_name: httpdevice
+    ports:
+      - "3002:8080" # UI
+    environment:
+      - MQTT_BROKER=mosquitto
+    env_file:
+      - .env
+    volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+    depends_on:    
+      mosquitto:
+        condition: service_healthy
+      redis:
+        condition: service_healthy        
+    restart: unless-stopped
+
   jaeger:
     image: jaegertracing/jaeger:2.12.0
     environment:

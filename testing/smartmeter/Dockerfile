@@ -19,9 +19,12 @@ FROM golang:1.25-alpine AS core-builder
     COPY services/internal/go.mod ./services/internal/
     COPY services/internal/ *.go ./services/internal/
 
+    COPY testing/device/go.mod testing/device/go.sum ./testing/device/
+    COPY testing/device/*.go ./testing/device/
+
     # Copy Smart Meter Core files
-    COPY testing/smartmeter/core/go.mod testing/smartmeter/core/go.sum ./smartmeter/core/
-    WORKDIR /workspace/smartmeter/core
+    COPY testing/smartmeter/core/go.mod testing/smartmeter/core/go.sum ./testing/smartmeter/core/
+    WORKDIR /workspace/testing/smartmeter/core
     RUN go mod download
 
     # Copy Smart Meter Core source code
@@ -36,7 +39,7 @@ FROM alpine:3.23
     WORKDIR /app
 
     # Copy Smart Meter Core binary
-    COPY --from=core-builder /workspace/smartmeter/core/smartmeter .
+    COPY --from=core-builder /workspace/testing/smartmeter/core/smartmeter .
 
     # Copy Smart Meter UI static files
     COPY --from=ui-build /app/ui/out ./public
