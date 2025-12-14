@@ -374,7 +374,18 @@ func (sc *StreamClient) handleLightningMessage(ctx context.Context, mqttClient *
 				"invoice_id": payload.GetInvoiceId(),
 				"amount_msat": payload.GetAmountReceivedMsat(),
 			})
-		return sc.publishInvoiceEvent(ctx, mqttClient, payload.GetDeviceId(), payload.GetInvoiceId(), mqttpb.InvoiceStatus_INVOICE_STATUS_SETTLED, payload.GetAmountReceivedMsat(), payload.GetNewBalanceMsat(), payload.GetTimestamp())
+		// Publish invoice event
+		if err := sc.publishInvoiceEvent(ctx, mqttClient, payload.GetDeviceId(), payload.GetInvoiceId(), mqttpb.InvoiceStatus_INVOICE_STATUS_SETTLED, payload.GetAmountReceivedMsat(), payload.GetNewBalanceMsat(), payload.GetTimestamp()); err != nil {
+			return err
+		}
+		// Note: Balance update will be published when DEVICE_CREDITED event is received from ledger service
+		// Send RESUME command after invoice settlement to allow device to resume operation
+		if err := sc.publishControlCommand(ctx, mqttClient, payload.GetDeviceId(), mqttpb.ControlCommand_CONTROL_COMMAND_RESUME, "INVOICE_SETTLED"); err != nil {
+			logger.WithDeviceID(payload.GetDeviceId()).
+				Error(ctx, "Error publishing RESUME control command after invoice settlement", err)
+			// Don't return error - invoice event was already published successfully
+		}
+		return nil
 	case lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED:
 		payload := lightningEvent.GetInvoiceExpired()
 		if payload == nil {
@@ -430,6 +441,36 @@ func (sc *StreamClient) publishInvoiceEvent(ctx context.Context, mqttClient *MQT
 		InfoWithFields(ctx, "Published invoice event on southbound mqtt", map[string]interface{}{
 			"invoice_id": invoiceID,
 			"status":     status.String(),
+		})
+	return nil
+}
+
+// publishControlCommand publishes a control command to the device
+func (sc *StreamClient) publishControlCommand(ctx context.Context, mqttClient *MQTTClient, deviceID string, command mqttpb.ControlCommand, reason string) error {
+	if deviceID == "" {
+		return fmt.Errorf("device ID is required")
+	}
+
+	payload := &mqttpb.ControlPayload{
+		Command: command,
+		Reason:  reason,
+	}
+
+	marshalOpts := protojson.MarshalOptions{UseProtoNames: true}
+	msgBytes, err := marshalOpts.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal control payload: %w", err)
+	}
+
+	topic := fmt.Sprintf("/devices/%s/control", deviceID)
+	if err := mqttClient.Publish(ctx, topic, 1, false, msgBytes); err != nil {
+		return fmt.Errorf("failed to publish control command to MQTT: %w", err)
+	}
+
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Published control command on southbound mqtt", map[string]interface{}{
+			"command": command.String(),
+			"reason":  reason,
 		})
 	return nil
 }

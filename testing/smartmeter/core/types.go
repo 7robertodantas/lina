@@ -27,6 +27,15 @@ type Appliance struct {
 	CurrentWatts int    `json:"currentWatts"`
 }
 
+// SmartMeterState contains SmartMeter-specific state
+type SmartMeterState struct {
+	Appliances       []Appliance `json:"appliances"`
+	TotalConsumption float64     `json:"totalConsumption"`
+	InstantPower     int         `json:"instantPower"`
+	Logs             []LogEntry  `json:"logs"`
+}
+
+// DeviceState combines DeviceContext and SmartMeterState for UI/API
 type DeviceState struct {
 	DeviceID             string           `json:"deviceId"`
 	DeviceStatus         string           `json:"deviceStatus"`

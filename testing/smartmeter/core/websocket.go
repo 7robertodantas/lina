@@ -143,7 +143,7 @@ func (h *WebSocketHandler) handleCommand(ctx context.Context, cmd WSCommand) {
 		}
 
 	case "simulate_payment":
-		h.meter.AddLog("Payment simulation - waiting for backend to confirm", "info")
+		h.meter.Log("Payment simulation - waiting for backend to confirm", "info")
 		// In real implementation, payment would be detected by backend
 		// and balance update would come via MQTT balance message
 
