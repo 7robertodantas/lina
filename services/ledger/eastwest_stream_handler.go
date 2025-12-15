@@ -100,6 +100,9 @@ func (esh *EastWestStreamHandler) HandleInvoiceSettled(ctx context.Context, sett
 			"balance_after": entry.BalanceAfter,
 		})
 
+	// Record metrics
+	RecordEntry(ctx, "credit", "invoice")
+
 	timestamp := time.Unix(entry.CreatedAt, 0).UTC().Format(time.RFC3339)
 	if err := esh.publisher.PublishDeviceCredited(ctx, entry.DeviceID, entry.AmountMsat, entry.BalanceAfter, timestamp); err != nil {
 		logger.WithDeviceID(deviceID).
@@ -114,6 +117,15 @@ func (esh *EastWestStreamHandler) HandleInvoiceSettled(ctx context.Context, sett
 func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Context, recorded *consumptionpb.DeviceConsumptionRecordedEvent) error {
 	if recorded == nil {
 		return fmt.Errorf("missing device_consumption_recorded payload")
+	}
+
+	// Calculate latency from original timestamp if available
+	// The timestamp comes from the original DeviceUsageReported event
+	if timestampStr := recorded.GetTimestamp(); timestampStr != "" {
+		if originalTime, err := time.Parse(time.RFC3339, timestampStr); err == nil {
+			latencySeconds := time.Since(originalTime).Seconds()
+			RecordDebitLatency(ctx, latencySeconds)
+		}
 	}
 
 	// Begin transaction for processing
@@ -152,6 +164,9 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 			WithStream("event.ledger", "produce").
 			Error(ctx, "Failed to publish AuthorizationDebited event", err)
 	}
+
+	// Record metrics
+	RecordAuthorizationDebited(ctx)
 
 	if result.newStatus == "completed" {
 		// Publish AuthorizationCompleted event
@@ -272,6 +287,8 @@ func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, 
 			return nil, fmt.Errorf("failed to apply overflow debit: %w", err)
 		}
 		overflowEntry = &entry
+		// Record metrics for overflow entry
+		RecordEntry(ctx, "debit", "overflow")
 	}
 
 	return &processConsumptionResult{

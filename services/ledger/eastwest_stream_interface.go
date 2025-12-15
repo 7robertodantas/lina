@@ -476,6 +476,8 @@ func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Cont
 				continue
 			}
 			creditEntry = &entry
+			// Record metrics for expiration credit entry
+			RecordEntry(ctx, "credit", "authorization")
 		}
 
 		if err := repo.MarkAuthorizationExpired(ctx, tx, auth.AuthorizationID); err != nil {
@@ -500,6 +502,9 @@ func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Cont
 				WithStream("event.ledger", "produce").
 				Error(ctx, "Failed to publish AuthorizationExpired event", err)
 		}
+
+		// Record metrics
+		RecordAuthorizationExpired(ctx)
 
 		if creditEntry != nil {
 			creditTimestamp := time.Unix(creditEntry.CreatedAt, 0).UTC().Format(time.RFC3339)

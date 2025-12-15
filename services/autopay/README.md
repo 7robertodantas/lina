@@ -53,7 +53,7 @@ docker build -f autopay/Dockerfile -t 7robertodantas/lnpay-autopay:latest .
 
 ### Using Docker Compose
 
-The service is included in `docker-compose.meas.yml` and will automatically start with the measurement stack.
+The service is included in `docker-compose.measurement.yml` and will automatically start with the measurement stack.
 
 You can also run it standalone using `docker-compose.autopay.yml`:
 

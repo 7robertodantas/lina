@@ -155,6 +155,9 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		return nil, status.Errorf(codes.Internal, "failed to create debit entry: %v", err)
 	}
 
+	// Record metrics
+	RecordEntry(ctx, "debit", "authorization")
+
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
@@ -187,6 +190,9 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 			// TODO: consider adding retry logic or dead letter queue
 		}
 	}
+
+	// Record metrics
+	RecordAuthorizationCreated(ctx)
 
 	return &ledgermodel.CreateAuthorizationResponse{
 		DeviceId:      req.DeviceId,

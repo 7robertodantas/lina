@@ -84,6 +84,8 @@ services:
   ledger:
     image: 7robertodantas/lnpay-ledger:latest
     container_name: ledger
+    ports:
+      - "9460:9464"
     environment:
       - REDIS_HOST=redis
       - DB_PATH=/data/ledger.db
@@ -140,6 +142,56 @@ services:
       redis:
         condition: service_healthy      
     restart: unless-stopped
+
+  redis_exporter:
+    image: oliver006/redis_exporter:v1.80.1-alpine
+    container_name: redis_exporter
+    ports:
+      - "9461:9121"
+    command:
+      - '--redis.addr=redis://redis:6379'
+      - '--check-streams=true'
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  cadvisor_exporter:
+    image: ghcr.io/google/cadvisor:0.54.1 # https://github.com/google/cadvisor/pkgs/container/cadvisor
+    container_name: cadvisor_exporter
+    privileged: true
+    restart: unless-stopped
+    ports:
+      - "9462:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    devices:
+      - /dev/kmsg:/dev/kmsg
+
+  node_exporter:
+    image: prom/node-exporter:v1.10.2
+    container_name: node_exporter
+    restart: unless-stopped
+    # If you decide to use host networking for real NIC metrics:
+    # network_mode: host
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9463:9100"   # remove this if you use network_mode: host
+
 
 volumes:
   mosquitto-data:

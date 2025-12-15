@@ -1,0 +1,31 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'lina'
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+
+  # Ledger service
+  - job_name: 'ledger'
+    static_configs:
+      - targets: ['host.docker.internal:9460']
+
+  # Redis exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['host.docker.internal:9461']
+
+  # Cadvisor
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['host.docker.internal:9462']
+
+  # Node exporter
+  - job_name: 'node'
+    static_configs:
+      - targets: ['host.docker.internal:9463']

@@ -103,7 +103,7 @@ docker-compose -f deployment/docker-compose.dev.yml up device ledger lightning c
 4. **Start the smart meter simulator** (in another terminal):
 
 ```bash
-docker-compose -f deployment/docker-compose.sims.yml up
+docker-compose -f deployment/docker-compose.simulators.yml up
 ```
 
 The smart meter UI will be available at `http://localhost:3001`
@@ -160,7 +160,7 @@ make
 The smart meter simulator provides a web UI to simulate device behavior:
 
 ```bash
-docker-compose -f deployment/docker-compose.sims.yml up
+docker-compose -f deployment/docker-compose.simulators.yml up
 ```
 
 Access the UI at `http://localhost:3001`
