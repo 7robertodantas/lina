@@ -202,9 +202,10 @@ services:
     container_name: redis_exporter
     ports:
       - "9461:9121"
-    command:
-      - '--redis.addr=redis://redis:6379'
-      - '--check-streams=true'
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+      - REDIS_EXPORTER_REDIS_ONLY_METRICS=true
+      - REDIS_EXPORTER_CHECK_SINGLE_STREAMS=event.ledger,event.consumption,event.device,event.lightning
     depends_on:
       redis:
         condition: service_healthy
