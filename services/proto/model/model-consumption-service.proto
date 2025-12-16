@@ -6,9 +6,9 @@ option go_package = "github.com/robertodantas/lnpay/proto/gen/model/consumption"
 
 // event.consumption: emitted after pricing a usage record.
 message DeviceConsumptionRecordedEvent {
-  string device_id        = 1;
-  int64  debit_msat       = 2;   // amount to debit from the authorization
-  string timestamp        = 3;   // ISO-8601 timestamp
+  string device_id  = 1;
+  int64  debit_msat = 2;   // amount to debit from the authorization
+  string timestamp  = 3;   // ISO-8601 timestamp (when the usage was priced and recorded)
 }
 
 // Envelope for entries in the event.consumption stream.

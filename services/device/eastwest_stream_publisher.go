@@ -52,11 +52,11 @@ func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.
 
 	// Convert MQTT UsagePayload to device UsageRecord
 	usageRecord := &devicepb.UsageRecord{
-		DeviceId:         payload.GetDeviceId(),
-		ReportId:         payload.GetReportId(),
-		Strategy:         convertReportingStrategy(payload.GetStrategy()),
-		Measure:          payload.GetMeasure(),
-		Unit:             payload.GetUnit(),
+		DeviceId: payload.GetDeviceId(),
+		ReportId: payload.GetReportId(),
+		Strategy: convertReportingStrategy(payload.GetStrategy()),
+		Measure:  payload.GetMeasure(),
+		Unit:     payload.GetUnit(),
 		Timestamp:        payload.GetTimestamp(),
 		PricePerUnitMsat: pricePerUnitMsat,
 	}

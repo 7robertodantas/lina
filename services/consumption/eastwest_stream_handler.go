@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
@@ -97,6 +98,8 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 	consumptionPropagator.Inject(ctx, carrier)
 
 	// Create consumption record with rounded-up amount and fractional part for auditability
+	// We store the original device/MQTT timestamp from the usage record,
+	// while created_at in the DB will reflect the record_timestamp.
 	err = esh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
 	if err != nil {
 		return err
@@ -108,6 +111,10 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 	}
 
 	// Publish consumption event
+	// Use explicit timestamp semantics:
+	// - timestamp: original device/MQTT timestamp from UsageRecord
+	// - report_timestamp: when the DeviceUsageReportedEvent was emitted (if available)
+	// - record_timestamp: now, when the usage is priced/recorded
 	// Extract parent context from stored trace context
 	publishCtx := ctx
 	if len(carrier) > 0 {
@@ -123,7 +130,10 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 			"rounded_up_by": debitMsat - int64(usageDebitMsat),
 		})
 
-	if err := esh.publisher.PublishConsumptionEvent(publishCtx, reportID, deviceID, debitMsat, usage.GetTimestamp()); err != nil {
+	// Use RFC3339Nano to preserve sub-second precision for accurate latency measurements
+	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+
+	if err := esh.publisher.PublishConsumptionEvent(publishCtx, reportID, deviceID, debitMsat, timestamp); err != nil {
 		logger.WithDeviceID(deviceID).
 			Warnf(ctx, "Failed to publish immediately, triggering outbox retry: %v", err)
 		// Non-blocking send to trigger outbox processing

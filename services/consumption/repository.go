@@ -104,6 +104,7 @@ type OutboxEvent struct {
 	DeviceID     string
 	DebitMsat    int64
 	Timestamp    string
+	CreatedAt    int64
 	TraceContext map[string]string
 }
 
@@ -186,7 +187,7 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 // GetUnpublishedOutboxEvents retrieves unpublished events from the outbox
 func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, limit int) ([]OutboxEvent, error) {
 	query := `
-		SELECT o.report_id, c.device_id, c.debit_msat, c.timestamp, o.traceparent
+		SELECT o.report_id, c.device_id, c.debit_msat, c.timestamp, c.created_at, o.traceparent
 		FROM consumption_outbox o
 		INNER JOIN consumption_records c ON o.report_id = c.report_id
 		WHERE o.published = 0
@@ -209,7 +210,7 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 	for rows.Next() {
 		var e OutboxEvent
 		var traceparent sql.NullString
-		if err := rows.Scan(&e.ReportID, &e.DeviceID, &e.DebitMsat, &e.Timestamp, &traceparent); err != nil {
+		if err := rows.Scan(&e.ReportID, &e.DeviceID, &e.DebitMsat, &e.Timestamp, &e.CreatedAt, &traceparent); err != nil {
 			return nil, fmt.Errorf("failed to scan outbox event: %w", err)
 		}
 

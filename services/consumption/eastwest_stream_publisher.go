@@ -34,6 +34,7 @@ func (esp *EastWestStreamPublisher) GetOutboxTrigger() chan string {
 }
 
 // PublishConsumptionEvent publishes a DeviceConsumptionRecorded event to event.consumption stream
+// timestamp is when the usage was priced and recorded in the consumption service
 func (esp *EastWestStreamPublisher) PublishConsumptionEvent(ctx context.Context, reportID, deviceID string, debitMsat int64, timestamp string) error {
 	// Create DeviceConsumptionRecordedEvent
 	event := &consumptionpb.DeviceConsumptionRecordedEvent{
@@ -134,7 +135,11 @@ func (esp *EastWestStreamPublisher) publishOutboxEvents(ctx context.Context) err
 			publishCtx = ctx
 		}
 
-		if err := esp.PublishConsumptionEvent(publishCtx, e.ReportID, e.DeviceID, e.DebitMsat, e.Timestamp); err != nil {
+		// For outbox replay, use the stored created_at (record time) from consumption_records
+		// Use RFC3339Nano to preserve sub-second precision for accurate latency measurements
+		timestamp := time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339Nano)
+
+		if err := esp.PublishConsumptionEvent(publishCtx, e.ReportID, e.DeviceID, e.DebitMsat, timestamp); err != nil {
 			logger.WithDeviceID(e.DeviceID).
 				WithStream("event.consumption", "produce").
 				Errorf(ctx, "Failed to publish event for report %s: %v", e.ReportID, err)

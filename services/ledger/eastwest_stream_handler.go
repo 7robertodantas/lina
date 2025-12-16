@@ -119,15 +119,6 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 		return fmt.Errorf("missing device_consumption_recorded payload")
 	}
 
-	// Calculate latency from original timestamp if available
-	// The timestamp comes from the original DeviceUsageReported event
-	if timestampStr := recorded.GetTimestamp(); timestampStr != "" {
-		if originalTime, err := time.Parse(time.RFC3339, timestampStr); err == nil {
-			latencySeconds := time.Since(originalTime).Seconds()
-			RecordDebitLatency(ctx, latencySeconds)
-		}
-	}
-
 	// Begin transaction for processing
 	tx, err := esh.repo.BeginTx(ctx, &sql.TxOptions{
 		Isolation: sql.LevelSerializable,
@@ -185,6 +176,29 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 				WithStream("event.ledger", "produce").
 				Error(ctx, "Failed to publish DeviceDebited event for overflow", err)
 		}
+	}
+
+	// Record latency only for successfully processed consumptions (no retries/failures).
+	// The timestamp represents when the usage was priced and recorded in the consumption service.
+	if ts := recorded.GetTimestamp(); ts != "" {
+		// Parse timestamp (support both RFC3339 and RFC3339Nano for safety)
+		parseTimestamp := func(ts string) (time.Time, error) {
+			if t, err := time.Parse(time.RFC3339Nano, ts); err == nil {
+				return t, nil
+			}
+			return time.Parse(time.RFC3339, ts)
+		}
+
+		t, err := parseTimestamp(ts)
+		if err != nil {
+			logger.WithDeviceID(recorded.GetDeviceId()).
+				WithStream("event.consumption", "latency").
+				Warnf(ctx, "Failed to parse timestamp for latency metric: %v", err)
+			return nil
+		}
+
+		latencySeconds := time.Since(t).Seconds()
+		RecordDebitLatency(ctx, latencySeconds)
 	}
 
 	return nil
