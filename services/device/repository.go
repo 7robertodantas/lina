@@ -238,6 +238,68 @@ func (r *DeviceRepository) ListDevices(ctx context.Context) ([]*Device, error) {
 	return devices, nil
 }
 
+// ListDevicesPage retrieves a page of devices with limit and offset for pagination
+func (r *DeviceRepository) ListDevicesPage(ctx context.Context, limit, offset int) ([]*Device, error) {
+	if limit <= 0 {
+		return nil, fmt.Errorf("limit must be > 0")
+	}
+	if offset < 0 {
+		return nil, fmt.Errorf("offset must be >= 0")
+	}
+
+	query := `
+	SELECT device_id, measurement_unit, unit_price_msat, reporting_strategy,
+	       reporting_interval, heartbeat_interval, authorize_request_msat, timestamp
+	FROM devices
+	ORDER BY timestamp DESC
+	LIMIT ? OFFSET ?`
+
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "devices"),
+		attribute.Int("db.limit", limit),
+		attribute.Int("db.offset", offset),
+	}
+	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list devices page", attrs, r.db, query, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query devices page: %w", err)
+	}
+	defer rows.Close()
+
+	var devices []*Device
+	for rows.Next() {
+		var device Device
+		var timestampStr string
+
+		err := rows.Scan(
+			&device.DeviceID,
+			&device.MeasurementUnit,
+			&device.UnitPriceMsat,
+			&device.ReportingStrategy,
+			&device.ReportingInterval,
+			&device.HeartbeatInterval,
+			&device.AuthorizeRequestMsat,
+			&timestampStr,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan device: %w", err)
+		}
+
+		device.Timestamp, err = time.Parse(time.RFC3339, timestampStr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse timestamp: %w", err)
+		}
+
+		devices = append(devices, &device)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating devices page: %w", err)
+	}
+
+	return devices, nil
+}
+
 // BatchExists checks if all devices in the specified range with the given pattern already exist
 func (r *DeviceRepository) BatchExists(ctx context.Context, idStart, idEnd, idPadding int, deviceIDPattern string) (bool, error) {
 	if idStart < 0 || idEnd < idStart {

@@ -276,6 +276,55 @@ func (nb *NorthboundInterface) publishDeviceConfig(ctx context.Context, device *
 	return nil
 }
 
+// RepublishAllDeviceConfigs republishes the configuration for all devices in the repository.
+// This is useful at service startup to ensure retained config messages exist in MQTT.
+func (nb *NorthboundInterface) RepublishAllDeviceConfigs(ctx context.Context) error {
+	const pageSize = 1000
+	offset := 0
+	totalSuccess := 0
+	page := 0
+
+	for {
+		devices, err := nb.repo.ListDevicesPage(ctx, pageSize, offset)
+		if err != nil {
+			return fmt.Errorf("failed to list devices page for config republish (offset=%d, limit=%d): %w", offset, pageSize, err)
+		}
+
+		if len(devices) == 0 {
+			if page == 0 {
+				logger.Info(ctx, "No devices found in repository to republish configs for")
+			}
+			break
+		}
+
+		page++
+		logger.Infof(ctx, "Republishing configs on southbound mqtt for page %d (offset=%d, count=%d)", page, offset, len(devices))
+
+		pageSuccess := 0
+		for _, device := range devices {
+			if err := nb.publishDeviceConfig(ctx, device); err != nil {
+				logger.WithDeviceID(device.DeviceID).
+					Warnf(ctx, "Failed to republish config on southbound mqtt: %v", err)
+				continue
+			}
+			pageSuccess++
+		}
+
+		totalSuccess += pageSuccess
+		offset += len(devices)
+
+		logger.Infof(ctx, "Finished page %d of config republish on southbound mqtt (success=%d, page_total=%d)", page, pageSuccess, len(devices))
+
+		// If we got less than a full page, we've reached the end
+		if len(devices) < pageSize {
+			break
+		}
+	}
+
+	logger.Infof(ctx, "Republished configs on southbound mqtt for %d devices in %d pages", totalSuccess, page)
+	return nil
+}
+
 // createDevicesBatch handles POST /devices/batch
 func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
 	var req CreateDevicesBatchRequest

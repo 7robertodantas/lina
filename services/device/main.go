@@ -117,6 +117,11 @@ func main() {
 	logger.Info(ctx, "Initializing northbound REST API")
 	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
 
+	// On startup, republish config for all devices so configs are retained in MQTT
+	if err := northbound.RepublishAllDeviceConfigs(ctx); err != nil {
+		logger.Warnf(ctx, "Failed to republish device configs on startup: %v", err)
+	}
+
 	// Start northbound server in a goroutine
 	go func() {
 		if err := northbound.Start(ctx, cfg.APIAddr); err != nil && err != http.ErrServerClosed {
