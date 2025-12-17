@@ -785,7 +785,8 @@ func (di *DeviceInterface) PublishHeartbeat(status mqttmodel.DeviceStatus) {
 	topic := "/devices/" + di.deviceID + "/heartbeat"
 
 	// Use WaitTimeout to avoid blocking indefinitely (2 second timeout for heartbeat)
-	token := di.mqttClient.Publish(topic, 1, false, payload)
+	// Use QoS 0 for heartbeats as they are best-effort and sent frequently
+	token := di.mqttClient.Publish(topic, 0, false, payload)
 	if token.WaitTimeout(2 * time.Second) {
 		if token.Error() != nil {
 			di.callbacks.OnLog("Failed to publish heartbeat: "+token.Error().Error(), "error")
