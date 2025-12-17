@@ -6,10 +6,82 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/trace"
 )
+
+// LogLevel represents the minimum log level to output
+type LogLevel int
+
+const (
+	LogLevelDebug LogLevel = iota
+	LogLevelInfo
+	LogLevelWarn
+	LogLevelError
+	LogLevelFatal
+)
+
+var (
+	globalLogLevel LogLevel = LogLevelInfo // Default to INFO in production
+	logLevelMu     sync.RWMutex
+)
+
+// SetLogLevel sets the global log level from a string (case-insensitive)
+// Valid values: "DEBUG", "INFO", "WARN", "ERROR", "FATAL"
+func SetLogLevel(level string) {
+	logLevelMu.Lock()
+	defer logLevelMu.Unlock()
+
+	switch strings.ToUpper(level) {
+	case "DEBUG":
+		globalLogLevel = LogLevelDebug
+	case "INFO":
+		globalLogLevel = LogLevelInfo
+	case "WARN", "WARNING":
+		globalLogLevel = LogLevelWarn
+	case "ERROR":
+		globalLogLevel = LogLevelError
+	case "FATAL":
+		globalLogLevel = LogLevelFatal
+	default:
+		globalLogLevel = LogLevelInfo // Default to INFO if invalid
+	}
+}
+
+// InitLogLevel initializes the log level from the LOG_LEVEL environment variable
+// This should be called early in main() or init()
+func InitLogLevel() {
+	if level := os.Getenv("LOG_LEVEL"); level != "" {
+		SetLogLevel(level)
+	}
+}
+
+// shouldLog checks if a message at the given level should be logged
+func shouldLog(level string) bool {
+	logLevelMu.RLock()
+	defer logLevelMu.RUnlock()
+
+	var messageLevel LogLevel
+	switch strings.ToLower(level) {
+	case "debug":
+		messageLevel = LogLevelDebug
+	case "info":
+		messageLevel = LogLevelInfo
+	case "warn", "warning":
+		messageLevel = LogLevelWarn
+	case "error":
+		messageLevel = LogLevelError
+	case "fatal":
+		messageLevel = LogLevelFatal
+	default:
+		// Unknown level, always log it
+		return true
+	}
+
+	return messageLevel >= globalLogLevel
+}
 
 // Logger provides structured logfmt logging with context
 type Logger struct {
@@ -112,6 +184,11 @@ func formatLogfmtValue(v interface{}) string {
 // log writes a structured logfmt log entry
 // ctx is optional - if provided, trace context will be extracted from it
 func (l *Logger) log(ctx context.Context, level, message string, err error, duration time.Duration, additionalFields map[string]interface{}) {
+	// Skip logging if message level is below the configured global log level
+	if !shouldLog(level) {
+		return
+	}
+
 	var parts []string
 
 	// Always include timestamp, level, service, and message

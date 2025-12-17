@@ -417,7 +417,7 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) {
 	})
 
 	needsAuth := turningOn && allOffBefore && !m.device.HasActiveAuthorization() && !m.device.IsPendingAuthorization()
-	logger.InfoWithFields(context.Background(), "ToggleAppliance state after toggle", map[string]interface{}{
+	logger.DebugWithFields(context.Background(), "ToggleAppliance state after toggle", map[string]interface{}{
 		"appliance_id":   applianceID,
 		"appliance_name": name,
 		"turned_on":      newIsOn,

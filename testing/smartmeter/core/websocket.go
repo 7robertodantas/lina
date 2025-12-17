@@ -221,7 +221,7 @@ func (h *WebSocketHandler) startPeriodicBroadcast() {
 
 		for _, client := range clients {
 			client.mu.Lock()
-			logger.InfoWithFields(ctx, "Sending state to client via northbound REST", map[string]interface{}{
+			logger.DebugWithFields(ctx, "Sending state to client via northbound REST", map[string]interface{}{
 				"client_id": client.conn.RemoteAddr().String(),
 			})
 			// Set a write deadline so a slow or stuck client can't block the broadcaster forever
