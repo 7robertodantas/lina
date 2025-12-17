@@ -20,6 +20,13 @@ func main() {
 
 	cfg := LoadConfig()
 
+	// Initialize metrics (must be done before OpenTelemetry tracer to avoid conflicts)
+	if err := initMetrics(); err != nil {
+		logger.Warnf(ctx, "Failed to initialize metrics: %v. Continuing without metrics.", err)
+	} else {
+		logger.Info(ctx, "Metrics initialized successfully")
+	}
+
 	// Initialize OpenTelemetry
 	tracerShutdown, err := internal.InitTracer(internal.TracerConfig{
 		ServiceName:          cfg.OTELServiceName,
@@ -104,6 +111,21 @@ func main() {
 	// Wait for interrupt signal to gracefully shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Start metrics server on port 9464
+	go func() {
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", GetMetricsHandler())
+		metricsServer := &http.Server{
+			Addr:    ":9464",
+			Handler: metricsMux,
+		}
+		logger.Info(ctx, "Metrics server listening on :9464/metrics")
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Errorf(ctx, "Failed to start metrics server: %v", err)
+		}
+	}()
+
 	<-sigChan
 
 	logger.Info(ctx, "Shutting down consumption service")

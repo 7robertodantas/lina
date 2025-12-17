@@ -106,6 +106,8 @@ services:
   consumption:
     image: 7robertodantas/lnpay-consumption:latest
     container_name: consumption
+    ports:
+      - "9465:9464"    
     environment:
       - REDIS_HOST=redis
       - DB_PATH=/data/consumption.db

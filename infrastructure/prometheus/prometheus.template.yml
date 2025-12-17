@@ -15,6 +15,11 @@ scrape_configs:
     static_configs:
       - targets: ['${TARGET_HOST}:9460']
 
+  #  Consumption service
+  - job_name: 'consumption'
+    static_configs:
+      - targets: ['${TARGET_HOST}:9465']
+
   # Redis exporter
   - job_name: 'redis'
     static_configs:

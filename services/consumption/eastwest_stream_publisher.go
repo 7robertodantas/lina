@@ -88,6 +88,10 @@ func (esp *EastWestStreamPublisher) PublishConsumptionEvent(ctx context.Context,
 			"debit_msat": debitMsat,
 			"stream_id":  streamID,
 		})
+
+	// Record metrics for the published event
+	RecordConsumptionEventPublished(ctx, eventType)
+
 	return nil
 }
 

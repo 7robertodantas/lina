@@ -113,6 +113,8 @@ services:
       dockerfile: services/Dockerfile
       args:
         SERVICE: consumption
+    ports:
+      - "9465:9464"        
     container_name: consumption
     environment:
       - REDIS_HOST=${REDIS_HOST:-redis}
