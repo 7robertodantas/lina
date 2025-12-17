@@ -1,7 +1,8 @@
 package main
 
 import (
-	"log"
+	"context"
+	"strings"
 	"sync"
 
 	devicepkg "github.com/robertodantas/lnpay/testing/device"
@@ -99,7 +100,7 @@ func (d *HTTPDevice) OnAuthorizationActive(response *devicepkg.AuthorizeResponse
 
 // OnAuthorizationRejected is called when authorization is rejected
 func (d *HTTPDevice) OnAuthorizationRejected(response *devicepkg.AuthorizeResponse) {
-	log.Printf("[%s] Requesting invoice", d.DeviceID)
+	logger.WithDeviceID(d.DeviceID).Info(context.Background(), "Requesting invoice")
 	requestID := devicepkg.GenerateID()
 	d.device.PublishInvoiceRequest(requestID, d.InvoiceAmountMsat, "AUTHORIZATION_REJECTED")
 }
@@ -116,7 +117,7 @@ func (d *HTTPDevice) OnInvoiceSettled(invoiceID string, amountMsat int64) {
 
 // OnInvoiceExpired is called when an invoice expires
 func (d *HTTPDevice) OnInvoiceExpired(invoiceID string) {
-	log.Printf("[%s] Invoice expired: %s", d.DeviceID, invoiceID)
+	logger.WithDeviceID(d.DeviceID).Warnf(context.Background(), "Invoice expired: %s", invoiceID)
 }
 
 // OnInvoiceFailed is called when an invoice fails
@@ -146,26 +147,38 @@ func (d *HTTPDevice) OnControlResume() {
 
 // OnControlReboot is called when REBOOT command is received
 func (d *HTTPDevice) OnControlReboot() {
-	log.Printf("[%s] Received REBOOT command", d.DeviceID)
+	logger.WithDeviceID(d.DeviceID).Info(context.Background(), "Received REBOOT command")
 	// For HTTP device, we don't actually reboot, just log it
 }
 
 // OnConnected is called when the device has successfully connected to MQTT
 func (d *HTTPDevice) OnConnected() {
-	log.Printf("[%s] Device connected and ready", d.DeviceID)
+	logger.WithDeviceID(d.DeviceID).Info(context.Background(), "Device connected and ready")
 }
 
 // OnMQTTStatus is called when MQTT connection status changes
 func (d *HTTPDevice) OnMQTTStatus(status string) {
-	log.Printf("[%s] MQTT status: %s", d.DeviceID, status)
+	logger.WithDeviceID(d.DeviceID).Infof(context.Background(), "MQTT status: %s", status)
 }
 
 // OnDeviceStatus is called when device status changes
 func (d *HTTPDevice) OnDeviceStatus(status string) {
-	log.Printf("[%s] Device status: %s", d.DeviceID, status)
+	logger.WithDeviceID(d.DeviceID).Infof(context.Background(), "Device status: %s", status)
 }
 
 // OnLog is called when a log message should be recorded
 func (d *HTTPDevice) OnLog(message, logType string) {
-	log.Printf("[%s] [%s] %s", d.DeviceID, logType, message)
+	deviceLogger := logger.WithDeviceID(d.DeviceID)
+	switch strings.ToLower(logType) {
+	case "debug":
+		deviceLogger.Debug(context.Background(), message)
+	case "info":
+		deviceLogger.Info(context.Background(), message)
+	case "warn", "warning":
+		deviceLogger.Warn(context.Background(), message)
+	case "error":
+		deviceLogger.Error(context.Background(), message, nil)
+	default:
+		deviceLogger.Info(context.Background(), message)
+	}
 }

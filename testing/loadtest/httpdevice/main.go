@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"log"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/robertodantas/lnpay/internal"
+	devicepkg "github.com/robertodantas/lnpay/testing/device"
 )
+
+var logger = internal.NewLogger("httpdevice")
 
 var config = LoadConfig()
 
@@ -33,8 +37,10 @@ func main() {
 	r.POST("/devices/:deviceId/*action", handleDeviceRoute)
 
 	listenAddr := ":" + config.HTTPPort
-	fmt.Printf("HTTP Device service running on %s (broker: %s)\n", listenAddr, config.MQTTBroker)
-	log.Fatal(r.Run(listenAddr))
+	logger.Info(context.Background(), fmt.Sprintf("HTTP Device service running on %s (broker: %s)", listenAddr, config.MQTTBroker))
+	if err := r.Run(listenAddr); err != nil {
+		logger.Fatal(context.Background(), "HTTP server failed", err)
+	}
 }
 
 // handleDeviceRoute dispatches to the appropriate handler based on the action
@@ -77,22 +83,22 @@ func handleConnect(c *gin.Context) {
 
 	if exists && existingSession.Device.IsConnected() {
 		// Device is already connected, skip reconnection
-		log.Printf("[%s] Device already connected, skipping reconnection", deviceID)
+		logger.WithDeviceID(deviceID).Info(context.Background(), "Device already connected, skipping reconnection")
 		c.Status(200)
 		return
 	}
 
 	// If session exists but device is not connected, clean it up
 	if exists {
-		log.Printf("[%s] Existing session found but not connected, cleaning up", deviceID)
+		logger.WithDeviceID(deviceID).Info(context.Background(), "Existing session found but not connected, cleaning up")
 		sessMux.Lock()
 		if existingSession.Device.IsConnected() {
 			existingSession.Device.Disconnect()
 		}
 		delete(sessions, deviceID)
 		sessMux.Unlock()
-		// Small delay to ensure the old connection is fully closed
-		time.Sleep(100 * time.Millisecond)
+		// Small delay to ensure the old connection is fully closed (reduced from 100ms to 50ms)
+		time.Sleep(50 * time.Millisecond)
 	}
 
 	// Create HTTP device (DeviceInterface handles MQTT connection)
@@ -104,9 +110,9 @@ func handleConnect(c *gin.Context) {
 		return
 	}
 
-	// Wait for connection to be established
-	timeout := time.After(10 * time.Second)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	// Wait for connection to be established (optimized: faster polling, shorter timeout)
+	timeout := time.After(5 * time.Second)          // Reduced from 10s to 5s
+	ticker := time.NewTicker(50 * time.Millisecond) // Reduced from 100ms to 50ms for faster detection
 	defer ticker.Stop()
 	for {
 		select {
@@ -123,6 +129,30 @@ func handleConnect(c *gin.Context) {
 connected:
 
 	// DeviceInterface automatically requests authorization after connection
+
+	// Request initial invoice after connection (wait a bit for device to become ONLINE)
+	// Send invoice request asynchronously after a short delay to allow authorization to complete
+	go func() {
+		// Wait a bit for device to transition to ONLINE status after authorization
+		time.Sleep(500 * time.Millisecond)
+
+		deviceInterface := device.GetDeviceInterface()
+		if deviceInterface != nil && deviceInterface.IsConnected() {
+			// Check if device is ONLINE before requesting invoice
+			deviceState := deviceInterface.GetDeviceContext()
+			if deviceState.DeviceStatus == "ONLINE" {
+				requestID := devicepkg.GenerateID()
+				invoiceAmount := device.InvoiceAmountMsat
+				if invoiceAmount == 0 {
+					invoiceAmount = 250000 // Default 250k msat
+				}
+				deviceInterface.PublishInvoiceRequest(requestID, invoiceAmount, "STARTUP")
+				logger.WithDeviceID(deviceID).Infof(context.Background(), "Initial invoice request sent: %d msat", invoiceAmount)
+			} else {
+				logger.WithDeviceID(deviceID).Debugf(context.Background(), "Skipping initial invoice request - device status: %s", deviceState.DeviceStatus)
+			}
+		}
+	}()
 
 	// Store session
 	sessMux.Lock()
@@ -173,7 +203,7 @@ func handleBatchConnect(c *gin.Context) {
 
 			if exists && existingSession.Device.IsConnected() {
 				// Device is already connected, skip reconnection
-				log.Printf("[%s] Device already connected, skipping reconnection", devID)
+				logger.WithDeviceID(devID).Info(context.Background(), "Device already connected, skipping reconnection")
 				results[idx] = deviceResult{
 					DeviceID: devID,
 					Success:  true,
@@ -183,7 +213,7 @@ func handleBatchConnect(c *gin.Context) {
 
 			// If session exists but device is not connected, clean it up
 			if exists {
-				log.Printf("[%s] Existing session found but not connected, cleaning up", devID)
+				logger.WithDeviceID(devID).Info(context.Background(), "Existing session found but not connected, cleaning up")
 				sessMux.Lock()
 				if existingSession.Device.IsConnected() {
 					existingSession.Device.Disconnect()
@@ -208,7 +238,7 @@ func handleBatchConnect(c *gin.Context) {
 			}
 
 			// Wait for connection to be established
-			timeout := time.After(10 * time.Second)
+			timeout := time.After(2 * time.Second)
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
 		connectionLoop:
@@ -230,6 +260,30 @@ func handleBatchConnect(c *gin.Context) {
 			}
 
 			// DeviceInterface automatically requests authorization after connection
+
+			// Request initial invoice after connection (wait a bit for device to become ONLINE)
+			// Send invoice request asynchronously after a short delay to allow authorization to complete
+			go func() {
+				// Wait a bit for device to transition to ONLINE status after authorization
+				time.Sleep(500 * time.Millisecond)
+
+				deviceInterface := device.GetDeviceInterface()
+				if deviceInterface != nil && deviceInterface.IsConnected() {
+					// Check if device is ONLINE before requesting invoice
+					deviceState := deviceInterface.GetDeviceContext()
+					if deviceState.DeviceStatus == "ONLINE" {
+						requestID := devicepkg.GenerateID()
+						invoiceAmount := device.InvoiceAmountMsat
+						if invoiceAmount == 0 {
+							invoiceAmount = 250000 // Default 250k msat
+						}
+						deviceInterface.PublishInvoiceRequest(requestID, invoiceAmount, "STARTUP")
+						logger.WithDeviceID(devID).Infof(context.Background(), "Initial invoice request sent: %d msat", invoiceAmount)
+					} else {
+						logger.WithDeviceID(devID).Debugf(context.Background(), "Skipping initial invoice request - device status: %s", deviceState.DeviceStatus)
+					}
+				}
+			}()
 
 			// Store session
 			sessMux.Lock()
@@ -311,7 +365,7 @@ func handleBatchDisconnect(c *gin.Context) {
 
 			// Disconnect device
 			session.Device.Disconnect()
-			log.Printf("[%s] Device disconnected", devID)
+			logger.WithDeviceID(devID).Info(context.Background(), "Device disconnected")
 
 			results[idx] = deviceResult{
 				DeviceID: devID,
@@ -360,7 +414,7 @@ func handleDisconnect(c *gin.Context) {
 
 	// Disconnect device
 	session.Device.Disconnect()
-	log.Printf("[%s] Device disconnected", deviceID)
+	logger.WithDeviceID(deviceID).Info(context.Background(), "Device disconnected")
 
 	c.Status(200)
 }
@@ -411,6 +465,27 @@ func handleDevicePublish(c *gin.Context) {
 
 	// For usage reports, parse JSON and use PublishUsageReport
 	if strings.Contains(topic, "/usage") {
+		// Check if there's an active authorization
+		if !deviceInterface.HasActiveAuthorization() {
+			logger.WithDeviceID(deviceID).Debug(context.Background(), "Usage report rejected: no active authorization")
+			c.JSON(423, gin.H{"error": "no active authorization - cannot publish usage report"})
+			return
+		}
+
+		// Check if balance is available and >= 0
+		deviceState := deviceInterface.GetDeviceContext()
+		if deviceState.Balance == nil {
+			logger.WithDeviceID(deviceID).Debug(context.Background(), "Usage report rejected: balance not available")
+			c.JSON(423, gin.H{"error": "balance not available - cannot publish usage report"})
+			return
+		}
+		if deviceState.Balance.AvailableMsat < 0 {
+			logger.WithDeviceID(deviceID).Debugf(context.Background(), "Usage report rejected: insufficient balance (%d msat)", deviceState.Balance.AvailableMsat)
+			c.JSON(423, gin.H{"error": fmt.Sprintf("insufficient balance (%d msat) - cannot publish usage report", deviceState.Balance.AvailableMsat)})
+			deviceInterface.PublishInvoiceRequest(devicepkg.GenerateID(), 0, "INSUFFICIENT_BALANCE")
+			return
+		}
+
 		// Read request body as JSON
 		var usagePayload struct {
 			ReportID string  `json:"reportId"`

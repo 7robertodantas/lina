@@ -4,6 +4,7 @@ go 1.25.4
 
 require (
 	github.com/gin-gonic/gin v1.11.0
+	github.com/robertodantas/lnpay/internal v0.0.0
 	github.com/robertodantas/lnpay/testing/device v0.0.0
 )
 
@@ -45,7 +46,6 @@ require (
 	github.com/redis/go-redis/extra/rediscmd/v9 v9.17.0 // indirect
 	github.com/redis/go-redis/extra/redisotel/v9 v9.17.0 // indirect
 	github.com/redis/go-redis/v9 v9.17.0 // indirect
-	github.com/robertodantas/lnpay/internal v0.0.0 // indirect
 	github.com/robertodantas/lnpay/services/proto v0.0.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect

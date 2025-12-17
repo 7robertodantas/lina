@@ -269,9 +269,9 @@ func (di *DeviceInterface) Connect(deviceID, deviceSecret string) {
 	di.callbacks.OnMQTTStatus("connecting")
 	di.callbacks.OnLog("Connecting to MQTT broker...", "info")
 
-	// Use WaitTimeout to avoid blocking indefinitely (15 second timeout for connection)
+	// Use WaitTimeout to avoid blocking indefinitely (reduced to 3 seconds for faster failure detection)
 	token := di.mqttClient.Connect()
-	if token.WaitTimeout(15 * time.Second) {
+	if token.WaitTimeout(3 * time.Second) {
 		if token.Error() != nil {
 			err := token.Error()
 			errMsg := err.Error()
@@ -294,7 +294,7 @@ func (di *DeviceInterface) Connect(deviceID, deviceSecret string) {
 		// Timeout occurred
 		di.setMQTTStatus("error")
 		di.callbacks.OnMQTTStatus("error")
-		di.callbacks.OnLog("MQTT connection timeout after 15 seconds", "error")
+		di.callbacks.OnLog("MQTT connection timeout after 3 seconds", "error")
 		di.setDeviceStatus("OFFLINE")
 		di.callbacks.OnDeviceStatus("OFFLINE")
 	}
@@ -321,30 +321,59 @@ func (di *DeviceInterface) subscribeToTopics() {
 		{"/devices/" + di.deviceID + "/control", di.handleControlMessage},
 	}
 
-	// Subscribe to each topic and wait for confirmation
+	// Subscribe to all topics in parallel for faster initialization
+	var wg sync.WaitGroup
+	subscriptionTimeout := 2 * time.Second // Reduced from 5s to 2s
+	successCount := 0
+	var mu sync.Mutex
+
 	for _, t := range criticalTopics {
-		token := di.mqttClient.Subscribe(t.topic, 1, t.handler)
-		if token.WaitTimeout(5 * time.Second) {
-			if token.Error() != nil {
-				di.callbacks.OnLog("Failed to subscribe to "+t.topic+": "+token.Error().Error(), "error")
-			} else {
-				logger.InfoWithFields(ctx, "Subscribed to topic on device mqtt", map[string]interface{}{
-					"topic": t.topic,
-				})
-				// Log subscription success for invoice events topic
-				if strings.Contains(t.topic, "/events/invoice") {
-					di.callbacks.OnLog("Subscribed to invoice events: "+t.topic, "info")
+		wg.Add(1)
+		go func(topic string, handler mqtt.MessageHandler) {
+			defer wg.Done()
+			token := di.mqttClient.Subscribe(topic, 1, handler)
+			if token.WaitTimeout(subscriptionTimeout) {
+				if token.Error() != nil {
+					di.callbacks.OnLog("Failed to subscribe to "+topic+": "+token.Error().Error(), "error")
+				} else {
+					mu.Lock()
+					successCount++
+					mu.Unlock()
+					logger.InfoWithFields(ctx, "Subscribed to topic on device mqtt", map[string]interface{}{
+						"topic": topic,
+					})
+					// Log subscription success for invoice events topic
+					if strings.Contains(topic, "/events/invoice") {
+						di.callbacks.OnLog("Subscribed to invoice events: "+topic, "info")
+					}
 				}
+			} else {
+				di.callbacks.OnLog("Timeout subscribing to "+topic, "error")
 			}
-		} else {
-			di.callbacks.OnLog("Timeout subscribing to "+t.topic, "error")
-		}
+		}(t.topic, t.handler)
 	}
 
-	// Additional delay to ensure broker has fully processed all subscriptions
-	// This prevents race conditions where responses arrive before subscriptions are ready
-	time.Sleep(500 * time.Millisecond)
-	logger.Info(ctx, "All subscriptions established, ready to send messages on device mqtt")
+	// Wait for all subscriptions to complete (with overall timeout)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	// Wait for subscriptions with overall timeout
+	select {
+	case <-done:
+		// All subscriptions completed
+	case <-time.After(subscriptionTimeout + 500*time.Millisecond):
+		di.callbacks.OnLog("Some subscriptions may have timed out", "warn")
+	}
+
+	// Small delay to ensure broker has processed subscriptions (reduced from 500ms to 100ms)
+	time.Sleep(100 * time.Millisecond)
+	logger.InfoWithFields(ctx, "All subscriptions established, ready to send messages on device mqtt", map[string]interface{}{
+		"subscribed": successCount,
+		"total":      len(criticalTopics),
+	})
 
 	// Signal that subscriptions are ready
 	select {
@@ -358,8 +387,8 @@ func (di *DeviceInterface) subscribeToTopics() {
 // It waits for subscriptions, sends heartbeat and authorization request, then calls OnConnected
 func (di *DeviceInterface) completeConnectionSequence() {
 	ctx := context.Background()
-	const connectionTimeout = 5 * time.Second
-	const subscriptionTimeout = 3 * time.Second
+	const connectionTimeout = 3 * time.Second   // Reduced from 5s to 3s
+	const subscriptionTimeout = 2 * time.Second // Reduced from 3s to 2s
 
 	// Wait for MQTT connection to be established (should be quick since we're already connecting)
 	if err := di.waitForConnection(connectionTimeout); err != nil {
@@ -390,13 +419,16 @@ func (di *DeviceInterface) completeConnectionSequence() {
 	}
 
 	// Send initial heartbeat and authorization request (framework handles this)
-	di.PublishHeartbeat(mqttmodel.DeviceStatus_DEVICE_STATUS_ONLINE)
+	// Send these in parallel since they're independent
+	go di.PublishHeartbeat(mqttmodel.DeviceStatus_DEVICE_STATUS_ONLINE)
 	di.PublishAuthorizeRequest("STARTUP")
 
 	// Start heartbeat ticker if enabled
 	di.startHeartbeat()
 
 	// Notify callback that device is connected and ready
+	// Device is ready as soon as it has authorization (or is requesting it)
+	// Don't wait for invoice settlement - that happens asynchronously
 	di.callbacks.OnLog("Device connected and ready", "success")
 	di.callbacks.OnConnected()
 }
@@ -832,9 +864,9 @@ func (di *DeviceInterface) PublishAuthorizeRequest(reason string) {
 	}
 	topic := "/devices/" + di.deviceID + "/request/authorize"
 
-	// Use WaitTimeout to avoid blocking indefinitely (5 second timeout)
+	// Use WaitTimeout to avoid blocking indefinitely (reduced to 1 second for faster failure detection)
 	token := di.mqttClient.Publish(topic, 1, false, payload)
-	if token.WaitTimeout(5 * time.Second) {
+	if token.WaitTimeout(1 * time.Second) {
 		if token.Error() != nil {
 			// Clear pending flag on error
 			di.pendingAuthMu.Lock()
@@ -934,9 +966,9 @@ func (di *DeviceInterface) PublishInvoiceRequest(requestID string, amountMsat in
 	}
 	topic := "/devices/" + di.deviceID + "/request/invoice"
 
-	// Use WaitTimeout to avoid blocking indefinitely (5 second timeout)
+	// Use WaitTimeout to avoid blocking indefinitely (reduced to 1 second for faster failure detection)
 	token := di.mqttClient.Publish(topic, 1, false, payload)
-	if token.WaitTimeout(5 * time.Second) {
+	if token.WaitTimeout(1 * time.Second) {
 		if token.Error() != nil {
 			di.callbacks.OnLog("Failed to publish invoice request ("+requestID+"): "+token.Error().Error(), "error")
 		} else {
@@ -983,8 +1015,8 @@ func (di *DeviceInterface) Publish(topic string, qos byte, retained bool, payloa
 		return nil
 	}
 
-	// For other topics, wait with timeout
-	if !token.WaitTimeout(5 * time.Second) {
+	// For other topics, wait with timeout (reduced to 2 seconds)
+	if !token.WaitTimeout(2 * time.Second) {
 		return fmt.Errorf("timeout publishing to %s", topic)
 	}
 	if token.Error() != nil {

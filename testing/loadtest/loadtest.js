@@ -22,13 +22,28 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // s
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
+const WARMUP = '60s';
+const MEASURE = '120s';
+
 // Define load test stages
 const loadTestStages = [
-  { duration: '1m', target: 100 },   // warmup
-  { duration: '1m', target: 500 },  
-  { duration: '1m', target: 1000 },  // peak
-  { duration: '5m', target: 1000 },  // plateau at max
-  { duration: '5m', target: 0 },      // ramp down
+  { duration: WARMUP, target: 25 },
+  { duration: MEASURE, target: 25 },   // warmup
+  { duration: WARMUP, target: 50 },
+  { duration: MEASURE, target: 50 },
+  { duration: WARMUP, target: 0 },
+  // { duration: WARMUP, target: 75 },
+  // { duration: MEASURE, target: 75 },
+  // { duration: WARMUP, target: 100 },
+  // { duration: MEASURE, target: 100 },
+  // { duration: WARMUP, target: 125 },
+  // { duration: MEASURE, target: 125 },
+  // { duration: WARMUP, target: 150 },
+  // { duration: MEASURE, target: 150 },
+  // { duration: WARMUP, target: 175 },
+  // { duration: MEASURE, target: 175 },
+  // { duration: WARMUP, target: 200 },
+  // { duration: MEASURE, target: 200 },
 ];
 
 // Calculate maximum VU count from stages (for setup - register all devices that will be used)
@@ -66,6 +81,7 @@ function generateID() {
 function getISOTimestamp() {
   return new Date().toISOString();
 }
+
 
 // --- Setup ---
 export function setup() {
@@ -175,8 +191,6 @@ export default function () {
     timestamp: getISOTimestamp(),
   });
 
-  console.log(`[VU ${vuID}] Usage report sent (${JSON.parse(usagePayload).reportId}): ${measure.toFixed(4)} kWh`);
-
   // Send usage report via httpdevice
   const usageRes = http.post(
     `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/usage`,
@@ -188,6 +202,7 @@ export default function () {
     usageReported.add(1);
     usageReportRate.add(1);
     // Ensure device_paused metric is always visible (initialize to 0 if not paused)
+    console.log(`[VU ${vuID}] Usage report sent (${JSON.parse(usagePayload).reportId}): ${measure.toFixed(4)} kWh`);
     devicePaused.add(0);
   } else if (usageRes.status === 423) {
     // 423 = Locked/Reporting disabled (STOP/PAUSE command received)
@@ -200,10 +215,12 @@ export default function () {
     console.error(`[VU ${vuID}] Usage report failed: ${usageRes.status} - ${usageRes.body}`);
   }
 
+  sleep(1); // Sleep for 1 second for each usage report
+
   // Sleep for a random interval between 0.1 and 1.0 seconds
   // This creates realistic, desynchronized load patterns
-  const sleepDuration = 0.1 + Math.random() * 0.5; // Random between 0.1 and 1.0 seconds
-  sleep(sleepDuration);
+  // const sleepDuration = 0.1 + Math.random() * 0.5; // Random between 0.1 and 1.0 seconds
+  // sleep(sleepDuration);
 }
 
 // --- Teardown ---
