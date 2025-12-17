@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -17,8 +16,7 @@ import (
 )
 
 var (
-	errConnectionTimeout = errors.New("connection timeout")
-	logger               = internal.NewLogger("device")
+	logger = internal.NewLogger("device_interface")
 )
 
 // deviceContext contains common device state shared across device types
@@ -89,7 +87,6 @@ func (ctx *deviceContext) getMQTTStatus() string {
 type DeviceInterface struct {
 	callbacks            DeviceCallback
 	mqttClient           mqtt.Client
-	subscriptionsReady   chan bool
 	cfg                  *Config
 	ctx                  *deviceContext
 	deviceID             string
@@ -103,11 +100,10 @@ type DeviceInterface struct {
 // NewDeviceInterface creates a new device interface
 func NewDeviceInterface(callbacks DeviceCallback, cfg *Config, deviceID string) *DeviceInterface {
 	return &DeviceInterface{
-		callbacks:          callbacks,
-		subscriptionsReady: make(chan bool, 1),
-		cfg:                cfg,
-		deviceID:           deviceID,
-		heartbeatEnabled:   true, // Default to enabled
+		callbacks:        callbacks,
+		cfg:              cfg,
+		deviceID:         deviceID,
+		heartbeatEnabled: true, // Default to enabled
 		ctx: &deviceContext{
 			DeviceID:     deviceID,
 			DeviceStatus: "OFFLINE",
@@ -246,7 +242,7 @@ func (di *DeviceInterface) Connect(deviceID, deviceSecret string) {
 		di.callbacks.OnLog("Connected to MQTT broker", "success")
 		// Subscribe to topics and complete startup sequence
 		di.subscribeToTopics()
-		go di.completeConnectionSequence()
+		di.completeConnectionSequence()
 	})
 	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
 		di.setMQTTStatus("disconnected")
@@ -309,16 +305,17 @@ func (di *DeviceInterface) subscribeToTopics() {
 	ctx := context.Background()
 
 	// Define topics in a specific order - critical response topics first
+	// Wrap handlers in goroutines to prevent blocking the MQTT client's message processing loop
 	criticalTopics := []struct {
 		topic   string
 		handler mqtt.MessageHandler
 	}{
-		{"/devices/" + di.deviceID + "/response/authorize", di.handleAuthorizeResponse},
-		{"/devices/" + di.deviceID + "/response/invoice", di.handleInvoiceResponse},
-		{"/devices/" + di.deviceID + "/events/invoice", di.handleInvoiceEvent},
-		{"/devices/" + di.deviceID + "/balance", di.handleBalanceMessage},
-		{"/devices/" + di.deviceID + "/config", di.handleConfigMessage},
-		{"/devices/" + di.deviceID + "/control", di.handleControlMessage},
+		{"/devices/" + di.deviceID + "/response/authorize", di.wrapHandler(di.handleAuthorizeResponse)},
+		{"/devices/" + di.deviceID + "/response/invoice", di.wrapHandler(di.handleInvoiceResponse)},
+		{"/devices/" + di.deviceID + "/events/invoice", di.wrapHandler(di.handleInvoiceEvent)},
+		{"/devices/" + di.deviceID + "/balance", di.wrapHandler(di.handleBalanceMessage)},
+		{"/devices/" + di.deviceID + "/config", di.wrapHandler(di.handleConfigMessage)},
+		{"/devices/" + di.deviceID + "/control", di.wrapHandler(di.handleControlMessage)},
 	}
 
 	// Subscribe to all topics in parallel for faster initialization
@@ -368,94 +365,83 @@ func (di *DeviceInterface) subscribeToTopics() {
 		di.callbacks.OnLog("Some subscriptions may have timed out", "warn")
 	}
 
-	// Small delay to ensure broker has processed subscriptions (reduced from 500ms to 100ms)
-	time.Sleep(100 * time.Millisecond)
+	// Small delay to ensure broker has processed subscriptions
+	time.Sleep(50 * time.Millisecond)
 	logger.InfoWithFields(ctx, "All subscriptions established, ready to send messages on device mqtt", map[string]interface{}{
 		"subscribed": successCount,
 		"total":      len(criticalTopics),
 	})
-
-	// Signal that subscriptions are ready
-	select {
-	case di.subscriptionsReady <- true:
-	default:
-		// Channel already has a value or is closed, ignore
-	}
 }
 
 // completeConnectionSequence handles the startup sequence after MQTT connection
-// It waits for subscriptions, sends heartbeat and authorization request, then calls OnConnected
+// It sends heartbeat and authorization request, then calls OnConnected
+// Note: This function is called after subscribeToTopics() completes, so subscriptions are already ready
 func (di *DeviceInterface) completeConnectionSequence() {
 	ctx := context.Background()
-	const connectionTimeout = 3 * time.Second   // Reduced from 5s to 3s
-	const subscriptionTimeout = 2 * time.Second // Reduced from 3s to 2s
-
-	// Wait for MQTT connection to be established (should be quick since we're already connecting)
-	if err := di.waitForConnection(connectionTimeout); err != nil {
-		if errors.Is(err, errConnectionTimeout) {
-			di.callbacks.OnLog("MQTT connection timeout during startup - reverting to OFFLINE", "error")
-			di.setDeviceStatus("OFFLINE")
-			di.callbacks.OnDeviceStatus("OFFLINE")
-			if shutdownCallback, ok := di.callbacks.(interface{ Shutdown() }); ok {
-				shutdownCallback.Shutdown()
-			}
-		}
-		return
-	}
-
-	// Wait for subscriptions to be ready (should be quick after connection)
-	select {
-	case <-di.subscriptionsReady:
-		logger.WithDeviceID(di.deviceID).
-			Info(ctx, "Subscriptions ready, proceeding with startup sequence on device mqtt")
-	case <-time.After(subscriptionTimeout):
-		di.callbacks.OnLog("Timeout waiting for subscriptions - reverting to OFFLINE", "error")
-		di.setDeviceStatus("OFFLINE")
-		di.callbacks.OnDeviceStatus("OFFLINE")
-		if shutdownCallback, ok := di.callbacks.(interface{ Shutdown() }); ok {
-			shutdownCallback.Shutdown()
-		}
-		return
-	}
-
-	// Send initial heartbeat and authorization request (framework handles this)
-	// Send these in parallel since they're independent
-	go di.PublishHeartbeat(mqttmodel.DeviceStatus_DEVICE_STATUS_ONLINE)
-	di.PublishAuthorizeRequest("STARTUP")
+	logger.WithDeviceID(di.deviceID).
+		Info(ctx, "Subscriptions ready, proceeding with startup sequence on device mqtt")
 
 	// Start heartbeat ticker if enabled
 	di.startHeartbeat()
 
-	// Notify callback that device is connected and ready
-	// Device is ready as soon as it has authorization (or is requesting it)
-	// Don't wait for invoice settlement - that happens asynchronously
+	// Send authorization request
+	di.PublishAuthorizeRequest("STARTUP")
+
 	di.callbacks.OnLog("Device connected and ready", "success")
 	di.callbacks.OnConnected()
 }
 
-// waitForConnection waits for the MQTT connection to be established
-func (di *DeviceInterface) waitForConnection(timeout time.Duration) error {
-	// Check immediately first (connection might already be established)
-	if di.IsConnected() {
-		return nil
-	}
+// wrapHandler wraps a message handler in a goroutine to prevent blocking the MQTT client
+func (di *DeviceInterface) wrapHandler(handler mqtt.MessageHandler) mqtt.MessageHandler {
+	return func(client mqtt.Client, msg mqtt.Message) {
+		topic := msg.Topic()
+		payloadLen := len(msg.Payload())
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	// Use a faster ticker for more responsive checking
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		if di.IsConnected() {
-			return nil
+		// Log that we received a message (for debugging)
+		logger.DebugWithFields(context.Background(), "MQTT message received on device mqtt", map[string]interface{}{
+			"topic":       topic,
+			"payload_len": payloadLen,
+		})
+
+		// Copy message payload to avoid issues if the original message is reused
+		payload := make([]byte, payloadLen)
+		copy(payload, msg.Payload())
+
+		// Create a message copy that can be safely used in a goroutine
+		msgCopy := &messageCopy{
+			topic:   topic,
+			payload: payload,
 		}
-		select {
-		case <-timer.C:
-			return errConnectionTimeout
-		case <-ticker.C:
-		}
+
+		// Process message in a goroutine to avoid blocking
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					errMsg := fmt.Sprintf("Panic in message handler for topic %s: %v", topic, r)
+					logger.ErrorWithFields(context.Background(), "Panic in message handler on device mqtt", fmt.Errorf("%v", r), map[string]interface{}{
+						"topic": topic,
+					})
+					di.callbacks.OnLog(errMsg, "error")
+				}
+			}()
+			handler(client, msgCopy)
+		}()
 	}
 }
+
+// messageCopy is a simple message implementation for use in goroutines
+type messageCopy struct {
+	topic   string
+	payload []byte
+}
+
+func (m *messageCopy) Duplicate() bool   { return false }
+func (m *messageCopy) Qos() byte         { return 1 }
+func (m *messageCopy) Retained() bool    { return false }
+func (m *messageCopy) Topic() string     { return m.topic }
+func (m *messageCopy) MessageID() uint16 { return 0 }
+func (m *messageCopy) Payload() []byte   { return m.payload }
+func (m *messageCopy) Ack()              {}
 
 // MQTT Message Handlers
 func (di *DeviceInterface) handleConfigMessage(client mqtt.Client, msg mqtt.Message) {
@@ -565,9 +551,19 @@ func (di *DeviceInterface) handleAuthorizeResponse(client mqtt.Client, msg mqtt.
 }
 
 func (di *DeviceInterface) handleBalanceMessage(client mqtt.Client, msg mqtt.Message) {
+	ctx := context.Background()
+	// Log that we received a balance message
+	logger.DebugWithFields(ctx, "Received balance message on device mqtt", map[string]interface{}{
+		"topic":       msg.Topic(),
+		"payload_len": len(msg.Payload()),
+	})
+
 	// Deserialize using proto model first
 	var balance mqttmodel.BalancePayload
 	if err := ProtoUnmarshalOpts.Unmarshal(msg.Payload(), &balance); err != nil {
+		logger.ErrorWithFields(ctx, "Failed to parse balance message on device mqtt", err, map[string]interface{}{
+			"topic": msg.Topic(),
+		})
 		di.callbacks.OnLog("Failed to parse balance message: "+err.Error(), "error")
 		payloadStr := string(msg.Payload())
 		if len(payloadStr) > 200 {
@@ -577,39 +573,86 @@ func (di *DeviceInterface) handleBalanceMessage(client mqtt.Client, msg mqtt.Mes
 		return
 	}
 
+	logger.DebugWithFields(ctx, "Successfully unmarshaled balance message on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
+
 	// Convert to domain type (type alias, so this is just a pointer conversion)
 	domainBalance := (*BalanceMessage)(&balance)
 
 	// Update device context first
+	logger.DebugWithFields(ctx, "About to set balance in device context on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
 	di.setBalance(domainBalance)
+	logger.DebugWithFields(ctx, "Balance set in device context on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
 
 	// Check if authorization should be requested (framework logic)
+	logger.DebugWithFields(ctx, "About to check authorization request on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
 	di.checkAndRequestAuthorization(domainBalance)
+	logger.DebugWithFields(ctx, "Returned from checkAndRequestAuthorization on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
+	logger.DebugWithFields(ctx, "Checked authorization request on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
 
 	// Then notify callback
+	logger.DebugWithFields(ctx, "Calling OnBalanceUpdated callback on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
 	di.callbacks.OnLog("Balance updated: "+FormatMsat(balance.AvailableMsat)+" msat available", "info")
 	di.callbacks.OnBalanceUpdated(domainBalance)
+	logger.DebugWithFields(ctx, "Completed balance message handling on device mqtt", map[string]interface{}{
+		"available_msat": balance.AvailableMsat,
+	})
 }
 
 // checkAndRequestAuthorization determines if authorization should be requested
 // and publishes the request if needed. This is framework logic.
 func (di *DeviceInterface) checkAndRequestAuthorization(balance *BalanceMessage) {
+	ctx := context.Background()
 	available := balance.AvailableMsat
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: starting", map[string]interface{}{
+		"available_msat": available,
+	})
+
 	if available <= 0 {
+		logger.DebugWithFields(ctx, "checkAndRequestAuthorization: available <= 0, returning", nil)
 		return
 	}
 
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: acquiring lock", nil)
 	di.pendingAuthMu.Lock()
-	defer di.pendingAuthMu.Unlock()
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: lock acquired", nil)
 
 	// Check if already pending
 	if di.pendingAuthorization {
+		logger.DebugWithFields(ctx, "checkAndRequestAuthorization: already pending, returning", nil)
+		di.pendingAuthMu.Unlock()
 		return
 	}
 
 	// Check if there's an active authorization
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: checking authorization", nil)
 	auth := di.ctx.getAuthorization()
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: got authorization", map[string]interface{}{
+		"auth_is_nil": auth == nil,
+		"auth_status": func() string {
+			if auth == nil {
+				return "nil"
+			}
+			return auth.Status
+		}(),
+	})
+
 	if auth != nil && auth.Status == "ACTIVE" {
+		logger.DebugWithFields(ctx, "checkAndRequestAuthorization: active authorization exists, returning", nil)
+		di.pendingAuthMu.Unlock()
 		return
 	}
 
@@ -618,13 +661,23 @@ func (di *DeviceInterface) checkAndRequestAuthorization(balance *BalanceMessage)
 	if auth != nil {
 		lastStatus = auth.Status
 	}
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: checking last status", map[string]interface{}{
+		"last_status": lastStatus,
+	})
+
 	if lastStatus != "REJECTED" {
+		logger.DebugWithFields(ctx, "checkAndRequestAuthorization: last status not REJECTED, returning", nil)
+		di.pendingAuthMu.Unlock()
 		return
 	}
 
 	// All conditions met - request authorization
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: all conditions met, requesting authorization", nil)
 	di.pendingAuthorization = true
+	// Unlock before calling PublishAuthorizeRequest to avoid deadlock (it will lock again)
+	di.pendingAuthMu.Unlock()
 	di.PublishAuthorizeRequest("FUNDS_AVAILABLE")
+	logger.DebugWithFields(ctx, "checkAndRequestAuthorization: authorization request published", nil)
 }
 
 func (di *DeviceInterface) handleInvoiceResponse(client mqtt.Client, msg mqtt.Message) {
@@ -1111,11 +1164,6 @@ func (di *DeviceInterface) startHeartbeatLocked() {
 			}
 		}
 	}()
-}
-
-// GetSubscriptionsReady returns the subscriptions ready channel
-func (di *DeviceInterface) GetSubscriptionsReady() chan bool {
-	return di.subscriptionsReady
 }
 
 // IsPendingAuthorization returns whether an authorization request is pending
