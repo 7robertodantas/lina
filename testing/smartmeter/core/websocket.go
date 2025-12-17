@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -31,24 +32,19 @@ type WebSocketHandler struct {
 	meter     *SmartMeter
 	clients   map[*websocket.Conn]*sync.Mutex
 	clientsMu sync.RWMutex
-	broadcast chan interface{}
 }
 
 // NewWebSocketHandler creates a new WebSocket handler
 func NewWebSocketHandler(meter *SmartMeter) *WebSocketHandler {
 	handler := &WebSocketHandler{
-		meter:     meter,
-		clients:   make(map[*websocket.Conn]*sync.Mutex),
-		broadcast: make(chan interface{}, 100),
+		meter:   meter,
+		clients: make(map[*websocket.Conn]*sync.Mutex),
 	}
 
-	// Set the meter's state change callback to broadcast to all WS clients
-	meter.SetStateChangeCallback(func(state DeviceState) {
-		handler.BroadcastState()
-	})
-
-	// Start broadcast loop
-	go handler.broadcastLoop()
+	// Periodic broadcaster: every second, check for state changes and send the latest
+	// state to all connected clients. If the state JSON is unchanged compared to the
+	// last sent value, nothing is sent (old updates are effectively coalesced).
+	go handler.startPeriodicBroadcast()
 
 	return handler
 }
@@ -121,13 +117,15 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 		var cmd WSCommand
 		err := conn.ReadJSON(&cmd)
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				logger.Error(ctx, "WebSocket error via northbound REST", err)
-			}
+			// Log all read errors so we can see why the loop stopped
+			logger.ErrorWithFields(ctx, "WebSocket read error via northbound REST", err, map[string]interface{}{
+				"remote_addr": conn.RemoteAddr().String(),
+			})
 			break
 		}
 
-		h.handleCommand(ctx, cmd)
+		// Handle each command in its own goroutine so the read loop is never blocked
+		go h.handleCommand(ctx, cmd)
 	}
 }
 
@@ -139,16 +137,10 @@ func (h *WebSocketHandler) handleCommand(ctx context.Context, cmd WSCommand) {
 
 	switch cmd.Action {
 	case "start":
-		// Execute in goroutine to avoid blocking websocket handler
-		go func() {
-			h.meter.Start()
-		}()
+		h.meter.Start()
 
 	case "stop":
-		// Execute in goroutine to avoid blocking websocket handler
-		go func() {
-			h.meter.Shutdown()
-		}()
+		h.meter.Shutdown()
 
 	case "toggle_appliance":
 		var data struct {
@@ -179,10 +171,7 @@ func (h *WebSocketHandler) handleCommand(ctx context.Context, cmd WSCommand) {
 				"amountMsat": data.AmountMsat,
 			})
 		} else {
-			// Execute in goroutine to avoid blocking websocket handler
-			go func(amount int64) {
-				h.meter.RequestTopUp(amount)
-			}(data.AmountMsat)
+			h.meter.RequestTopUp(data.AmountMsat)
 		}
 
 	case "clear_invoice":
@@ -195,12 +184,30 @@ func (h *WebSocketHandler) handleCommand(ctx context.Context, cmd WSCommand) {
 	}
 }
 
-// broadcastLoop sends state updates to all connected clients
-func (h *WebSocketHandler) broadcastLoop() {
+// startPeriodicBroadcast periodically broadcasts the latest state to all clients.
+func (h *WebSocketHandler) startPeriodicBroadcast() {
 	ctx := context.Background()
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
-	for msg := range h.broadcast {
-		// Take a snapshot of current clients to avoid locking upgrades on write errors
+	defer func() {
+		if r := recover(); r != nil {
+			logger.ErrorWithFields(ctx, "panic in websocket periodic broadcast goroutine", nil, map[string]interface{}{
+				"panic": r,
+			})
+		}
+	}()
+
+	for range ticker.C {
+		// Get current state JSON from the meter
+		stateJSON := h.meter.GetStateJSON()
+
+		msg := WSMessage{
+			Type:    "state",
+			Payload: stateJSON,
+		}
+
+		// Take a snapshot of current clients to avoid holding the lock during writes
 		h.clientsMu.RLock()
 		type clientEntry struct {
 			conn *websocket.Conn
@@ -214,6 +221,11 @@ func (h *WebSocketHandler) broadcastLoop() {
 
 		for _, client := range clients {
 			client.mu.Lock()
+			logger.InfoWithFields(ctx, "Sending state to client via northbound REST", map[string]interface{}{
+				"client_id": client.conn.RemoteAddr().String(),
+			})
+			// Set a write deadline so a slow or stuck client can't block the broadcaster forever
+			_ = client.conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
 			err := client.conn.WriteJSON(msg)
 			client.mu.Unlock()
 
@@ -237,6 +249,7 @@ func (h *WebSocketHandler) sendToClient(conn *websocket.Conn, msg WSMessage) {
 	writeMu, ok := h.clients[conn]
 	h.clientsMu.RUnlock()
 	if !ok {
+		logger.Warn(ctx, "Attempted to send to unknown WebSocket client")
 		return
 	}
 
@@ -246,26 +259,5 @@ func (h *WebSocketHandler) sendToClient(conn *websocket.Conn, msg WSMessage) {
 
 	if err != nil {
 		logger.Error(ctx, "Error sending to client via northbound REST", err)
-	}
-}
-
-// BroadcastState broadcasts the current state to all clients
-// Uses non-blocking send to prevent blocking if channel is full
-func (h *WebSocketHandler) BroadcastState() {
-	ctx := context.Background()
-
-	msg := WSMessage{
-		Type:    "state",
-		Payload: h.meter.GetStateJSON(),
-	}
-
-	select {
-	case h.broadcast <- msg:
-		// Successfully queued
-	default:
-		// Channel is full, log warning but don't block
-		logger.WarnWithFields(ctx, "Broadcast channel full, dropping state update", map[string]interface{}{
-			"channel_capacity": cap(h.broadcast),
-		})
 	}
 }

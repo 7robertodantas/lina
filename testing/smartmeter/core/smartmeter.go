@@ -23,10 +23,17 @@ type SmartMeter struct {
 	usageTicker              *time.Ticker
 	currentReportingInterval int32 // Track current reporting interval to detect changes
 	savedApplianceStates     map[string]bool
-	stateChangeCallback      func(DeviceState)
 	logCallback              func(message, logType string)
 	deviceSecret             string
 	deviceID                 string
+}
+
+// withState provides safe, write-locked access to the internal SmartMeterState.
+// Callers MUST NOT call methods that themselves acquire m.mu from within fn.
+func (m *SmartMeter) withState(fn func(state *SmartMeterState)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	fn(&m.meterState)
 }
 
 // NewSmartMeter creates a new smart meter instance
@@ -64,30 +71,11 @@ func NewSmartMeter(deviceID, deviceSecret string, cfg *Config) *SmartMeter {
 	return m
 }
 
-// SetStateChangeCallback sets the callback for state changes
-func (m *SmartMeter) SetStateChangeCallback(cb func(DeviceState)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.stateChangeCallback = cb
-}
-
 // SetLogCallback sets the callback for log messages
 func (m *SmartMeter) SetLogCallback(cb func(message, logType string)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.logCallback = cb
-}
-
-// ensureAppliancesInitialized ensures appliances are initialized (must be called with lock held)
-// Note: This method should NOT call m.Log() as it would cause a deadlock (Log also acquires the lock)
-func (m *SmartMeter) ensureAppliancesInitialized() {
-	if len(m.meterState.Appliances) == 0 {
-		appliances := make([]Appliance, len(defaultAppliances))
-		copy(appliances, defaultAppliances)
-		m.meterState.Appliances = appliances
-		// Use logger directly to avoid deadlock (can't call m.Log() while holding lock)
-		logger.Warn(context.Background(), "Appliances were empty, re-initialized from defaults")
-	}
 }
 
 // GetState returns a copy of the current state (combines DeviceContext and SmartMeterState)
@@ -96,9 +84,6 @@ func (m *SmartMeter) GetState() DeviceState {
 	defer m.mu.RUnlock()
 
 	ctx := m.device.GetDeviceContext()
-
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
 
 	// Make a copy of appliances to avoid race conditions
 	appliancesCopy := make([]Appliance, len(m.meterState.Appliances))
@@ -140,9 +125,6 @@ func (m *SmartMeter) GetStateJSON() json.RawMessage {
 	defer m.mu.RUnlock()
 
 	ctx := m.device.GetDeviceContext()
-
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
 
 	// Make a copy of appliances to avoid race conditions
 	appliancesCopy := make([]Appliance, len(m.meterState.Appliances))
@@ -211,27 +193,11 @@ func (m *SmartMeter) Log(message, logType string) {
 	m.mu.RUnlock()
 }
 
-// notifyStateChange calls the state change callback if set
-func (m *SmartMeter) notifyStateChange() {
-	m.mu.RLock()
-	if m.stateChangeCallback != nil {
-		state := m.GetState() // Get combined state
-		m.mu.RUnlock()
-		m.stateChangeCallback(state)
-	} else {
-		m.mu.RUnlock()
-	}
-}
-
 // OnMQTTStatus is called when MQTT connection status changes
-func (m *SmartMeter) OnMQTTStatus(status string) {
-	m.notifyStateChange()
-}
+func (m *SmartMeter) OnMQTTStatus(status string) {}
 
 // OnDeviceStatus is called when device status changes
-func (m *SmartMeter) OnDeviceStatus(status string) {
-	m.notifyStateChange()
-}
+func (m *SmartMeter) OnDeviceStatus(status string) {}
 
 // Start boots the smart meter: connect MQTT and start simulation
 // DeviceInterface will handle connection, subscriptions, heartbeat, and authorization
@@ -246,7 +212,6 @@ func (m *SmartMeter) Start() {
 // OnConnected is called when the device has successfully connected to MQTT,
 // subscriptions are ready, and initial heartbeat/authorization have been sent
 func (m *SmartMeter) OnConnected() {
-	m.notifyStateChange()
 }
 
 // GetDeviceStatus returns the current device status
@@ -268,55 +233,45 @@ func (m *SmartMeter) GetDeviceConfig() *DeviceConfig {
 // DeviceInterface has already updated the DeviceContext and restarted heartbeat if needed
 func (m *SmartMeter) OnConfigUpdated(config *DeviceConfig) {
 	// Check if reporting interval changed and restart usage ticker if needed
-	m.mu.Lock()
 	oldInterval := m.currentReportingInterval
 	newInterval := int32(60) // Default
 	if config != nil && config.ReportingInterval > 0 {
 		newInterval = config.ReportingInterval
 	}
-	m.mu.Unlock()
 
 	// Restart usage ticker if interval changed
 	if oldInterval != newInterval {
 		m.restartUsageTicker(newInterval)
 	}
-
-	m.notifyStateChange()
 }
 
 // OnBalanceUpdated is called when balance is updated
 func (m *SmartMeter) OnBalanceUpdated(balance *BalanceMessage) {
-	m.notifyStateChange()
 }
 
 // OnAuthorizationGranted is called when authorization is granted
 func (m *SmartMeter) OnAuthorizationGranted(response *AuthorizeResponse) {
-	m.notifyStateChange()
 	// Device service will send RESUME control command to restore appliances
 }
 
 // OnAuthorizationActive is called when an existing authorization is found
 func (m *SmartMeter) OnAuthorizationActive(response *AuthorizeResponse) {
-	m.notifyStateChange()
 }
 
 // OnAuthorizationRejected is called when authorization is rejected
 func (m *SmartMeter) OnAuthorizationRejected(response *AuthorizeResponse) {
 	// Device service will send STOP control command to halt consumption
-	m.notifyStateChange()
 }
 
 // OnInvoiceCreated is called when an invoice is created
 // DeviceInterface has already updated the DeviceContext
 func (m *SmartMeter) OnInvoiceCreated(invoice *InvoiceResponse) {
-	m.notifyStateChange()
 }
 
 // ClearInvoice clears the current invoice
 // DeviceInterface manages invoice state, so we delegate to it
 func (m *SmartMeter) ClearInvoice() {
 	m.device.ClearInvoice()
-	m.notifyStateChange()
 }
 
 // RequestTopUp requests an invoice via device interface and updates local invoice state
@@ -330,132 +285,150 @@ func (m *SmartMeter) RequestTopUp(amountMsat int64) {
 // DeviceInterface has already set default reason if empty and logged the command
 // SmartMeter decides to halt consumption (keep device online) rather than shutdown
 func (m *SmartMeter) OnControlStop(reason string) {
-	m.mu.Lock()
-
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
-
-	// Save current appliance states before turning them off (only if not already saved)
-	if len(m.savedApplianceStates) == 0 {
-		for i := range m.meterState.Appliances {
-			m.savedApplianceStates[m.meterState.Appliances[i].ID] = m.meterState.Appliances[i].IsOn
+	m.withState(func(state *SmartMeterState) {
+		// Save current appliance states before turning them off (only if not already saved)
+		if len(m.savedApplianceStates) == 0 {
+			for i := range state.Appliances {
+				m.savedApplianceStates[state.Appliances[i].ID] = state.Appliances[i].IsOn
+			}
 		}
-	}
 
-	// Turn off all appliances but keep connection
-	for i := range m.meterState.Appliances {
-		m.meterState.Appliances[i].IsOn = false
-		m.meterState.Appliances[i].CurrentWatts = 0
-	}
-	m.meterState.InstantPower = 0
-	m.mu.Unlock()
-
-	m.notifyStateChange()
+		// Turn off all appliances but keep connection
+		for i := range state.Appliances {
+			state.Appliances[i].IsOn = false
+			state.Appliances[i].CurrentWatts = 0
+		}
+		state.InstantPower = 0
+	})
 }
 
 // OnControlPause is called when PAUSE command is received
 // DeviceInterface has already set default reason if empty and updated device status
 func (m *SmartMeter) OnControlPause(reason string) {
-	m.mu.Lock()
-
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
-
-	if m.device.GetDeviceStatus() == "ONLINE" {
-		// Turn off all appliances but keep connection
-		// Note: DeviceInterface should handle status changes, but PAUSE is device-specific
-		// For now, we'll update status here but ideally DeviceInterface should handle it
-		for i := range m.meterState.Appliances {
-			m.meterState.Appliances[i].IsOn = false
-			m.meterState.Appliances[i].CurrentWatts = 0
-		}
-		m.meterState.InstantPower = 0
+	isOnline := m.device.GetDeviceStatus() == "ONLINE"
+	if !isOnline {
+		return
 	}
-	m.mu.Unlock()
 
-	m.notifyStateChange()
+	m.withState(func(state *SmartMeterState) {
+		// Turn off all appliances but keep connection
+		for i := range state.Appliances {
+			state.Appliances[i].IsOn = false
+			state.Appliances[i].CurrentWatts = 0
+		}
+		state.InstantPower = 0
+	})
 }
 
 // OnControlResume is called when RESUME command is received
 func (m *SmartMeter) OnControlResume() {
 	// Restore previous appliance states that were saved when consumption was halted
-	m.mu.Lock()
-
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
-
-	if len(m.savedApplianceStates) == 0 {
-		m.mu.Unlock()
-		return
-	}
-	for i := range m.meterState.Appliances {
-		prevOn, ok := m.savedApplianceStates[m.meterState.Appliances[i].ID]
-		if ok && prevOn {
-			m.meterState.Appliances[i].IsOn = true
+	m.withState(func(state *SmartMeterState) {
+		// Only restore previous states if we actually have any saved.
+		if len(m.savedApplianceStates) > 0 {
+			for i := range state.Appliances {
+				prevOn, ok := m.savedApplianceStates[state.Appliances[i].ID]
+				if ok && prevOn {
+					state.Appliances[i].IsOn = true
+				}
+			}
 		}
-	}
-	// Clear saved states after restoring
-	m.savedApplianceStates = make(map[string]bool)
-	m.mu.Unlock()
+		// Clear saved states after restoring (or after a no-op RESUME)
+		m.savedApplianceStates = make(map[string]bool)
+	})
+
 	m.Log("Appliances resumed", "info")
-	m.notifyStateChange()
 }
 
 // ToggleAppliance toggles an appliance on or off
 func (m *SmartMeter) ToggleAppliance(applianceID string) {
-	m.mu.Lock()
-
-	if m.device.GetDeviceStatus() != "ONLINE" {
-		m.mu.Unlock()
+	logger.InfoWithFields(context.Background(), "ToggleAppliance called", map[string]interface{}{
+		"appliance_id": applianceID,
+	})
+	deviceStatus := m.device.GetDeviceStatus()
+	if deviceStatus != "ONLINE" {
 		m.Log("Cannot toggle appliance: offline", "error")
+		logger.WarnWithFields(context.Background(), "ToggleAppliance aborted: device not online", map[string]interface{}{
+			"device_status": deviceStatus,
+		})
 		return
 	}
 
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
+	// Snapshot current appliances under read lock
+	m.mu.RLock()
+	appliancesSnapshot := make([]Appliance, len(m.meterState.Appliances))
+	copy(appliancesSnapshot, m.meterState.Appliances)
+	m.mu.RUnlock()
 
-	var appliance *Appliance
-	for i := range m.meterState.Appliances {
-		if m.meterState.Appliances[i].ID == applianceID {
-			appliance = &m.meterState.Appliances[i]
+	// Work on the snapshot outside the lock
+	var (
+		name          string
+		status        string
+		turningOn     bool
+		allOffBefore  bool
+		applianceSeen bool
+		newIsOn       bool
+	)
+
+	for i := range appliancesSnapshot {
+		if appliancesSnapshot[i].ID == applianceID {
+			applianceSeen = true
+			turningOn = !appliancesSnapshot[i].IsOn
+
+			// Check if this is the first appliance being turned on (all currently off)
+			allOffBefore = true
+			if turningOn {
+				for j := range appliancesSnapshot {
+					if appliancesSnapshot[j].IsOn {
+						allOffBefore = false
+						break
+					}
+				}
+			}
+
+			// Toggle in the snapshot
+			appliancesSnapshot[i].IsOn = !appliancesSnapshot[i].IsOn
+			newIsOn = appliancesSnapshot[i].IsOn
+			status = "OFF"
+			if newIsOn {
+				status = "ON"
+			}
+			name = appliancesSnapshot[i].Name
 			break
 		}
 	}
 
-	if appliance == nil {
-		m.mu.Unlock()
+	if !applianceSeen {
 		m.Log(fmt.Sprintf("Appliance not found: %s", applianceID), "error")
+		logger.WarnWithFields(context.Background(), "ToggleAppliance aborted: appliance not found", map[string]interface{}{
+			"appliance_id": applianceID,
+		})
 		return
 	}
 
-	// Check if this is the first appliance being turned on (all currently off)
-	turningOn := !appliance.IsOn
-	allOff := true
-	if turningOn {
-		for i := range m.meterState.Appliances {
-			if m.meterState.Appliances[i].IsOn {
-				allOff = false
+	// Short critical section: apply the new on/off state back into the real state
+	m.withState(func(state *SmartMeterState) {
+		for i := range state.Appliances {
+			if state.Appliances[i].ID == applianceID {
+				state.Appliances[i].IsOn = newIsOn
 				break
 			}
 		}
-	}
+	})
 
-	// Toggle appliance
-	appliance.IsOn = !appliance.IsOn
-	status := "OFF"
-	if appliance.IsOn {
-		status = "ON"
-	}
-	name := appliance.Name
-	needsAuth := turningOn && allOff && !m.device.HasActiveAuthorization() && !m.device.IsPendingAuthorization()
+	needsAuth := turningOn && allOffBefore && !m.device.HasActiveAuthorization() && !m.device.IsPendingAuthorization()
+	logger.InfoWithFields(context.Background(), "ToggleAppliance state after toggle", map[string]interface{}{
+		"appliance_id":   applianceID,
+		"appliance_name": name,
+		"turned_on":      newIsOn,
+		"all_off_before": allOffBefore,
+		"needs_auth":     needsAuth,
+	})
 	var reason string
 	if needsAuth {
 		reason = "INITIATE_USAGE"
 	}
-	m.mu.Unlock()
-
 	m.Log(name+" turned "+status, "info")
-	m.notifyStateChange()
 
 	if needsAuth {
 		go func(r string) {
@@ -472,13 +445,13 @@ func (m *SmartMeter) Shutdown() {
 	// This ensures any concurrent operations (like updatePowerReadings) see OFFLINE status immediately
 	// Note: DeviceInterface should handle this, but for shutdown we do it directly
 	// TODO: Add a Shutdown method to DeviceInterface that handles this
-	m.mu.Lock()
-	for i := range m.meterState.Appliances {
-		m.meterState.Appliances[i].IsOn = false
-		m.meterState.Appliances[i].CurrentWatts = 0
-	}
-	m.meterState.InstantPower = 0
-	m.mu.Unlock()
+	m.withState(func(state *SmartMeterState) {
+		for i := range state.Appliances {
+			state.Appliances[i].IsOn = false
+			state.Appliances[i].CurrentWatts = 0
+		}
+		state.InstantPower = 0
+	})
 
 	// Stop tickers (after setting status to prevent concurrent updates)
 	if m.powerUpdateTicker != nil {
@@ -498,8 +471,6 @@ func (m *SmartMeter) Shutdown() {
 	// MQTT status will be updated by DeviceInterface on disconnect
 
 	m.Log("Meter system shut down", "info")
-	// Single state change notification with final OFFLINE status
-	m.notifyStateChange()
 }
 
 // StartSimulation starts the meter simulation (power updates and usage reporting)
@@ -507,7 +478,16 @@ func (m *SmartMeter) startSimulationLoops() {
 	// Power update ticker (1 second)
 	m.powerUpdateTicker = time.NewTicker(1 * time.Second)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.ErrorWithFields(context.Background(), "panic in power update goroutine", nil, map[string]interface{}{
+					"panic": r,
+				})
+			}
+		}()
+
 		for range m.powerUpdateTicker.C {
+			logger.Debug(context.Background(), "updatePowerReadings tick")
 			m.updatePowerReadings()
 		}
 	}()
@@ -523,6 +503,14 @@ func (m *SmartMeter) startSimulationLoops() {
 	m.currentReportingInterval = reportingInterval
 	m.usageTicker = time.NewTicker(time.Duration(reportingInterval) * time.Second)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.ErrorWithFields(context.Background(), "panic in usage reporting goroutine", nil, map[string]interface{}{
+					"panic": r,
+				})
+			}
+		}()
+
 		for range m.usageTicker.C {
 			shouldReport, reportID, kWh := m.ReportUsage()
 			if shouldReport {
@@ -534,22 +522,26 @@ func (m *SmartMeter) startSimulationLoops() {
 
 // restartUsageTicker restarts the usage ticker with a new interval
 func (m *SmartMeter) restartUsageTicker(interval int32) {
-	m.mu.Lock()
-
-	// Stop existing ticker if any
+	// Stop existing ticker if any and update stored interval
 	if m.usageTicker != nil {
 		m.usageTicker.Stop()
 		m.usageTicker = nil
 	}
 
-	// Update stored interval
 	m.currentReportingInterval = interval
 
 	// Start with new interval
 	m.usageTicker = time.NewTicker(time.Duration(interval) * time.Second)
-	m.mu.Unlock()
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.ErrorWithFields(context.Background(), "panic in usage reporting goroutine (restart)", nil, map[string]interface{}{
+					"panic": r,
+				})
+			}
+		}()
+
 		for range m.usageTicker.C {
 			shouldReport, reportID, kWh := m.ReportUsage()
 			if shouldReport {
@@ -563,51 +555,61 @@ func (m *SmartMeter) restartUsageTicker(interval int32) {
 
 // ReportUsage generates and reports usage (should be called by the usage ticker)
 func (m *SmartMeter) ReportUsage() (shouldReport bool, reportID string, kWhConsumed float64) {
-	m.mu.Lock()
+	// Snapshot external config and status first (no SmartMeter lock involved)
+	deviceStatus := m.device.GetDeviceStatus()
+	config := m.device.GetDeviceConfig()
 
-	if m.device.GetDeviceStatus() != "ONLINE" || m.meterState.InstantPower == 0 {
-		m.mu.Unlock()
+	if deviceStatus != "ONLINE" {
 		return false, "", 0
 	}
 
-	// Calculate kWh consumed in this interval
-	config := m.device.GetDeviceConfig()
+	// Snapshot instantaneous power under read lock, then calculate outside the lock
+	m.mu.RLock()
+	instantPower := m.meterState.InstantPower
+	m.mu.RUnlock()
+
+	if instantPower == 0 {
+		return false, "", 0
+	}
+
+	// Calculate kWh consumed in this interval (outside lock)
 	// Use default of 60 seconds if config is nil (e.g., when MQTT connection fails)
 	defaultReportingInterval := float64(60)
 	intervalSeconds := defaultReportingInterval
 	if config != nil && config.ReportingInterval > 0 {
 		intervalSeconds = float64(config.ReportingInterval)
 	}
-	kWhConsumed = (float64(m.meterState.InstantPower) / 1000.0) * (intervalSeconds / 3600.0)
+	kWhConsumed = (float64(instantPower) / 1000.0) * (intervalSeconds / 3600.0)
 
-	// Update total consumption
-	m.meterState.TotalConsumption += kWhConsumed
+	// Now lock briefly just to update total consumption
+	m.withState(func(state *SmartMeterState) {
+		state.TotalConsumption += kWhConsumed
+	})
 
 	reportID = generateID()
-	m.mu.Unlock()
-
-	m.notifyStateChange()
 	return true, reportID, kWhConsumed
 }
 
 // updatePowerReadings updates power consumption for all appliances
 func (m *SmartMeter) updatePowerReadings() {
-	m.mu.Lock()
-
 	// Skip if device is offline to prevent race conditions during shutdown
 	if m.device.GetDeviceStatus() == "OFFLINE" {
-		m.mu.Unlock()
 		return
 	}
 
-	// Ensure appliances are initialized
-	m.ensureAppliancesInitialized()
+	// Snapshot current appliances under read lock
+	m.mu.RLock()
+	appliancesSnapshot := make([]Appliance, len(m.meterState.Appliances))
+	copy(appliancesSnapshot, m.meterState.Appliances)
+	m.mu.RUnlock()
 
+	// Calculate new power readings outside the lock
+	newWatts := make([]int, len(appliancesSnapshot))
 	totalPower := 0
-	for i := range m.meterState.Appliances {
-		appliance := &m.meterState.Appliances[i]
+	for i := range appliancesSnapshot {
+		appliance := &appliancesSnapshot[i]
 		if !appliance.IsOn {
-			appliance.CurrentWatts = 0
+			newWatts[i] = 0
 			continue
 		}
 
@@ -618,13 +620,20 @@ func (m *SmartMeter) updatePowerReadings() {
 		currentWatts := math.Max(float64(appliance.MinWatts),
 			math.Min(float64(appliance.MaxWatts), baseWatts+variance))
 
-		appliance.CurrentWatts = int(math.Round(currentWatts))
-		totalPower += appliance.CurrentWatts
+		watts := int(math.Round(currentWatts))
+		newWatts[i] = watts
+		totalPower += watts
 	}
 
-	m.meterState.InstantPower = totalPower
-	m.mu.Unlock()
-	m.notifyStateChange()
+	// Briefly lock just to apply the new readings
+	m.withState(func(state *SmartMeterState) {
+		for i := range state.Appliances {
+			if i < len(newWatts) {
+				state.Appliances[i].CurrentWatts = newWatts[i]
+			}
+		}
+		state.InstantPower = totalPower
+	})
 }
 
 // OnInvoiceSettled is called when an invoice is settled
@@ -646,7 +655,6 @@ func (m *SmartMeter) OnInvoiceFailed(invoiceID string) {
 func (m *SmartMeter) OnControlReboot() {
 	m.Shutdown()
 	m.Start()
-	m.notifyStateChange()
 }
 
 // OnLog is called when a log message should be recorded
