@@ -22,28 +22,22 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // s
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
+const BASELINE_VUS = 500;
+const INCREMENT_VUS = 25;
 const WARMUP = '30s';
 const MEASURE = '60s';
 
+
 // Define load test stages
 const loadTestStages = [
-  { duration: WARMUP, target: 25 },
-  { duration: MEASURE, target: 25 },   // warmup
-  { duration: WARMUP, target: 50 },
-  { duration: MEASURE, target: 50 },
-  { duration: WARMUP, target: 0 },
-  { duration: WARMUP, target: 75 },
-  { duration: MEASURE, target: 75 },
-  { duration: WARMUP, target: 100 },
-  { duration: MEASURE, target: 100 },
-  { duration: WARMUP, target: 125 },
-  { duration: MEASURE, target: 125 },
-  { duration: WARMUP, target: 150 },
-  { duration: MEASURE, target: 150 },
-  { duration: WARMUP, target: 175 },
-  { duration: MEASURE, target: 175 },
-  { duration: WARMUP, target: 200 },
-  { duration: MEASURE, target: 200 },
+  { duration: WARMUP, target: BASELINE_VUS },
+  { duration: MEASURE, target: BASELINE_VUS },   // warmup
+  { duration: WARMUP, target: BASELINE_VUS + INCREMENT_VUS },
+  { duration: MEASURE, target: BASELINE_VUS + INCREMENT_VUS },
+  { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 2) },
+  { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 2) },
+  { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 3) },
+  { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 3) },
 ];
 
 // Calculate maximum VU count from stages (for setup - register all devices that will be used)
@@ -52,13 +46,14 @@ const VUsCount = maxVUsFromStages;
 
 // --- Configuration ---
 export const options = {
-  setupTimeout: '5m', // Allow up to 5 minutes for setup (device batch registration)
+  setupTimeout: '10m', // Allow up to 10 minutes for setup (device batch registration + connection)
   scenarios: {
-    devices: {
+    load_usage: {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: loadTestStages,
       gracefulRampDown: '2m',
+      exec: 'load_usage',
       tags: { type: 'loadtest' },
     },
   },
@@ -133,52 +128,87 @@ export function setup() {
     return {
       deviceIDs: [],
       registered: 0,
+      connected: 0,
     };
   }
 
-  const setupEndTime = new Date().toISOString();
-  console.log(`[${setupEndTime}] Setup complete: ${registered}/${VUsCount} devices registered`);
-  return {
-    deviceIDs,
-    registered,
-  };
-}
+  // Connect devices in batches
+  const CONNECT_BATCH_SIZE = parseInt(__ENV.CONNECT_BATCH_SIZE || INCREMENT_VUS); // Devices per batch
+  const CONNECT_BATCH_SLEEP = parseInt(__ENV.CONNECT_BATCH_SLEEP || '5'); // Seconds to sleep between batches
+  const CONNECT_TIMEOUT = __ENV.CONNECT_TIMEOUT || '120s'; // Timeout for each connect request
 
-// --- Main VU Function ---
-export default function () {
-  const vuID = __VU;
-  const deviceID = generateDeviceID(vuID);
-
-  // Connect device on first iteration
-  if (__ITER === 0) {
-    const firstIterationTime = new Date().toISOString();
-    console.log(`[${firstIterationTime}] VU ${vuID} (${deviceID}) - First iteration started, connecting...`);
-
-    const deviceSecret = `${deviceID}_password`;
-    const connectPayload = JSON.stringify({
-      secret: deviceSecret,
-    });
-
-    const connectRes = http.post(
-      `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/connect`,
-      connectPayload,
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: '120s', // Allow time for invoice + authorization
+  console.log(`Connecting ${registered} devices in batches of ${CONNECT_BATCH_SIZE} (sleep ${CONNECT_BATCH_SLEEP}s between batches)...`);
+  
+  let connected = 0;
+  let failed = 0;
+  
+  for (let i = 0; i < deviceIDs.length; i += CONNECT_BATCH_SIZE) {
+    const batch = deviceIDs.slice(i, i + CONNECT_BATCH_SIZE);
+    const batchNum = Math.floor(i / CONNECT_BATCH_SIZE) + 1;
+    const totalBatches = Math.ceil(deviceIDs.length / CONNECT_BATCH_SIZE);
+    
+    console.log(`Connecting batch ${batchNum}/${totalBatches} (${batch.length} devices)...`);
+    
+    // Connect devices sequentially within the batch (k6 http.post is synchronous)
+    let batchConnected = 0;
+    let batchFailed = 0;
+    
+    for (const deviceID of batch) {
+      const deviceSecret = `${deviceID}_password`;
+      const connectPayload = JSON.stringify({
+        secret: deviceSecret,
+      });
+      
+      const connectRes = http.post(
+        `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/connect`,
+        connectPayload,
+        {
+          headers: { 'Content-Type': 'application/json' },
+          timeout: CONNECT_TIMEOUT,
+        }
+      );
+      
+      if (connectRes.status === 200) {
+        batchConnected++;
+        deviceConnected.add(1);
+      } else {
+        batchFailed++;
+        deviceConnectionFailed.add(1);
+        console.error(`Failed to connect device ${deviceID}: ${connectRes.status} - ${connectRes.body}`);
       }
-    );
-
-    if (check(connectRes, { 'Device connected': (r) => r.status === 200 })) {
-      deviceConnected.add(1);
-      console.log(`VU ${vuID} successfully connected device ${deviceID}`);
-    } else {
-      deviceConnectionFailed.add(1);
-      console.error(`VU ${vuID} failed to connect device ${deviceID}: ${connectRes.status} - ${connectRes.body}`);
+    }
+    
+    connected += batchConnected;
+    failed += batchFailed;
+    
+    console.log(`Batch ${batchNum}/${totalBatches} complete: ${batchConnected} connected, ${batchFailed} failed (total: ${connected}/${registered})`);
+    
+    // Sleep between batches (except after the last batch)
+    if (i + CONNECT_BATCH_SIZE < deviceIDs.length) {
+      console.log(`Sleeping ${CONNECT_BATCH_SLEEP}s before next batch...`);
+      sleep(CONNECT_BATCH_SLEEP);
     }
   }
 
+  const setupEndTime = new Date().toISOString();
+  console.log(`[${setupEndTime}] Setup complete: ${registered}/${VUsCount} devices registered, ${connected}/${registered} devices connected, ${failed} failed`);
+  
+  return {
+    deviceIDs,
+    registered,
+    connected,
+    failed,
+  };
+}
+
+// --- Load Usage Scenario ---
+export function load_usage() {
+  const vuID = __VU;
+  const deviceID = generateDeviceID(vuID);
+
   // k6 calls this function in a loop - each call sends one usage report
   // The httpdevice handles all the MQTT logic, authorization maintenance, etc.
+  // Devices are assumed to be already connected from setup phase
 
   // Generate a random measurement between 0.1 and 1.0 kWh
   const measure = 0.1 + Math.random() * 0.9;
@@ -195,7 +225,10 @@ export default function () {
   const usageRes = http.post(
     `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/usage`,
     usagePayload,
-    { headers: { 'Content-Type': 'application/json' } }
+    { 
+      headers: { 'Content-Type': 'application/json' },
+      tags: { type: 'loadtest' },
+    }
   );
 
   if (usageRes.status === 200) {
@@ -221,6 +254,13 @@ export default function () {
   // This creates realistic, desynchronized load patterns
   // const sleepDuration = 0.1 + Math.random() * 0.5; // Random between 0.1 and 1.0 seconds
   // sleep(sleepDuration);
+}
+
+// --- Main VU Function (default - not used when exec is specified) ---
+export default function () {
+  // This function is not used when scenarios specify exec
+  // It's kept for compatibility
+  load_usage();
 }
 
 // --- Teardown ---

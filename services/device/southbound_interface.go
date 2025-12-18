@@ -72,7 +72,7 @@ func extractDeviceID(topic string) string {
 }
 
 // handleHeartbeatMessage decodes MQTT message and calls callback with clean payload
-func (sb *SouthboundInterface) handleHeartbeatMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) {
+func (sb *SouthboundInterface) handleHeartbeatMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) error {
 	topic := msg.Topic()
 	deviceID := extractDeviceID(topic)
 
@@ -81,14 +81,15 @@ func (sb *SouthboundInterface) handleHeartbeatMessage(ctx context.Context, clien
 	if err := opts.Unmarshal(msg.Payload(), &payload); err != nil {
 		logger.WithDeviceID(deviceID).
 			Error(ctx, "Error parsing heartbeat payload on southbound mqtt", err)
-		return
+		return err
 	}
 
 	sb.handler.HandleHeartbeat(ctx, deviceID, &payload)
+	return nil
 }
 
 // handleUsageMessage decodes MQTT message and calls callback with clean payload
-func (sb *SouthboundInterface) handleUsageMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) {
+func (sb *SouthboundInterface) handleUsageMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) error {
 	// Copy payload since we'll be processing in a goroutine and the original may be reused
 	payloadBytes := make([]byte, len(msg.Payload()))
 	copy(payloadBytes, msg.Payload())
@@ -100,14 +101,15 @@ func (sb *SouthboundInterface) handleUsageMessage(ctx context.Context, client mq
 	if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
 		logger.WithDeviceID(deviceID).
 			Error(ctx, "Error parsing usage payload on southbound mqtt", err)
-		return
+		return err
 	}
 
 	sb.handler.HandleUsage(ctx, deviceID, &payload)
+	return nil
 }
 
 // handleAuthorizationRequestMessage decodes MQTT message and calls callback with clean payload
-func (sb *SouthboundInterface) handleAuthorizationRequestMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) {
+func (sb *SouthboundInterface) handleAuthorizationRequestMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) error {
 	// Copy payload since we'll be processing in a goroutine and the original may be reused
 	payloadBytes := make([]byte, len(msg.Payload()))
 	copy(payloadBytes, msg.Payload())
@@ -130,14 +132,15 @@ func (sb *SouthboundInterface) handleAuthorizationRequestMessage(ctx context.Con
 				"payload": string(payloadBytes),
 			}).
 			Error(ctx, "Error parsing authorization request payload on southbound mqtt", err)
-		return
+		return err
 	}
 
 	sb.handler.HandleAuthorizationRequest(ctx, deviceID, &payload)
+	return nil
 }
 
 // handleInvoiceRequestMessage decodes MQTT message and calls callback with clean payload
-func (sb *SouthboundInterface) handleInvoiceRequestMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) {
+func (sb *SouthboundInterface) handleInvoiceRequestMessage(ctx context.Context, client mqtt.Client, msg mqtt.Message) error {
 	// Copy payload since we'll be processing in a goroutine and the original may be reused
 	payloadBytes := make([]byte, len(msg.Payload()))
 	copy(payloadBytes, msg.Payload())
@@ -149,8 +152,9 @@ func (sb *SouthboundInterface) handleInvoiceRequestMessage(ctx context.Context, 
 	if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
 		logger.WithDeviceID(deviceID).
 			Error(ctx, "Error parsing invoice request payload on southbound mqtt", err)
-		return
+		return err
 	}
 
 	sb.handler.HandleInvoiceRequest(ctx, deviceID, &payload)
+	return nil
 }

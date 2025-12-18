@@ -20,6 +20,11 @@ scrape_configs:
     static_configs:
       - targets: ['${TARGET_HOST}:9465']
 
+  # Device service
+  - job_name: 'device'
+    static_configs:
+      - targets: ['${TARGET_HOST}:9466']
+
   # Redis exporter
   - job_name: 'redis'
     static_configs:

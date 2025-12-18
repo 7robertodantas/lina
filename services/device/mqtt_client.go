@@ -21,8 +21,9 @@ var (
 	mqttReceiveTracer = otel.Tracer("mqtt.receive")
 )
 
-// MQTTMessageHandlerWithContext is a custom handler that receives context
-type MQTTMessageHandlerWithContext func(ctx context.Context, client mqtt.Client, msg mqtt.Message)
+// MQTTMessageHandlerWithContext is a custom handler that receives context and returns an error
+// so that the caller can record success/failure metrics.
+type MQTTMessageHandlerWithContext func(ctx context.Context, client mqtt.Client, msg mqtt.Message) error
 
 // MQTTClient wraps the MQTT client and connection logic
 type MQTTClient struct {
@@ -286,7 +287,8 @@ func (m *MQTTClient) Publish(ctx context.Context, topic string, qos byte, retain
 
 // wrapHandlerWithTracing wraps a context-aware handler with OpenTelemetry tracing
 // and ensures the handler is executed in a separate goroutine so that MQTT
-// callbacks are not blocked by message processing.
+// callbacks are not blocked by message processing. It also records Prometheus
+// counters for received, processed, and failed messages via OpenTelemetry metrics.
 func wrapHandlerWithTracing(handler MQTTMessageHandlerWithContext) mqtt.MessageHandler {
 	return func(client mqtt.Client, msg mqtt.Message) {
 		topic := msg.Topic()
@@ -301,13 +303,22 @@ func wrapHandlerWithTracing(handler MQTTMessageHandlerWithContext) mqtt.MessageH
 			),
 		)
 
+		// Record that we received a message on this topic
+		RecordMQTTMessageReceived(ctx, topic, deviceID)
+
 		// Process the message in a goroutine to avoid blocking the MQTT client
 		go func() {
 			defer span.End()
 
-			// Call the custom handler with context
-			handler(ctx, client, msg)
+			// Call the custom handler with context and record success/failure
+			if err := handler(ctx, client, msg); err != nil {
+				span.RecordError(err)
+				span.SetStatus(codes.Error, err.Error())
+				RecordMQTTMessageFailed(ctx, topic, deviceID)
+				return
+			}
 
+			RecordMQTTMessageProcessed(ctx, topic, deviceID)
 			span.SetStatus(codes.Ok, "processed")
 		}()
 	}

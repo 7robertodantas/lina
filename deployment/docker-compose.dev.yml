@@ -38,7 +38,7 @@ services:
     build:
       context: ../infrastructure/mosquitto
       dockerfile: Dockerfile
-    container_name: mosquitto
+    container_name: mosquitto      
     ports:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
@@ -61,6 +61,8 @@ services:
       args:
         SERVICE: device
     container_name: device
+    ports:
+      - "9466:9464" # Metrics
     environment:
       - MQTT_BROKER=mosquitto
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
