@@ -285,6 +285,8 @@ func (m *MQTTClient) Publish(ctx context.Context, topic string, qos byte, retain
 }
 
 // wrapHandlerWithTracing wraps a context-aware handler with OpenTelemetry tracing
+// and ensures the handler is executed in a separate goroutine so that MQTT
+// callbacks are not blocked by message processing.
 func wrapHandlerWithTracing(handler MQTTMessageHandlerWithContext) mqtt.MessageHandler {
 	return func(client mqtt.Client, msg mqtt.Message) {
 		topic := msg.Topic()
@@ -298,12 +300,16 @@ func wrapHandlerWithTracing(handler MQTTMessageHandlerWithContext) mqtt.MessageH
 				attribute.String("mqtt.operation", "RECEIVE"),
 			),
 		)
-		defer span.End()
 
-		// Call the custom handler with context
-		handler(ctx, client, msg)
+		// Process the message in a goroutine to avoid blocking the MQTT client
+		go func() {
+			defer span.End()
 
-		span.SetStatus(codes.Ok, "processed")
+			// Call the custom handler with context
+			handler(ctx, client, msg)
+
+			span.SetStatus(codes.Ok, "processed")
+		}()
 	}
 }
 

@@ -95,20 +95,15 @@ func (sb *SouthboundInterface) handleUsageMessage(ctx context.Context, client mq
 	topic := msg.Topic()
 	deviceID := extractDeviceID(topic)
 
-	// Process in goroutine to avoid blocking MQTT message handler
-	go func() {
-		processCtx := context.Background()
+	var payload mqttpb.UsagePayload
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
+		logger.WithDeviceID(deviceID).
+			Error(ctx, "Error parsing usage payload on southbound mqtt", err)
+		return
+	}
 
-		var payload mqttpb.UsagePayload
-		opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-		if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
-			logger.WithDeviceID(deviceID).
-				Error(processCtx, "Error parsing usage payload on southbound mqtt", err)
-			return
-		}
-
-		sb.handler.HandleUsage(processCtx, deviceID, &payload)
-	}()
+	sb.handler.HandleUsage(ctx, deviceID, &payload)
 }
 
 // handleAuthorizationRequestMessage decodes MQTT message and calls callback with clean payload
@@ -119,31 +114,26 @@ func (sb *SouthboundInterface) handleAuthorizationRequestMessage(ctx context.Con
 	topic := msg.Topic()
 	deviceID := extractDeviceID(topic)
 
-	// Process in goroutine to avoid blocking MQTT message handler
-	go func() {
-		processCtx := context.Background()
+	// Log that we received a message on this topic
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Received message on authorization request topic on southbound mqtt", map[string]interface{}{
+			"topic":        topic,
+			"payload_size": len(payloadBytes),
+			"payload":      string(payloadBytes),
+		})
 
-		// Log that we received a message on this topic
+	var payload mqttpb.AuthorizationRequestPayload
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
 		logger.WithDeviceID(deviceID).
-			InfoWithFields(processCtx, "Received message on authorization request topic on southbound mqtt", map[string]interface{}{
-				"topic":        topic,
-				"payload_size": len(payloadBytes),
-				"payload":      string(payloadBytes),
-			})
+			WithFields(map[string]interface{}{
+				"payload": string(payloadBytes),
+			}).
+			Error(ctx, "Error parsing authorization request payload on southbound mqtt", err)
+		return
+	}
 
-		var payload mqttpb.AuthorizationRequestPayload
-		opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-		if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
-			logger.WithDeviceID(deviceID).
-				WithFields(map[string]interface{}{
-					"payload": string(payloadBytes),
-				}).
-				Error(processCtx, "Error parsing authorization request payload on southbound mqtt", err)
-			return
-		}
-
-		sb.handler.HandleAuthorizationRequest(processCtx, deviceID, &payload)
-	}()
+	sb.handler.HandleAuthorizationRequest(ctx, deviceID, &payload)
 }
 
 // handleInvoiceRequestMessage decodes MQTT message and calls callback with clean payload
@@ -154,18 +144,13 @@ func (sb *SouthboundInterface) handleInvoiceRequestMessage(ctx context.Context, 
 	topic := msg.Topic()
 	deviceID := extractDeviceID(topic)
 
-	// Process in goroutine to avoid blocking MQTT message handler
-	go func() {
-		processCtx := context.Background()
+	var payload mqttpb.InvoiceRequestPayload
+	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
+	if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
+		logger.WithDeviceID(deviceID).
+			Error(ctx, "Error parsing invoice request payload on southbound mqtt", err)
+		return
+	}
 
-		var payload mqttpb.InvoiceRequestPayload
-		opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-		if err := opts.Unmarshal(payloadBytes, &payload); err != nil {
-			logger.WithDeviceID(deviceID).
-				Error(processCtx, "Error parsing invoice request payload on southbound mqtt", err)
-			return
-		}
-
-		sb.handler.HandleInvoiceRequest(processCtx, deviceID, &payload)
-	}()
+	sb.handler.HandleInvoiceRequest(ctx, deviceID, &payload)
 }
