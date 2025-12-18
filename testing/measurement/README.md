@@ -109,9 +109,100 @@ python3 monitor.py
 
 The measurement approach is non-intrusive and doesn't generate additional load on the target system.
 
+## Exporting Metrics from Grafana/Prometheus
+
+The `export_metrics.py` script allows you to export all metrics from your Grafana monitoring dashboard for a specific time period to JSON and CSV files.
+
+### Usage
+
+1. **Export metrics for a time period**:
+   ```bash
+   python3 export_metrics.py \
+     --from "2025-12-18T18:25:04.648Z" \
+     --to "2025-12-18T18:34:57.053Z"
+   ```
+
+2. **Specify Prometheus URL** (if not running on localhost:9090):
+   ```bash
+   python3 export_metrics.py \
+     --from "2025-12-18T18:25:04.648Z" \
+     --to "2025-12-18T18:34:57.053Z" \
+     --prometheus-url http://192.168.0.170:9090
+   ```
+
+3. **Export only JSON or CSV**:
+   ```bash
+   python3 export_metrics.py \
+     --from "2025-12-18T18:25:04.648Z" \
+     --to "2025-12-18T18:34:57.053Z" \
+     --format csv
+   ```
+
+4. **Custom output directory**:
+   ```bash
+   python3 export_metrics.py \
+     --from "2025-12-18T18:25:04.648Z" \
+     --to "2025-12-18T18:34:57.053Z" \
+     --output-dir my_metrics
+   ```
+
+### Output Format
+
+The script extracts all Prometheus queries from the Grafana dashboard and exports each metric to separate files:
+
+- **JSON files**: Contain the full Prometheus API response including metadata
+- **CSV files**: Time-series data with timestamps and values for each series
+
+Files are named based on the panel title from the dashboard (sanitized for filesystem compatibility).
+
+### Example Output
+
+```
+metrics_export/
+├── Disk_write_throughput.json
+├── Disk_write_throughput.csv
+├── Container_CPU_Usage.json
+├── Container_CPU_Usage.csv
+├── Consumption_Recorded_per_second.json
+├── Consumption_Recorded_per_second.csv
+...
+```
+
+### Plotting Exported Metrics
+
+After exporting metrics, you can generate graphs from the CSV files using `plot_exported_metrics.py`:
+
+```bash
+python3 plot_exported_metrics.py
+```
+
+This will:
+- Read all CSV files from the `metrics_export/` directory
+- Generate matplotlib graphs in the same style as `plot_graphs.py`
+- Save PNG files to the `graphs/` directory
+
+**Options:**
+- `--input-dir`: Specify custom input directory (default: `metrics_export`)
+- `--output-dir`: Specify custom output directory (default: `graphs`)
+
+**Example:**
+```bash
+python3 plot_exported_metrics.py --input-dir my_metrics --output-dir my_graphs
+```
+
+The script automatically handles:
+- Single-series metrics (one value column)
+- Multi-series metrics (multiple labeled series)
+- Proper datetime formatting on x-axis
+- Clean legend placement
+- **Automatic unit extraction from Grafana dashboard** - Y-axis labels use the correct units (e.g., "debits/s", "Bytes/s", "%", "s", "events/s", etc.)
+
+**Note:** The script reads unit information from the Grafana dashboard JSON file. If a metric doesn't have a unit defined in the dashboard, it will use "Value" as the default label.
+
 ## Notes
 
 - The CSV file is appended to, so you can run multiple measurement sessions
 - Graphs are regenerated from the entire CSV file each time `plot_graphs.py` runs
 - Make sure you have write permissions in the measurement directory
 - For long-running measurement sessions, consider rotating the CSV file periodically
+- The `export_metrics.py` script requires Prometheus to be accessible via HTTP API
