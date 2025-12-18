@@ -22,106 +22,12 @@
   "links": [],
   "panels": [
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisBorderShow": false,
-            "axisCenteredZero": false,
-            "axisColorMode": "text",
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "barWidthFactor": 0.6,
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "viz": false
-            },
-            "insertNulls": false,
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "auto",
-            "showValues": false,
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
-      "id": 13,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "hideZeros": false,
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "pluginVersion": "12.3.0",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "rate(container_cpu_usage_seconds_total[1m])",
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "New panel",
-      "type": "timeseries"
-    },
-    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 8
+        "y": 0
       },
       "id": 9,
       "panels": [],
@@ -193,10 +99,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 6,
+        "w": 14,
         "x": 0,
-        "y": 9
+        "y": 1
       },
       "id": 3,
       "options": {
@@ -263,8 +169,8 @@
       "gridPos": {
         "h": 6,
         "w": 5,
-        "x": 12,
-        "y": 9
+        "x": 14,
+        "y": 1
       },
       "id": 8,
       "options": {
@@ -327,9 +233,9 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 4,
-        "x": 17,
-        "y": 9
+        "w": 5,
+        "x": 19,
+        "y": 1
       },
       "id": 7,
       "options": {
@@ -406,6 +312,110 @@
               "mode": "off"
             }
           },
+          "fieldMinMax": false,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "debits/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 14,
+        "x": 0,
+        "y": 7
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.0",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum(rate(consumption_events_total[30s]))",
+          "hide": false,
+          "instant": false,
+          "interval": "15",
+          "legendFormat": "Devices",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Consumption Events Emitted",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -423,8 +433,8 @@
       "gridPos": {
         "h": 9,
         "w": 5,
-        "x": 12,
-        "y": 15
+        "x": 14,
+        "y": 7
       },
       "id": 14,
       "options": {
@@ -513,9 +523,9 @@
       },
       "gridPos": {
         "h": 9,
-        "w": 7,
-        "x": 17,
-        "y": 15
+        "w": 5,
+        "x": 19,
+        "y": 7
       },
       "id": 15,
       "options": {
@@ -608,10 +618,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 6,
+        "w": 14,
         "x": 0,
-        "y": 17
+        "y": 13
       },
       "id": 2,
       "options": {
@@ -709,10 +719,10 @@
         "overrides": []
       },
       "gridPos": {
-        "h": 8,
-        "w": 12,
+        "h": 7,
+        "w": 14,
         "x": 0,
-        "y": 25
+        "y": 19
       },
       "id": 4,
       "options": {
@@ -755,7 +765,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 26
       },
       "id": 10,
       "panels": [
@@ -1071,5 +1081,5 @@
   "timezone": "browser",
   "title": "LINA Monitoring",
   "uid": "adp8dtw",
-  "version": 11
+  "version": 1
 }
