@@ -22,7 +22,7 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // s
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
-const BASELINE_VUS = 500;
+const BASELINE_VUS = 25;
 const INCREMENT_VUS = 25;
 const WARMUP = '30s';
 const MEASURE = '60s';
@@ -38,6 +38,9 @@ const loadTestStages = [
   { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 2) },
   { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 3) },
   { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 3) },
+  { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 4) },
+  { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 4) },
+  { duration: MEASURE, target: 0 },
 ];
 
 // Calculate maximum VU count from stages (for setup - register all devices that will be used)

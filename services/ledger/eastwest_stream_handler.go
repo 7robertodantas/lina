@@ -179,7 +179,8 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 	}
 
 	// Record latency only for successfully processed consumptions (no retries/failures).
-	// The timestamp represents when the usage was priced and recorded in the consumption service.
+	// The timestamp represents the original device/MQTT timestamp from when the usage was reported.
+	// This measures end-to-end latency: device usage reported → ledger debit completed.
 	if ts := recorded.GetTimestamp(); ts != "" {
 		// Parse timestamp (support both RFC3339 and RFC3339Nano for safety)
 		parseTimestamp := func(ts string) (time.Time, error) {

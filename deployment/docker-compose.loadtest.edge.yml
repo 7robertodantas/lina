@@ -51,6 +51,8 @@ services:
   device:
     image: 7robertodantas/lnpay-device:latest
     container_name: device
+    ports:
+      - "9466:9464" # Metrics    
     environment:
       - MQTT_BROKER=mosquitto
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}

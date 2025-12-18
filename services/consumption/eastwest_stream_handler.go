@@ -130,8 +130,15 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 			"rounded_up_by": debitMsat - int64(usageDebitMsat),
 		})
 
-	// Use RFC3339Nano to preserve sub-second precision for accurate latency measurements
-	timestamp := time.Now().UTC().Format(time.RFC3339Nano)
+	// Use the original device/MQTT timestamp from the usage record for accurate end-to-end latency measurement
+	// This measures from when the device originally reported usage to when it's debited in the ledger
+	timestamp := usage.GetTimestamp()
+	if timestamp == "" {
+		// Fallback to current time if timestamp is missing (shouldn't happen in normal operation)
+		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
+		logger.WithDeviceID(deviceID).
+			Warn(ctx, "Missing timestamp in usage record, using current time as fallback")
+	}
 
 	if err := esh.publisher.PublishConsumptionEvent(publishCtx, reportID, deviceID, debitMsat, timestamp); err != nil {
 		logger.WithDeviceID(deviceID).

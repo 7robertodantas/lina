@@ -97,7 +97,7 @@ func (ewsi *EastWestStreamInterface) consumeDeviceEvents(ctx context.Context, st
 				Group:    ewsi.groupName,
 				Consumer: ewsi.consumerName,
 				Streams:  []string{streamName, ">"},
-				Count:    10, // Read up to 10 messages at a time
+				Count:    50, // Read up to 10 messages at a time
 				Block:    5 * time.Second,
 			})
 

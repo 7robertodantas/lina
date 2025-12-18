@@ -34,7 +34,7 @@ func (esp *EastWestStreamPublisher) GetOutboxTrigger() chan string {
 }
 
 // PublishConsumptionEvent publishes a DeviceConsumptionRecorded event to event.consumption stream
-// timestamp is when the usage was priced and recorded in the consumption service
+// timestamp is the original device/MQTT timestamp from when the usage was reported (for end-to-end latency measurement)
 func (esp *EastWestStreamPublisher) PublishConsumptionEvent(ctx context.Context, reportID, deviceID string, debitMsat int64, timestamp string) error {
 	// Create DeviceConsumptionRecordedEvent
 	event := &consumptionpb.DeviceConsumptionRecordedEvent{
