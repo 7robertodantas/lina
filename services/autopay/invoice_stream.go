@@ -49,8 +49,8 @@ func (h *InvoiceStreamHandler) Start(ctx context.Context) error {
 					continue
 				}
 
-				// Process invoice update
-				h.handleInvoiceUpdate(ctx, invoice)
+				// Process invoice update concurrently to avoid blocking the stream
+				go h.handleInvoiceUpdate(ctx, invoice)
 			}
 		}
 	}()
