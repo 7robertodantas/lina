@@ -7,12 +7,11 @@
 package lightning
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -138,7 +137,7 @@ type Invoice struct {
 	DeviceId      string                 `protobuf:"bytes,2,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	Bolt11        string                 `protobuf:"bytes,3,opt,name=bolt11,proto3" json:"bolt11,omitempty"` // encoded payment request
 	AmountMsat    int64                  `protobuf:"varint,4,opt,name=amount_msat,json=amountMsat,proto3" json:"amount_msat,omitempty"`
-	Status        InvoiceStatus          `protobuf:"varint,5,opt,name=status,proto3,enum=iot.payperuse.edge.model.lightning.InvoiceStatus" json:"status,omitempty"`
+	Status        InvoiceStatus          `protobuf:"varint,5,opt,name=status,proto3,enum=lina.model.lightning.InvoiceStatus" json:"status,omitempty"`
 	ExpiresAt     string                 `protobuf:"bytes,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"` // ISO-8601 expiration time
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -503,7 +502,7 @@ func (x *InvoiceExpiredEvent) GetTimestamp() string {
 
 type LightningEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Type  LightningEventType     `protobuf:"varint,1,opt,name=type,proto3,enum=iot.payperuse.edge.model.lightning.LightningEventType" json:"type,omitempty"`
+	Type  LightningEventType     `protobuf:"varint,1,opt,name=type,proto3,enum=lina.model.lightning.LightningEventType" json:"type,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*LightningEvent_InvoiceCreated
@@ -611,26 +610,26 @@ var File_model_model_lightning_service_proto protoreflect.FileDescriptor
 
 const file_model_model_lightning_service_proto_rawDesc = "" +
 	"\n" +
-	"#model/model-lightning-service.proto\x12\"iot.payperuse.edge.model.lightning\"\xe8\x01\n" +
+	"#model/model-lightning-service.proto\x12\x14lina.model.lightning\"\xda\x01\n" +
 	"\aInvoice\x12\x1d\n" +
 	"\n" +
 	"invoice_id\x18\x01 \x01(\tR\tinvoiceId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x16\n" +
 	"\x06bolt11\x18\x03 \x01(\tR\x06bolt11\x12\x1f\n" +
 	"\vamount_msat\x18\x04 \x01(\x03R\n" +
-	"amountMsat\x12I\n" +
-	"\x06status\x18\x05 \x01(\x0e21.iot.payperuse.edge.model.lightning.InvoiceStatusR\x06status\x12\x1d\n" +
+	"amountMsat\x12;\n" +
+	"\x06status\x18\x05 \x01(\x0e2#.lina.model.lightning.InvoiceStatusR\x06status\x12\x1d\n" +
 	"\n" +
 	"expires_at\x18\x06 \x01(\tR\texpiresAt\"l\n" +
 	"\x14CreateInvoiceRequest\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1f\n" +
 	"\vamount_msat\x18\x02 \x01(\x03R\n" +
 	"amountMsat\x12\x16\n" +
-	"\x06reason\x18\x03 \x01(\tR\x06reason\"^\n" +
-	"\x15CreateInvoiceResponse\x12E\n" +
-	"\ainvoice\x18\x01 \x01(\v2+.iot.payperuse.edge.model.lightning.InvoiceR\ainvoice\"\\\n" +
-	"\x13InvoiceCreatedEvent\x12E\n" +
-	"\ainvoice\x18\x01 \x01(\v2+.iot.payperuse.edge.model.lightning.InvoiceR\ainvoice\"\xcb\x01\n" +
+	"\x06reason\x18\x03 \x01(\tR\x06reason\"P\n" +
+	"\x15CreateInvoiceResponse\x127\n" +
+	"\ainvoice\x18\x01 \x01(\v2\x1d.lina.model.lightning.InvoiceR\ainvoice\"N\n" +
+	"\x13InvoiceCreatedEvent\x127\n" +
+	"\ainvoice\x18\x01 \x01(\v2\x1d.lina.model.lightning.InvoiceR\ainvoice\"\xcb\x01\n" +
 	"\x13InvoiceSettledEvent\x12\x1d\n" +
 	"\n" +
 	"invoice_id\x18\x01 \x01(\tR\tinvoiceId\x12\x1b\n" +
@@ -642,12 +641,12 @@ const file_model_model_lightning_service_proto_rawDesc = "" +
 	"\n" +
 	"invoice_id\x18\x01 \x01(\tR\tinvoiceId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\x93\x03\n" +
-	"\x0eLightningEvent\x12J\n" +
-	"\x04type\x18\x01 \x01(\x0e26.iot.payperuse.edge.model.lightning.LightningEventTypeR\x04type\x12b\n" +
-	"\x0finvoice_created\x18\x02 \x01(\v27.iot.payperuse.edge.model.lightning.InvoiceCreatedEventH\x00R\x0einvoiceCreated\x12b\n" +
-	"\x0finvoice_settled\x18\x03 \x01(\v27.iot.payperuse.edge.model.lightning.InvoiceSettledEventH\x00R\x0einvoiceSettled\x12b\n" +
-	"\x0finvoice_expired\x18\x04 \x01(\v27.iot.payperuse.edge.model.lightning.InvoiceExpiredEventH\x00R\x0einvoiceExpiredB\t\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\xdb\x02\n" +
+	"\x0eLightningEvent\x12<\n" +
+	"\x04type\x18\x01 \x01(\x0e2(.lina.model.lightning.LightningEventTypeR\x04type\x12T\n" +
+	"\x0finvoice_created\x18\x02 \x01(\v2).lina.model.lightning.InvoiceCreatedEventH\x00R\x0einvoiceCreated\x12T\n" +
+	"\x0finvoice_settled\x18\x03 \x01(\v2).lina.model.lightning.InvoiceSettledEventH\x00R\x0einvoiceSettled\x12T\n" +
+	"\x0finvoice_expired\x18\x04 \x01(\v2).lina.model.lightning.InvoiceExpiredEventH\x00R\x0einvoiceExpiredB\t\n" +
 	"\apayload*\x9e\x01\n" +
 	"\rInvoiceStatus\x12\x1e\n" +
 	"\x1aINVOICE_STATUS_UNSPECIFIED\x10\x00\x12\x1a\n" +
@@ -659,7 +658,7 @@ const file_model_model_lightning_service_proto_rawDesc = "" +
 	" LIGHTNING_EVENT_TYPE_UNSPECIFIED\x10\x00\x12(\n" +
 	"$LIGHTNING_EVENT_TYPE_INVOICE_CREATED\x10\x01\x12(\n" +
 	"$LIGHTNING_EVENT_TYPE_INVOICE_SETTLED\x10\x02\x12(\n" +
-	"$LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED\x10\x03B:Z8github.com/robertodantas/lina/proto/gen/model/lightningb\x06proto3"
+	"$LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED\x10\x03B9Z7github.com/robertodantas/lina/proto/gen/model/lightningb\x06proto3"
 
 var (
 	file_model_model_lightning_service_proto_rawDescOnce sync.Once
@@ -676,24 +675,24 @@ func file_model_model_lightning_service_proto_rawDescGZIP() []byte {
 var file_model_model_lightning_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_model_model_lightning_service_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_model_model_lightning_service_proto_goTypes = []any{
-	(InvoiceStatus)(0),            // 0: iot.payperuse.edge.model.lightning.InvoiceStatus
-	(LightningEventType)(0),       // 1: iot.payperuse.edge.model.lightning.LightningEventType
-	(*Invoice)(nil),               // 2: iot.payperuse.edge.model.lightning.Invoice
-	(*CreateInvoiceRequest)(nil),  // 3: iot.payperuse.edge.model.lightning.CreateInvoiceRequest
-	(*CreateInvoiceResponse)(nil), // 4: iot.payperuse.edge.model.lightning.CreateInvoiceResponse
-	(*InvoiceCreatedEvent)(nil),   // 5: iot.payperuse.edge.model.lightning.InvoiceCreatedEvent
-	(*InvoiceSettledEvent)(nil),   // 6: iot.payperuse.edge.model.lightning.InvoiceSettledEvent
-	(*InvoiceExpiredEvent)(nil),   // 7: iot.payperuse.edge.model.lightning.InvoiceExpiredEvent
-	(*LightningEvent)(nil),        // 8: iot.payperuse.edge.model.lightning.LightningEvent
+	(InvoiceStatus)(0),            // 0: lina.model.lightning.InvoiceStatus
+	(LightningEventType)(0),       // 1: lina.model.lightning.LightningEventType
+	(*Invoice)(nil),               // 2: lina.model.lightning.Invoice
+	(*CreateInvoiceRequest)(nil),  // 3: lina.model.lightning.CreateInvoiceRequest
+	(*CreateInvoiceResponse)(nil), // 4: lina.model.lightning.CreateInvoiceResponse
+	(*InvoiceCreatedEvent)(nil),   // 5: lina.model.lightning.InvoiceCreatedEvent
+	(*InvoiceSettledEvent)(nil),   // 6: lina.model.lightning.InvoiceSettledEvent
+	(*InvoiceExpiredEvent)(nil),   // 7: lina.model.lightning.InvoiceExpiredEvent
+	(*LightningEvent)(nil),        // 8: lina.model.lightning.LightningEvent
 }
 var file_model_model_lightning_service_proto_depIdxs = []int32{
-	0, // 0: iot.payperuse.edge.model.lightning.Invoice.status:type_name -> iot.payperuse.edge.model.lightning.InvoiceStatus
-	2, // 1: iot.payperuse.edge.model.lightning.CreateInvoiceResponse.invoice:type_name -> iot.payperuse.edge.model.lightning.Invoice
-	2, // 2: iot.payperuse.edge.model.lightning.InvoiceCreatedEvent.invoice:type_name -> iot.payperuse.edge.model.lightning.Invoice
-	1, // 3: iot.payperuse.edge.model.lightning.LightningEvent.type:type_name -> iot.payperuse.edge.model.lightning.LightningEventType
-	5, // 4: iot.payperuse.edge.model.lightning.LightningEvent.invoice_created:type_name -> iot.payperuse.edge.model.lightning.InvoiceCreatedEvent
-	6, // 5: iot.payperuse.edge.model.lightning.LightningEvent.invoice_settled:type_name -> iot.payperuse.edge.model.lightning.InvoiceSettledEvent
-	7, // 6: iot.payperuse.edge.model.lightning.LightningEvent.invoice_expired:type_name -> iot.payperuse.edge.model.lightning.InvoiceExpiredEvent
+	0, // 0: lina.model.lightning.Invoice.status:type_name -> lina.model.lightning.InvoiceStatus
+	2, // 1: lina.model.lightning.CreateInvoiceResponse.invoice:type_name -> lina.model.lightning.Invoice
+	2, // 2: lina.model.lightning.InvoiceCreatedEvent.invoice:type_name -> lina.model.lightning.Invoice
+	1, // 3: lina.model.lightning.LightningEvent.type:type_name -> lina.model.lightning.LightningEventType
+	5, // 4: lina.model.lightning.LightningEvent.invoice_created:type_name -> lina.model.lightning.InvoiceCreatedEvent
+	6, // 5: lina.model.lightning.LightningEvent.invoice_settled:type_name -> lina.model.lightning.InvoiceSettledEvent
+	7, // 6: lina.model.lightning.LightningEvent.invoice_expired:type_name -> lina.model.lightning.InvoiceExpiredEvent
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	7, // [7:7] is the sub-list for extension type_name

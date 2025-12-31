@@ -7,12 +7,11 @@
 package mqtt
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -299,7 +298,7 @@ func (InvoiceStatus) EnumDescriptor() ([]byte, []int) {
 type HeartbeatPayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	Status        DeviceStatus           `protobuf:"varint,2,opt,name=status,proto3,enum=iot.payperuse.edge.model.mqtt.DeviceStatus" json:"status,omitempty"`
+	Status        DeviceStatus           `protobuf:"varint,2,opt,name=status,proto3,enum=lina.model.mqtt.DeviceStatus" json:"status,omitempty"`
 	Timestamp     string                 `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // ISO-8601 timestamp
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -361,7 +360,7 @@ type ConfigPayload struct {
 	DeviceId             string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	MeasurementUnit      string                 `protobuf:"bytes,2,opt,name=measurement_unit,json=measurementUnit,proto3" json:"measurement_unit,omitempty"` // e.g., "kWh", "L", "pages"
 	UnitPriceMsat        int64                  `protobuf:"varint,3,opt,name=unit_price_msat,json=unitPriceMsat,proto3" json:"unit_price_msat,omitempty"`    // price per unit in millisatoshis
-	ReportingStrategy    ReportingStrategy      `protobuf:"varint,4,opt,name=reporting_strategy,json=reportingStrategy,proto3,enum=iot.payperuse.edge.model.mqtt.ReportingStrategy" json:"reporting_strategy,omitempty"`
+	ReportingStrategy    ReportingStrategy      `protobuf:"varint,4,opt,name=reporting_strategy,json=reportingStrategy,proto3,enum=lina.model.mqtt.ReportingStrategy" json:"reporting_strategy,omitempty"`
 	ReportingInterval    int32                  `protobuf:"varint,5,opt,name=reporting_interval,json=reportingInterval,proto3" json:"reporting_interval,omitempty"`            // seconds between reports
 	HeartbeatInterval    int32                  `protobuf:"varint,6,opt,name=heartbeat_interval,json=heartbeatInterval,proto3" json:"heartbeat_interval,omitempty"`            // expected heartbeat frequency (seconds)
 	AuthorizeRequestMsat int64                  `protobuf:"varint,7,opt,name=authorize_request_msat,json=authorizeRequestMsat,proto3" json:"authorize_request_msat,omitempty"` // expected amount in each authorization request
@@ -458,7 +457,7 @@ func (x *ConfigPayload) GetTimestamp() string {
 
 type ControlPayload struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	Command         ControlCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=iot.payperuse.edge.model.mqtt.ControlCommand" json:"command,omitempty"`
+	Command         ControlCommand         `protobuf:"varint,1,opt,name=command,proto3,enum=lina.model.mqtt.ControlCommand" json:"command,omitempty"`
 	Reason          string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`                                          // optional: context hint
 	Id              string                 `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`                                                  // optional: for PING command
 	AuthorizationId string                 `protobuf:"bytes,4,opt,name=authorization_id,json=authorizationId,proto3" json:"authorization_id,omitempty"` // optional: for AUTHORIZATION command
@@ -603,11 +602,11 @@ func (x *BalancePayload) GetTimestamp() string {
 type UsagePayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	ReportId      string                 `protobuf:"bytes,2,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"`                                       // unique identifier for idempotency
-	Strategy      ReportingStrategy      `protobuf:"varint,3,opt,name=strategy,proto3,enum=iot.payperuse.edge.model.mqtt.ReportingStrategy" json:"strategy,omitempty"` // "interval" | "delta" | "total"
-	Measure       float64                `protobuf:"fixed64,4,opt,name=measure,proto3" json:"measure,omitempty"`                                                       // amount consumed in this window
-	Unit          string                 `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`                                                               // e.g., "kWh"
-	Timestamp     string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                                     // ISO-8601 timestamp
+	ReportId      string                 `protobuf:"bytes,2,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"`                         // unique identifier for idempotency
+	Strategy      ReportingStrategy      `protobuf:"varint,3,opt,name=strategy,proto3,enum=lina.model.mqtt.ReportingStrategy" json:"strategy,omitempty"` // "interval" | "delta" | "total"
+	Measure       float64                `protobuf:"fixed64,4,opt,name=measure,proto3" json:"measure,omitempty"`                                         // amount consumed in this window
+	Unit          string                 `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`                                                 // e.g., "kWh"
+	Timestamp     string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                       // ISO-8601 timestamp
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -765,7 +764,7 @@ type AuthorizationResponsePayload struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId  string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	RequestId string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // matches request identifier
-	Status    AuthorizationStatus    `protobuf:"varint,3,opt,name=status,proto3,enum=iot.payperuse.edge.model.mqtt.AuthorizationStatus" json:"status,omitempty"`
+	Status    AuthorizationStatus    `protobuf:"varint,3,opt,name=status,proto3,enum=lina.model.mqtt.AuthorizationStatus" json:"status,omitempty"`
 	// Present when status is GRANTED or ACTIVE
 	AuthorizationId string `protobuf:"bytes,4,opt,name=authorization_id,json=authorizationId,proto3" json:"authorization_id,omitempty"`
 	GrantedMsat     int64  `protobuf:"varint,5,opt,name=granted_msat,json=grantedMsat,proto3" json:"granted_msat,omitempty"`
@@ -960,8 +959,8 @@ func (x *InvoiceRequestPayload) GetTimestamp() string {
 type InvoiceResponsePayload struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	RequestId     string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`                            // matches request identifier
-	Status        InvoiceStatus          `protobuf:"varint,3,opt,name=status,proto3,enum=iot.payperuse.edge.model.mqtt.InvoiceStatus" json:"status,omitempty"` // CREATED
+	RequestId     string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`              // matches request identifier
+	Status        InvoiceStatus          `protobuf:"varint,3,opt,name=status,proto3,enum=lina.model.mqtt.InvoiceStatus" json:"status,omitempty"` // CREATED
 	InvoiceId     string                 `protobuf:"bytes,4,opt,name=invoice_id,json=invoiceId,proto3" json:"invoice_id,omitempty"`
 	Bolt11        string                 `protobuf:"bytes,5,opt,name=bolt11,proto3" json:"bolt11,omitempty"` // BOLT11 payment request string
 	AmountMsat    int64                  `protobuf:"varint,6,opt,name=amount_msat,json=amountMsat,proto3" json:"amount_msat,omitempty"`
@@ -1054,7 +1053,7 @@ type InvoiceEventPayload struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId           string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	InvoiceId          string                 `protobuf:"bytes,2,opt,name=invoice_id,json=invoiceId,proto3" json:"invoice_id,omitempty"`
-	Status             InvoiceStatus          `protobuf:"varint,3,opt,name=status,proto3,enum=iot.payperuse.edge.model.mqtt.InvoiceStatus" json:"status,omitempty"`    // CREATED | SETTLED | EXPIRED
+	Status             InvoiceStatus          `protobuf:"varint,3,opt,name=status,proto3,enum=lina.model.mqtt.InvoiceStatus" json:"status,omitempty"`                  // CREATED | SETTLED | EXPIRED
 	AmountReceivedMsat int64                  `protobuf:"varint,4,opt,name=amount_received_msat,json=amountReceivedMsat,proto3" json:"amount_received_msat,omitempty"` // present when SETTLED
 	BalanceMsat        int64                  `protobuf:"varint,5,opt,name=balance_msat,json=balanceMsat,proto3" json:"balance_msat,omitempty"`                        // present when SETTLED
 	Timestamp          string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                                // ISO-8601 timestamp
@@ -1138,22 +1137,22 @@ var File_model_model_mqtt_southbound_proto protoreflect.FileDescriptor
 
 const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"\n" +
-	"!model/model-mqtt-southbound.proto\x12\x1diot.payperuse.edge.model.mqtt\"\x92\x01\n" +
+	"!model/model-mqtt-southbound.proto\x12\x0flina.model.mqtt\"\x84\x01\n" +
 	"\x10HeartbeatPayload\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12C\n" +
-	"\x06status\x18\x02 \x01(\x0e2+.iot.payperuse.edge.model.mqtt.DeviceStatusR\x06status\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\x92\x03\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x125\n" +
+	"\x06status\x18\x02 \x01(\x0e2\x1d.lina.model.mqtt.DeviceStatusR\x06status\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\x84\x03\n" +
 	"\rConfigPayload\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12)\n" +
 	"\x10measurement_unit\x18\x02 \x01(\tR\x0fmeasurementUnit\x12&\n" +
-	"\x0funit_price_msat\x18\x03 \x01(\x03R\runitPriceMsat\x12_\n" +
-	"\x12reporting_strategy\x18\x04 \x01(\x0e20.iot.payperuse.edge.model.mqtt.ReportingStrategyR\x11reportingStrategy\x12-\n" +
+	"\x0funit_price_msat\x18\x03 \x01(\x03R\runitPriceMsat\x12Q\n" +
+	"\x12reporting_strategy\x18\x04 \x01(\x0e2\".lina.model.mqtt.ReportingStrategyR\x11reportingStrategy\x12-\n" +
 	"\x12reporting_interval\x18\x05 \x01(\x05R\x11reportingInterval\x12-\n" +
 	"\x12heartbeat_interval\x18\x06 \x01(\x05R\x11heartbeatInterval\x124\n" +
 	"\x16authorize_request_msat\x18\a \x01(\x03R\x14authorizeRequestMsat\x12\x1c\n" +
-	"\ttimestamp\x18\b \x01(\tR\ttimestamp\"\xac\x01\n" +
-	"\x0eControlPayload\x12G\n" +
-	"\acommand\x18\x01 \x01(\x0e2-.iot.payperuse.edge.model.mqtt.ControlCommandR\acommand\x12\x16\n" +
+	"\ttimestamp\x18\b \x01(\tR\ttimestamp\"\x9e\x01\n" +
+	"\x0eControlPayload\x129\n" +
+	"\acommand\x18\x01 \x01(\x0e2\x1f.lina.model.mqtt.ControlCommandR\acommand\x12\x16\n" +
 	"\x06reason\x18\x02 \x01(\tR\x06reason\x12\x0e\n" +
 	"\x02id\x18\x03 \x01(\tR\x02id\x12)\n" +
 	"\x10authorization_id\x18\x04 \x01(\tR\x0fauthorizationId\"\xb6\x01\n" +
@@ -1163,11 +1162,11 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"\rreserved_msat\x18\x03 \x01(\x03R\freservedMsat\x12\x1d\n" +
 	"\n" +
 	"total_msat\x18\x04 \x01(\x03R\ttotalMsat\x12\x1c\n" +
-	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\xe2\x01\n" +
+	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\xd4\x01\n" +
 	"\fUsagePayload\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
-	"\treport_id\x18\x02 \x01(\tR\breportId\x12L\n" +
-	"\bstrategy\x18\x03 \x01(\x0e20.iot.payperuse.edge.model.mqtt.ReportingStrategyR\bstrategy\x12\x18\n" +
+	"\treport_id\x18\x02 \x01(\tR\breportId\x12>\n" +
+	"\bstrategy\x18\x03 \x01(\x0e2\".lina.model.mqtt.ReportingStrategyR\bstrategy\x12\x18\n" +
 	"\ameasure\x18\x04 \x01(\x01R\ameasure\x12\x12\n" +
 	"\x04unit\x18\x05 \x01(\tR\x04unit\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\"\xb2\x01\n" +
@@ -1177,12 +1176,12 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"request_id\x18\x02 \x01(\tR\trequestId\x12!\n" +
 	"\frequest_msat\x18\x03 \x01(\x03R\vrequestMsat\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x1c\n" +
-	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\x96\x03\n" +
+	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\x88\x03\n" +
 	"\x1cAuthorizationResponsePayload\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\tR\trequestId\x12J\n" +
-	"\x06status\x18\x03 \x01(\x0e22.iot.payperuse.edge.model.mqtt.AuthorizationStatusR\x06status\x12)\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x12<\n" +
+	"\x06status\x18\x03 \x01(\x0e2$.lina.model.mqtt.AuthorizationStatusR\x06status\x12)\n" +
 	"\x10authorization_id\x18\x04 \x01(\tR\x0fauthorizationId\x12!\n" +
 	"\fgranted_msat\x18\x05 \x01(\x03R\vgrantedMsat\x12%\n" +
 	"\x0eremaining_msat\x18\x06 \x01(\x03R\rremainingMsat\x12\x1b\n" +
@@ -1199,24 +1198,24 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"\vamount_msat\x18\x03 \x01(\x03R\n" +
 	"amountMsat\x12\x16\n" +
 	"\x06reason\x18\x04 \x01(\tR\x06reason\x12\x1c\n" +
-	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\x91\x02\n" +
+	"\ttimestamp\x18\x05 \x01(\tR\ttimestamp\"\x83\x02\n" +
 	"\x16InvoiceResponsePayload\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\tR\trequestId\x12D\n" +
-	"\x06status\x18\x03 \x01(\x0e2,.iot.payperuse.edge.model.mqtt.InvoiceStatusR\x06status\x12\x1d\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x126\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x1e.lina.model.mqtt.InvoiceStatusR\x06status\x12\x1d\n" +
 	"\n" +
 	"invoice_id\x18\x04 \x01(\tR\tinvoiceId\x12\x16\n" +
 	"\x06bolt11\x18\x05 \x01(\tR\x06bolt11\x12\x1f\n" +
 	"\vamount_msat\x18\x06 \x01(\x03R\n" +
 	"amountMsat\x12\x1d\n" +
 	"\n" +
-	"expires_at\x18\a \x01(\tR\texpiresAt\"\x8a\x02\n" +
+	"expires_at\x18\a \x01(\tR\texpiresAt\"\xfc\x01\n" +
 	"\x13InvoiceEventPayload\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
-	"invoice_id\x18\x02 \x01(\tR\tinvoiceId\x12D\n" +
-	"\x06status\x18\x03 \x01(\x0e2,.iot.payperuse.edge.model.mqtt.InvoiceStatusR\x06status\x120\n" +
+	"invoice_id\x18\x02 \x01(\tR\tinvoiceId\x126\n" +
+	"\x06status\x18\x03 \x01(\x0e2\x1e.lina.model.mqtt.InvoiceStatusR\x06status\x120\n" +
 	"\x14amount_received_msat\x18\x04 \x01(\x03R\x12amountReceivedMsat\x12!\n" +
 	"\fbalance_msat\x18\x05 \x01(\x03R\vbalanceMsat\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp*b\n" +
@@ -1248,7 +1247,7 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"\x16INVOICE_STATUS_CREATED\x10\x01\x12\x1a\n" +
 	"\x16INVOICE_STATUS_SETTLED\x10\x02\x12\x1a\n" +
 	"\x16INVOICE_STATUS_EXPIRED\x10\x03\x12\x19\n" +
-	"\x15INVOICE_STATUS_FAILED\x10\x04B5Z3github.com/robertodantas/lina/proto/gen/model/mqttb\x06proto3"
+	"\x15INVOICE_STATUS_FAILED\x10\x04B4Z2github.com/robertodantas/lina/proto/gen/model/mqttb\x06proto3"
 
 var (
 	file_model_model_mqtt_southbound_proto_rawDescOnce sync.Once
@@ -1265,30 +1264,30 @@ func file_model_model_mqtt_southbound_proto_rawDescGZIP() []byte {
 var file_model_model_mqtt_southbound_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_model_model_mqtt_southbound_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_model_model_mqtt_southbound_proto_goTypes = []any{
-	(DeviceStatus)(0),                    // 0: iot.payperuse.edge.model.mqtt.DeviceStatus
-	(ReportingStrategy)(0),               // 1: iot.payperuse.edge.model.mqtt.ReportingStrategy
-	(ControlCommand)(0),                  // 2: iot.payperuse.edge.model.mqtt.ControlCommand
-	(AuthorizationStatus)(0),             // 3: iot.payperuse.edge.model.mqtt.AuthorizationStatus
-	(InvoiceStatus)(0),                   // 4: iot.payperuse.edge.model.mqtt.InvoiceStatus
-	(*HeartbeatPayload)(nil),             // 5: iot.payperuse.edge.model.mqtt.HeartbeatPayload
-	(*ConfigPayload)(nil),                // 6: iot.payperuse.edge.model.mqtt.ConfigPayload
-	(*ControlPayload)(nil),               // 7: iot.payperuse.edge.model.mqtt.ControlPayload
-	(*BalancePayload)(nil),               // 8: iot.payperuse.edge.model.mqtt.BalancePayload
-	(*UsagePayload)(nil),                 // 9: iot.payperuse.edge.model.mqtt.UsagePayload
-	(*AuthorizationRequestPayload)(nil),  // 10: iot.payperuse.edge.model.mqtt.AuthorizationRequestPayload
-	(*AuthorizationResponsePayload)(nil), // 11: iot.payperuse.edge.model.mqtt.AuthorizationResponsePayload
-	(*InvoiceRequestPayload)(nil),        // 12: iot.payperuse.edge.model.mqtt.InvoiceRequestPayload
-	(*InvoiceResponsePayload)(nil),       // 13: iot.payperuse.edge.model.mqtt.InvoiceResponsePayload
-	(*InvoiceEventPayload)(nil),          // 14: iot.payperuse.edge.model.mqtt.InvoiceEventPayload
+	(DeviceStatus)(0),                    // 0: lina.model.mqtt.DeviceStatus
+	(ReportingStrategy)(0),               // 1: lina.model.mqtt.ReportingStrategy
+	(ControlCommand)(0),                  // 2: lina.model.mqtt.ControlCommand
+	(AuthorizationStatus)(0),             // 3: lina.model.mqtt.AuthorizationStatus
+	(InvoiceStatus)(0),                   // 4: lina.model.mqtt.InvoiceStatus
+	(*HeartbeatPayload)(nil),             // 5: lina.model.mqtt.HeartbeatPayload
+	(*ConfigPayload)(nil),                // 6: lina.model.mqtt.ConfigPayload
+	(*ControlPayload)(nil),               // 7: lina.model.mqtt.ControlPayload
+	(*BalancePayload)(nil),               // 8: lina.model.mqtt.BalancePayload
+	(*UsagePayload)(nil),                 // 9: lina.model.mqtt.UsagePayload
+	(*AuthorizationRequestPayload)(nil),  // 10: lina.model.mqtt.AuthorizationRequestPayload
+	(*AuthorizationResponsePayload)(nil), // 11: lina.model.mqtt.AuthorizationResponsePayload
+	(*InvoiceRequestPayload)(nil),        // 12: lina.model.mqtt.InvoiceRequestPayload
+	(*InvoiceResponsePayload)(nil),       // 13: lina.model.mqtt.InvoiceResponsePayload
+	(*InvoiceEventPayload)(nil),          // 14: lina.model.mqtt.InvoiceEventPayload
 }
 var file_model_model_mqtt_southbound_proto_depIdxs = []int32{
-	0, // 0: iot.payperuse.edge.model.mqtt.HeartbeatPayload.status:type_name -> iot.payperuse.edge.model.mqtt.DeviceStatus
-	1, // 1: iot.payperuse.edge.model.mqtt.ConfigPayload.reporting_strategy:type_name -> iot.payperuse.edge.model.mqtt.ReportingStrategy
-	2, // 2: iot.payperuse.edge.model.mqtt.ControlPayload.command:type_name -> iot.payperuse.edge.model.mqtt.ControlCommand
-	1, // 3: iot.payperuse.edge.model.mqtt.UsagePayload.strategy:type_name -> iot.payperuse.edge.model.mqtt.ReportingStrategy
-	3, // 4: iot.payperuse.edge.model.mqtt.AuthorizationResponsePayload.status:type_name -> iot.payperuse.edge.model.mqtt.AuthorizationStatus
-	4, // 5: iot.payperuse.edge.model.mqtt.InvoiceResponsePayload.status:type_name -> iot.payperuse.edge.model.mqtt.InvoiceStatus
-	4, // 6: iot.payperuse.edge.model.mqtt.InvoiceEventPayload.status:type_name -> iot.payperuse.edge.model.mqtt.InvoiceStatus
+	0, // 0: lina.model.mqtt.HeartbeatPayload.status:type_name -> lina.model.mqtt.DeviceStatus
+	1, // 1: lina.model.mqtt.ConfigPayload.reporting_strategy:type_name -> lina.model.mqtt.ReportingStrategy
+	2, // 2: lina.model.mqtt.ControlPayload.command:type_name -> lina.model.mqtt.ControlCommand
+	1, // 3: lina.model.mqtt.UsagePayload.strategy:type_name -> lina.model.mqtt.ReportingStrategy
+	3, // 4: lina.model.mqtt.AuthorizationResponsePayload.status:type_name -> lina.model.mqtt.AuthorizationStatus
+	4, // 5: lina.model.mqtt.InvoiceResponsePayload.status:type_name -> lina.model.mqtt.InvoiceStatus
+	4, // 6: lina.model.mqtt.InvoiceEventPayload.status:type_name -> lina.model.mqtt.InvoiceStatus
 	7, // [7:7] is the sub-list for method output_type
 	7, // [7:7] is the sub-list for method input_type
 	7, // [7:7] is the sub-list for extension type_name

@@ -7,12 +7,11 @@
 package consumption
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -132,7 +131,7 @@ func (x *DeviceConsumptionRecordedEvent) GetTimestamp() string {
 
 type ConsumptionEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Type  ConsumptionEventType   `protobuf:"varint,1,opt,name=type,proto3,enum=iot.payperuse.edge.model.consumption.ConsumptionEventType" json:"type,omitempty"`
+	Type  ConsumptionEventType   `protobuf:"varint,1,opt,name=type,proto3,enum=lina.model.consumption.ConsumptionEventType" json:"type,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*ConsumptionEvent_DeviceConsumptionRecorded
@@ -208,19 +207,19 @@ var File_model_model_consumption_service_proto protoreflect.FileDescriptor
 
 const file_model_model_consumption_service_proto_rawDesc = "" +
 	"\n" +
-	"%model/model-consumption-service.proto\x12$iot.payperuse.edge.model.consumption\"z\n" +
+	"%model/model-consumption-service.proto\x12\x16lina.model.consumption\"z\n" +
 	"\x1eDeviceConsumptionRecordedEvent\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
 	"debit_msat\x18\x02 \x01(\x03R\tdebitMsat\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\xf6\x01\n" +
-	"\x10ConsumptionEvent\x12N\n" +
-	"\x04type\x18\x01 \x01(\x0e2:.iot.payperuse.edge.model.consumption.ConsumptionEventTypeR\x04type\x12\x86\x01\n" +
-	"\x1bdevice_consumption_recorded\x18\x02 \x01(\v2D.iot.payperuse.edge.model.consumption.DeviceConsumptionRecordedEventH\x00R\x19deviceConsumptionRecordedB\t\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\xd9\x01\n" +
+	"\x10ConsumptionEvent\x12@\n" +
+	"\x04type\x18\x01 \x01(\x0e2,.lina.model.consumption.ConsumptionEventTypeR\x04type\x12x\n" +
+	"\x1bdevice_consumption_recorded\x18\x02 \x01(\v26.lina.model.consumption.DeviceConsumptionRecordedEventH\x00R\x19deviceConsumptionRecordedB\t\n" +
 	"\apayload*v\n" +
 	"\x14ConsumptionEventType\x12&\n" +
 	"\"CONSUMPTION_EVENT_TYPE_UNSPECIFIED\x10\x00\x126\n" +
-	"2CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED\x10\x01B<Z:github.com/robertodantas/lina/proto/gen/model/consumptionb\x06proto3"
+	"2CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED\x10\x01B;Z9github.com/robertodantas/lina/proto/gen/model/consumptionb\x06proto3"
 
 var (
 	file_model_model_consumption_service_proto_rawDescOnce sync.Once
@@ -237,13 +236,13 @@ func file_model_model_consumption_service_proto_rawDescGZIP() []byte {
 var file_model_model_consumption_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_model_model_consumption_service_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_model_model_consumption_service_proto_goTypes = []any{
-	(ConsumptionEventType)(0),              // 0: iot.payperuse.edge.model.consumption.ConsumptionEventType
-	(*DeviceConsumptionRecordedEvent)(nil), // 1: iot.payperuse.edge.model.consumption.DeviceConsumptionRecordedEvent
-	(*ConsumptionEvent)(nil),               // 2: iot.payperuse.edge.model.consumption.ConsumptionEvent
+	(ConsumptionEventType)(0),              // 0: lina.model.consumption.ConsumptionEventType
+	(*DeviceConsumptionRecordedEvent)(nil), // 1: lina.model.consumption.DeviceConsumptionRecordedEvent
+	(*ConsumptionEvent)(nil),               // 2: lina.model.consumption.ConsumptionEvent
 }
 var file_model_model_consumption_service_proto_depIdxs = []int32{
-	0, // 0: iot.payperuse.edge.model.consumption.ConsumptionEvent.type:type_name -> iot.payperuse.edge.model.consumption.ConsumptionEventType
-	1, // 1: iot.payperuse.edge.model.consumption.ConsumptionEvent.device_consumption_recorded:type_name -> iot.payperuse.edge.model.consumption.DeviceConsumptionRecordedEvent
+	0, // 0: lina.model.consumption.ConsumptionEvent.type:type_name -> lina.model.consumption.ConsumptionEventType
+	1, // 1: lina.model.consumption.ConsumptionEvent.device_consumption_recorded:type_name -> lina.model.consumption.DeviceConsumptionRecordedEvent
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name

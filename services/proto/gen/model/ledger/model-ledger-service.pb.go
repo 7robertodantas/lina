@@ -7,12 +7,11 @@
 package ledger
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -375,7 +374,7 @@ type CreateAuthorizationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	RequestId     string                 `protobuf:"bytes,2,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"` // matches request identifier
-	Status        AuthorizationStatus    `protobuf:"varint,3,opt,name=status,proto3,enum=iot.payperuse.edge.model.ledger.AuthorizationStatus" json:"status,omitempty"`
+	Status        AuthorizationStatus    `protobuf:"varint,3,opt,name=status,proto3,enum=lina.model.ledger.AuthorizationStatus" json:"status,omitempty"`
 	Authorization *Authorization         `protobuf:"bytes,4,opt,name=authorization,proto3" json:"authorization,omitempty"`                       // present for GRANTED/ACTIVE
 	AvailableMsat int64                  `protobuf:"varint,5,opt,name=available_msat,json=availableMsat,proto3" json:"available_msat,omitempty"` // current available balance (for REJECTED)
 	Reason        string                 `protobuf:"bytes,6,opt,name=reason,proto3" json:"reason,omitempty"`                                     // explanation for REJECTED or ACTIVE
@@ -1014,7 +1013,7 @@ func (x *AuthorizationDebitFailedEvent) GetTimestamp() string {
 
 type LedgerEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Type  LedgerEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=iot.payperuse.edge.model.ledger.LedgerEventType" json:"type,omitempty"`
+	Type  LedgerEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=lina.model.ledger.LedgerEventType" json:"type,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*LedgerEvent_AuthorizationCreated
@@ -1186,7 +1185,7 @@ var File_model_model_ledger_service_proto protoreflect.FileDescriptor
 
 const file_model_model_ledger_service_proto_rawDesc = "" +
 	"\n" +
-	" model/model-ledger-service.proto\x12\x1fiot.payperuse.edge.model.ledger\"\xdd\x01\n" +
+	" model/model-ledger-service.proto\x12\x11lina.model.ledger\"\xdd\x01\n" +
 	"\rAuthorization\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12!\n" +
@@ -1207,21 +1206,21 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	"\n" +
 	"request_id\x18\x02 \x01(\tR\trequestId\x12!\n" +
 	"\frequest_msat\x18\x03 \x01(\x03R\vrequestMsat\x12\x16\n" +
-	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xbc\x02\n" +
+	"\x06reason\x18\x04 \x01(\tR\x06reason\"\xa0\x02\n" +
 	"\x1bCreateAuthorizationResponse\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\x02 \x01(\tR\trequestId\x12L\n" +
-	"\x06status\x18\x03 \x01(\x0e24.iot.payperuse.edge.model.ledger.AuthorizationStatusR\x06status\x12T\n" +
-	"\rauthorization\x18\x04 \x01(\v2..iot.payperuse.edge.model.ledger.AuthorizationR\rauthorization\x12%\n" +
+	"request_id\x18\x02 \x01(\tR\trequestId\x12>\n" +
+	"\x06status\x18\x03 \x01(\x0e2&.lina.model.ledger.AuthorizationStatusR\x06status\x12F\n" +
+	"\rauthorization\x18\x04 \x01(\v2 .lina.model.ledger.AuthorizationR\rauthorization\x12%\n" +
 	"\x0eavailable_msat\x18\x05 \x01(\x03R\ravailableMsat\x12\x16\n" +
 	"\x06reason\x18\x06 \x01(\tR\x06reason\"0\n" +
 	"\x11GetBalanceRequest\x12\x1b\n" +
-	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"b\n" +
-	"\x12GetBalanceResponse\x12L\n" +
-	"\abalance\x18\x01 \x01(\v22.iot.payperuse.edge.model.ledger.BalanceProjectionR\abalance\"q\n" +
-	"\x19AuthorizationCreatedEvent\x12T\n" +
-	"\rauthorization\x18\x01 \x01(\v2..iot.payperuse.edge.model.ledger.AuthorizationR\rauthorization\"\x83\x01\n" +
+	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\"T\n" +
+	"\x12GetBalanceResponse\x12>\n" +
+	"\abalance\x18\x01 \x01(\v2$.lina.model.ledger.BalanceProjectionR\abalance\"c\n" +
+	"\x19AuthorizationCreatedEvent\x12F\n" +
+	"\rauthorization\x18\x01 \x01(\v2 .lina.model.ledger.AuthorizationR\rauthorization\"\x83\x01\n" +
 	"\x1bAuthorizationCompletedEvent\x12)\n" +
 	"\x10authorization_id\x18\x01 \x01(\tR\x0fauthorizationId\x12\x1b\n" +
 	"\tdevice_id\x18\x02 \x01(\tR\bdeviceId\x12\x1c\n" +
@@ -1256,16 +1255,16 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	"\x0erequested_msat\x18\x03 \x01(\x03R\rrequestedMsat\x12%\n" +
 	"\x0eremaining_msat\x18\x04 \x01(\x03R\rremainingMsat\x12\x16\n" +
 	"\x06reason\x18\x05 \x01(\tR\x06reason\x12\x1c\n" +
-	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\"\xef\x06\n" +
-	"\vLedgerEvent\x12D\n" +
-	"\x04type\x18\x01 \x01(\x0e20.iot.payperuse.edge.model.ledger.LedgerEventTypeR\x04type\x12q\n" +
-	"\x15authorization_created\x18\x02 \x01(\v2:.iot.payperuse.edge.model.ledger.AuthorizationCreatedEventH\x00R\x14authorizationCreated\x12w\n" +
-	"\x17authorization_completed\x18\x03 \x01(\v2<.iot.payperuse.edge.model.ledger.AuthorizationCompletedEventH\x00R\x16authorizationCompleted\x12q\n" +
-	"\x15authorization_expired\x18\x04 \x01(\v2:.iot.payperuse.edge.model.ledger.AuthorizationExpiredEventH\x00R\x14authorizationExpired\x12_\n" +
-	"\x0fdevice_credited\x18\x05 \x01(\v24.iot.payperuse.edge.model.ledger.DeviceCreditedEventH\x00R\x0edeviceCredited\x12\\\n" +
-	"\x0edevice_debited\x18\x06 \x01(\v23.iot.payperuse.edge.model.ledger.DeviceDebitedEventH\x00R\rdeviceDebited\x12q\n" +
-	"\x15authorization_debited\x18\a \x01(\v2:.iot.payperuse.edge.model.ledger.AuthorizationDebitedEventH\x00R\x14authorizationDebited\x12~\n" +
-	"\x1aauthorization_debit_failed\x18\b \x01(\v2>.iot.payperuse.edge.model.ledger.AuthorizationDebitFailedEventH\x00R\x18authorizationDebitFailedB\t\n" +
+	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\"\xff\x05\n" +
+	"\vLedgerEvent\x126\n" +
+	"\x04type\x18\x01 \x01(\x0e2\".lina.model.ledger.LedgerEventTypeR\x04type\x12c\n" +
+	"\x15authorization_created\x18\x02 \x01(\v2,.lina.model.ledger.AuthorizationCreatedEventH\x00R\x14authorizationCreated\x12i\n" +
+	"\x17authorization_completed\x18\x03 \x01(\v2..lina.model.ledger.AuthorizationCompletedEventH\x00R\x16authorizationCompleted\x12c\n" +
+	"\x15authorization_expired\x18\x04 \x01(\v2,.lina.model.ledger.AuthorizationExpiredEventH\x00R\x14authorizationExpired\x12Q\n" +
+	"\x0fdevice_credited\x18\x05 \x01(\v2&.lina.model.ledger.DeviceCreditedEventH\x00R\x0edeviceCredited\x12N\n" +
+	"\x0edevice_debited\x18\x06 \x01(\v2%.lina.model.ledger.DeviceDebitedEventH\x00R\rdeviceDebited\x12c\n" +
+	"\x15authorization_debited\x18\a \x01(\v2,.lina.model.ledger.AuthorizationDebitedEventH\x00R\x14authorizationDebited\x12p\n" +
+	"\x1aauthorization_debit_failed\x18\b \x01(\v20.lina.model.ledger.AuthorizationDebitFailedEventH\x00R\x18authorizationDebitFailedB\t\n" +
 	"\apayload*\xa1\x01\n" +
 	"\x13AuthorizationStatus\x12$\n" +
 	" AUTHORIZATION_STATUS_UNSPECIFIED\x10\x00\x12 \n" +
@@ -1280,7 +1279,7 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	"!LEDGER_EVENT_TYPE_DEVICE_CREDITED\x10\x04\x12$\n" +
 	" LEDGER_EVENT_TYPE_DEVICE_DEBITED\x10\x05\x12+\n" +
 	"'LEDGER_EVENT_TYPE_AUTHORIZATION_DEBITED\x10\x06\x120\n" +
-	",LEDGER_EVENT_TYPE_AUTHORIZATION_DEBIT_FAILED\x10\aB7Z5github.com/robertodantas/lina/proto/gen/model/ledgerb\x06proto3"
+	",LEDGER_EVENT_TYPE_AUTHORIZATION_DEBIT_FAILED\x10\aB6Z4github.com/robertodantas/lina/proto/gen/model/ledgerb\x06proto3"
 
 var (
 	file_model_model_ledger_service_proto_rawDescOnce sync.Once
@@ -1297,36 +1296,36 @@ func file_model_model_ledger_service_proto_rawDescGZIP() []byte {
 var file_model_model_ledger_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_model_model_ledger_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_model_model_ledger_service_proto_goTypes = []any{
-	(AuthorizationStatus)(0),              // 0: iot.payperuse.edge.model.ledger.AuthorizationStatus
-	(LedgerEventType)(0),                  // 1: iot.payperuse.edge.model.ledger.LedgerEventType
-	(*Authorization)(nil),                 // 2: iot.payperuse.edge.model.ledger.Authorization
-	(*BalanceProjection)(nil),             // 3: iot.payperuse.edge.model.ledger.BalanceProjection
-	(*CreateAuthorizationRequest)(nil),    // 4: iot.payperuse.edge.model.ledger.CreateAuthorizationRequest
-	(*CreateAuthorizationResponse)(nil),   // 5: iot.payperuse.edge.model.ledger.CreateAuthorizationResponse
-	(*GetBalanceRequest)(nil),             // 6: iot.payperuse.edge.model.ledger.GetBalanceRequest
-	(*GetBalanceResponse)(nil),            // 7: iot.payperuse.edge.model.ledger.GetBalanceResponse
-	(*AuthorizationCreatedEvent)(nil),     // 8: iot.payperuse.edge.model.ledger.AuthorizationCreatedEvent
-	(*AuthorizationCompletedEvent)(nil),   // 9: iot.payperuse.edge.model.ledger.AuthorizationCompletedEvent
-	(*AuthorizationExpiredEvent)(nil),     // 10: iot.payperuse.edge.model.ledger.AuthorizationExpiredEvent
-	(*DeviceCreditedEvent)(nil),           // 11: iot.payperuse.edge.model.ledger.DeviceCreditedEvent
-	(*DeviceDebitedEvent)(nil),            // 12: iot.payperuse.edge.model.ledger.DeviceDebitedEvent
-	(*AuthorizationDebitedEvent)(nil),     // 13: iot.payperuse.edge.model.ledger.AuthorizationDebitedEvent
-	(*AuthorizationDebitFailedEvent)(nil), // 14: iot.payperuse.edge.model.ledger.AuthorizationDebitFailedEvent
-	(*LedgerEvent)(nil),                   // 15: iot.payperuse.edge.model.ledger.LedgerEvent
+	(AuthorizationStatus)(0),              // 0: lina.model.ledger.AuthorizationStatus
+	(LedgerEventType)(0),                  // 1: lina.model.ledger.LedgerEventType
+	(*Authorization)(nil),                 // 2: lina.model.ledger.Authorization
+	(*BalanceProjection)(nil),             // 3: lina.model.ledger.BalanceProjection
+	(*CreateAuthorizationRequest)(nil),    // 4: lina.model.ledger.CreateAuthorizationRequest
+	(*CreateAuthorizationResponse)(nil),   // 5: lina.model.ledger.CreateAuthorizationResponse
+	(*GetBalanceRequest)(nil),             // 6: lina.model.ledger.GetBalanceRequest
+	(*GetBalanceResponse)(nil),            // 7: lina.model.ledger.GetBalanceResponse
+	(*AuthorizationCreatedEvent)(nil),     // 8: lina.model.ledger.AuthorizationCreatedEvent
+	(*AuthorizationCompletedEvent)(nil),   // 9: lina.model.ledger.AuthorizationCompletedEvent
+	(*AuthorizationExpiredEvent)(nil),     // 10: lina.model.ledger.AuthorizationExpiredEvent
+	(*DeviceCreditedEvent)(nil),           // 11: lina.model.ledger.DeviceCreditedEvent
+	(*DeviceDebitedEvent)(nil),            // 12: lina.model.ledger.DeviceDebitedEvent
+	(*AuthorizationDebitedEvent)(nil),     // 13: lina.model.ledger.AuthorizationDebitedEvent
+	(*AuthorizationDebitFailedEvent)(nil), // 14: lina.model.ledger.AuthorizationDebitFailedEvent
+	(*LedgerEvent)(nil),                   // 15: lina.model.ledger.LedgerEvent
 }
 var file_model_model_ledger_service_proto_depIdxs = []int32{
-	0,  // 0: iot.payperuse.edge.model.ledger.CreateAuthorizationResponse.status:type_name -> iot.payperuse.edge.model.ledger.AuthorizationStatus
-	2,  // 1: iot.payperuse.edge.model.ledger.CreateAuthorizationResponse.authorization:type_name -> iot.payperuse.edge.model.ledger.Authorization
-	3,  // 2: iot.payperuse.edge.model.ledger.GetBalanceResponse.balance:type_name -> iot.payperuse.edge.model.ledger.BalanceProjection
-	2,  // 3: iot.payperuse.edge.model.ledger.AuthorizationCreatedEvent.authorization:type_name -> iot.payperuse.edge.model.ledger.Authorization
-	1,  // 4: iot.payperuse.edge.model.ledger.LedgerEvent.type:type_name -> iot.payperuse.edge.model.ledger.LedgerEventType
-	8,  // 5: iot.payperuse.edge.model.ledger.LedgerEvent.authorization_created:type_name -> iot.payperuse.edge.model.ledger.AuthorizationCreatedEvent
-	9,  // 6: iot.payperuse.edge.model.ledger.LedgerEvent.authorization_completed:type_name -> iot.payperuse.edge.model.ledger.AuthorizationCompletedEvent
-	10, // 7: iot.payperuse.edge.model.ledger.LedgerEvent.authorization_expired:type_name -> iot.payperuse.edge.model.ledger.AuthorizationExpiredEvent
-	11, // 8: iot.payperuse.edge.model.ledger.LedgerEvent.device_credited:type_name -> iot.payperuse.edge.model.ledger.DeviceCreditedEvent
-	12, // 9: iot.payperuse.edge.model.ledger.LedgerEvent.device_debited:type_name -> iot.payperuse.edge.model.ledger.DeviceDebitedEvent
-	13, // 10: iot.payperuse.edge.model.ledger.LedgerEvent.authorization_debited:type_name -> iot.payperuse.edge.model.ledger.AuthorizationDebitedEvent
-	14, // 11: iot.payperuse.edge.model.ledger.LedgerEvent.authorization_debit_failed:type_name -> iot.payperuse.edge.model.ledger.AuthorizationDebitFailedEvent
+	0,  // 0: lina.model.ledger.CreateAuthorizationResponse.status:type_name -> lina.model.ledger.AuthorizationStatus
+	2,  // 1: lina.model.ledger.CreateAuthorizationResponse.authorization:type_name -> lina.model.ledger.Authorization
+	3,  // 2: lina.model.ledger.GetBalanceResponse.balance:type_name -> lina.model.ledger.BalanceProjection
+	2,  // 3: lina.model.ledger.AuthorizationCreatedEvent.authorization:type_name -> lina.model.ledger.Authorization
+	1,  // 4: lina.model.ledger.LedgerEvent.type:type_name -> lina.model.ledger.LedgerEventType
+	8,  // 5: lina.model.ledger.LedgerEvent.authorization_created:type_name -> lina.model.ledger.AuthorizationCreatedEvent
+	9,  // 6: lina.model.ledger.LedgerEvent.authorization_completed:type_name -> lina.model.ledger.AuthorizationCompletedEvent
+	10, // 7: lina.model.ledger.LedgerEvent.authorization_expired:type_name -> lina.model.ledger.AuthorizationExpiredEvent
+	11, // 8: lina.model.ledger.LedgerEvent.device_credited:type_name -> lina.model.ledger.DeviceCreditedEvent
+	12, // 9: lina.model.ledger.LedgerEvent.device_debited:type_name -> lina.model.ledger.DeviceDebitedEvent
+	13, // 10: lina.model.ledger.LedgerEvent.authorization_debited:type_name -> lina.model.ledger.AuthorizationDebitedEvent
+	14, // 11: lina.model.ledger.LedgerEvent.authorization_debit_failed:type_name -> lina.model.ledger.AuthorizationDebitFailedEvent
 	12, // [12:12] is the sub-list for method output_type
 	12, // [12:12] is the sub-list for method input_type
 	12, // [12:12] is the sub-list for extension type_name

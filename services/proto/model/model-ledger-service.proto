@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package iot.payperuse.edge.model.ledger;
+package lina.model.ledger;
 
 option go_package = "github.com/robertodantas/lina/proto/gen/model/ledger";
 

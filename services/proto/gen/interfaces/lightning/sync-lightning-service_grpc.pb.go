@@ -8,7 +8,6 @@ package lightning
 
 import (
 	context "context"
-
 	lightning "github.com/robertodantas/lina/proto/gen/model/lightning"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
@@ -21,7 +20,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LightningService_CreateInvoice_FullMethodName = "/iot.payperuse.edge.interfaces.sync.lightning.LightningService/CreateInvoice"
+	LightningService_CreateInvoice_FullMethodName = "/lina.interfaces.sync.lightning.LightningService/CreateInvoice"
 )
 
 // LightningServiceClient is the client API for LightningService service.
@@ -112,7 +111,7 @@ func _LightningService_CreateInvoice_Handler(srv interface{}, ctx context.Contex
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var LightningService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "iot.payperuse.edge.interfaces.sync.lightning.LightningService",
+	ServiceName: "lina.interfaces.sync.lightning.LightningService",
 	HandlerType: (*LightningServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

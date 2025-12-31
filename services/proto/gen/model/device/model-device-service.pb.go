@@ -7,12 +7,11 @@
 package device
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -127,7 +126,7 @@ type UsageRecord struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	DeviceId         string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	ReportId         string                 `protobuf:"bytes,2,opt,name=report_id,json=reportId,proto3" json:"report_id,omitempty"` // unique identifier for idempotency
-	Strategy         UsageReportingStrategy `protobuf:"varint,3,opt,name=strategy,proto3,enum=iot.payperuse.edge.model.device.UsageReportingStrategy" json:"strategy,omitempty"`
+	Strategy         UsageReportingStrategy `protobuf:"varint,3,opt,name=strategy,proto3,enum=lina.model.device.UsageReportingStrategy" json:"strategy,omitempty"`
 	Measure          float64                `protobuf:"fixed64,4,opt,name=measure,proto3" json:"measure,omitempty"`                                              // amount consumed in unit
 	Unit             string                 `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`                                                      // e.g., "kWh"
 	Timestamp        string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                            // ISO-8601 timestamp (device/MQTT)
@@ -262,7 +261,7 @@ func (x *DeviceUsageReportedEvent) GetUsage() *UsageRecord {
 
 type DeviceEvent struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Type  DeviceEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=iot.payperuse.edge.model.device.DeviceEventType" json:"type,omitempty"`
+	Type  DeviceEventType        `protobuf:"varint,1,opt,name=type,proto3,enum=lina.model.device.DeviceEventType" json:"type,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*DeviceEvent_UsageReported
@@ -338,20 +337,20 @@ var File_model_model_device_service_proto protoreflect.FileDescriptor
 
 const file_model_model_device_service_proto_rawDesc = "" +
 	"\n" +
-	" model/model-device-service.proto\x12\x1fiot.payperuse.edge.model.device\"\x97\x02\n" +
+	" model/model-device-service.proto\x12\x11lina.model.device\"\x89\x02\n" +
 	"\vUsageRecord\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
-	"\treport_id\x18\x02 \x01(\tR\breportId\x12S\n" +
-	"\bstrategy\x18\x03 \x01(\x0e27.iot.payperuse.edge.model.device.UsageReportingStrategyR\bstrategy\x12\x18\n" +
+	"\treport_id\x18\x02 \x01(\tR\breportId\x12E\n" +
+	"\bstrategy\x18\x03 \x01(\x0e2).lina.model.device.UsageReportingStrategyR\bstrategy\x12\x18\n" +
 	"\ameasure\x18\x04 \x01(\x01R\ameasure\x12\x12\n" +
 	"\x04unit\x18\x05 \x01(\tR\x04unit\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12-\n" +
-	"\x13price_per_unit_msat\x18\a \x01(\x03R\x10pricePerUnitMsat\"^\n" +
-	"\x18DeviceUsageReportedEvent\x12B\n" +
-	"\x05usage\x18\x01 \x01(\v2,.iot.payperuse.edge.model.device.UsageRecordR\x05usage\"\xc2\x01\n" +
-	"\vDeviceEvent\x12D\n" +
-	"\x04type\x18\x01 \x01(\x0e20.iot.payperuse.edge.model.device.DeviceEventTypeR\x04type\x12b\n" +
-	"\x0eusage_reported\x18\x02 \x01(\v29.iot.payperuse.edge.model.device.DeviceUsageReportedEventH\x00R\rusageReportedB\t\n" +
+	"\x13price_per_unit_msat\x18\a \x01(\x03R\x10pricePerUnitMsat\"P\n" +
+	"\x18DeviceUsageReportedEvent\x124\n" +
+	"\x05usage\x18\x01 \x01(\v2\x1e.lina.model.device.UsageRecordR\x05usage\"\xa6\x01\n" +
+	"\vDeviceEvent\x126\n" +
+	"\x04type\x18\x01 \x01(\x0e2\".lina.model.device.DeviceEventTypeR\x04type\x12T\n" +
+	"\x0eusage_reported\x18\x02 \x01(\v2+.lina.model.device.DeviceUsageReportedEventH\x00R\rusageReportedB\t\n" +
 	"\apayload*\x89\x01\n" +
 	"\x16UsageReportingStrategy\x12\x1e\n" +
 	"\x1aUSAGE_STRATEGY_UNSPECIFIED\x10\x00\x12\x1b\n" +
@@ -360,7 +359,7 @@ const file_model_model_device_service_proto_rawDesc = "" +
 	"\x14USAGE_STRATEGY_TOTAL\x10\x03*Z\n" +
 	"\x0fDeviceEventType\x12!\n" +
 	"\x1dDEVICE_EVENT_TYPE_UNSPECIFIED\x10\x00\x12$\n" +
-	" DEVICE_EVENT_TYPE_USAGE_REPORTED\x10\x01B7Z5github.com/robertodantas/lina/proto/gen/model/deviceb\x06proto3"
+	" DEVICE_EVENT_TYPE_USAGE_REPORTED\x10\x01B6Z4github.com/robertodantas/lina/proto/gen/model/deviceb\x06proto3"
 
 var (
 	file_model_model_device_service_proto_rawDescOnce sync.Once
@@ -377,17 +376,17 @@ func file_model_model_device_service_proto_rawDescGZIP() []byte {
 var file_model_model_device_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_model_model_device_service_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_model_model_device_service_proto_goTypes = []any{
-	(UsageReportingStrategy)(0),      // 0: iot.payperuse.edge.model.device.UsageReportingStrategy
-	(DeviceEventType)(0),             // 1: iot.payperuse.edge.model.device.DeviceEventType
-	(*UsageRecord)(nil),              // 2: iot.payperuse.edge.model.device.UsageRecord
-	(*DeviceUsageReportedEvent)(nil), // 3: iot.payperuse.edge.model.device.DeviceUsageReportedEvent
-	(*DeviceEvent)(nil),              // 4: iot.payperuse.edge.model.device.DeviceEvent
+	(UsageReportingStrategy)(0),      // 0: lina.model.device.UsageReportingStrategy
+	(DeviceEventType)(0),             // 1: lina.model.device.DeviceEventType
+	(*UsageRecord)(nil),              // 2: lina.model.device.UsageRecord
+	(*DeviceUsageReportedEvent)(nil), // 3: lina.model.device.DeviceUsageReportedEvent
+	(*DeviceEvent)(nil),              // 4: lina.model.device.DeviceEvent
 }
 var file_model_model_device_service_proto_depIdxs = []int32{
-	0, // 0: iot.payperuse.edge.model.device.UsageRecord.strategy:type_name -> iot.payperuse.edge.model.device.UsageReportingStrategy
-	2, // 1: iot.payperuse.edge.model.device.DeviceUsageReportedEvent.usage:type_name -> iot.payperuse.edge.model.device.UsageRecord
-	1, // 2: iot.payperuse.edge.model.device.DeviceEvent.type:type_name -> iot.payperuse.edge.model.device.DeviceEventType
-	3, // 3: iot.payperuse.edge.model.device.DeviceEvent.usage_reported:type_name -> iot.payperuse.edge.model.device.DeviceUsageReportedEvent
+	0, // 0: lina.model.device.UsageRecord.strategy:type_name -> lina.model.device.UsageReportingStrategy
+	2, // 1: lina.model.device.DeviceUsageReportedEvent.usage:type_name -> lina.model.device.UsageRecord
+	1, // 2: lina.model.device.DeviceEvent.type:type_name -> lina.model.device.DeviceEventType
+	3, // 3: lina.model.device.DeviceEvent.usage_reported:type_name -> lina.model.device.DeviceUsageReportedEvent
 	4, // [4:4] is the sub-list for method output_type
 	4, // [4:4] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name

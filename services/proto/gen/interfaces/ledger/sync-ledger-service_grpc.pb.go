@@ -8,7 +8,6 @@ package ledger
 
 import (
 	context "context"
-
 	ledger "github.com/robertodantas/lina/proto/gen/model/ledger"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
@@ -21,7 +20,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LedgerService_CreateOrGetAuthorization_FullMethodName = "/iot.payperuse.edge.interfaces.sync.ledger.LedgerService/CreateOrGetAuthorization"
+	LedgerService_CreateOrGetAuthorization_FullMethodName = "/lina.interfaces.sync.ledger.LedgerService/CreateOrGetAuthorization"
 )
 
 // LedgerServiceClient is the client API for LedgerService service.
@@ -112,7 +111,7 @@ func _LedgerService_CreateOrGetAuthorization_Handler(srv interface{}, ctx contex
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var LedgerService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "iot.payperuse.edge.interfaces.sync.ledger.LedgerService",
+	ServiceName: "lina.interfaces.sync.ledger.LedgerService",
 	HandlerType: (*LedgerServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{

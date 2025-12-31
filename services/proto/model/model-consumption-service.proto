@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package iot.payperuse.edge.model.consumption;
+package lina.model.consumption;
 
 option go_package = "github.com/robertodantas/lina/proto/gen/model/consumption";
 

@@ -1,13 +1,11 @@
 syntax = "proto3";
-
-package iot.payperuse.edge.interfaces.sync.ledger;
-
+package lina.interfaces.sync.ledger;
 option go_package = "github.com/robertodantas/lina/proto/gen/interfaces/ledger";
 
 import "model/model-ledger-service.proto";
 
 service LedgerService {
   // Creates a new authorization or returns the active one for the device.
-  rpc CreateOrGetAuthorization(iot.payperuse.edge.model.ledger.CreateAuthorizationRequest)
-      returns (iot.payperuse.edge.model.ledger.CreateAuthorizationResponse);
+  rpc CreateOrGetAuthorization(lina.model.ledger.CreateAuthorizationRequest)
+      returns (lina.model.ledger.CreateAuthorizationResponse);
 }
