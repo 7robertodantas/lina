@@ -18,7 +18,7 @@ services:
       - DEVICE_SECRET=smart-meter-001_password
       - MQTT_BROKER=${SMARTMETER_MQTT_BROKER}
     env_file:
-      - .env.simulators
+      - .env
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
