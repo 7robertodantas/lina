@@ -1,4 +1,4 @@
-# LINA
+# LINA (Lightning Integrated Node Architecture)
 
 A Lightning Network payment system for smart meters and IoT devices. This system enables devices to request Lightning invoices, track consumption, and manage balances through a microservices architecture.
 
