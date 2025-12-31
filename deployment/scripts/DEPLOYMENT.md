@@ -5,13 +5,13 @@ This guide explains how to deploy the LINA system to a new machine.
 ## Quick Answer: What Files Do I Need?
 
 **To generate certificates on the new machine:**
-- `docker-compose.prod.yml`
+- `docker-compose.production.yml`
 - `certs/generate-certs.sh` ← **Required**
 - `.env` (or create one)
 - `scripts/deploy.sh` (optional, for automated deployment)
 
 **To use pre-generated certificates:**
-- `docker-compose.prod.yml`
+- `docker-compose.production.yml`
 - `certs/ca.crt` (pre-generated)
 - `certs/server.crt` (pre-generated)
 - `certs/server.key` (pre-generated)
@@ -27,7 +27,7 @@ This guide explains how to deploy the LINA system to a new machine.
 
 ```bash
 # 1. Copy these files to the new machine:
-#    - docker-compose.prod.yml
+#    - docker-compose.production.yml
 #    - scripts/deploy.sh
 #    - certs/generate-certs.sh (required to generate certificates)
 #    - .env (or create one)
@@ -63,7 +63,7 @@ The script will:
 
 3. **Start services:**
    ```bash
-   docker-compose -f docker-compose.prod.yml up -d
+   docker-compose -f docker-compose.production.yml up -d
    ```
 
 **If using pre-generated certificates:**
@@ -76,7 +76,7 @@ The script will:
 
 2. **Start services:**
    ```bash
-   docker-compose -f docker-compose.prod.yml up -d
+   docker-compose -f docker-compose.production.yml up -d
    ```
 
 **Pros:**
@@ -105,7 +105,7 @@ The script will:
 
 **Option A: Generate certificates on new machine (recommended)**
 ```
-docker-compose.prod.yml
+docker-compose.production.yml
 .env (or create one with your configuration)
 scripts/deploy.sh (optional, for automated deployment)
 certs/generate-certs.sh (required to generate certificates)
@@ -113,7 +113,7 @@ certs/generate-certs.sh (required to generate certificates)
 
 **Option B: Use pre-generated certificates**
 ```
-docker-compose.prod.yml
+docker-compose.production.yml
 .env (or create one with your configuration)
 certs/ca.crt (pre-generated)
 certs/server.crt (pre-generated)
@@ -135,17 +135,17 @@ certs/server.key (pre-generated)
 ./certs/generate-certs.sh
 
 # Start services
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.production.yml up -d
 ```
 
 #### 3. Verify Deployment
 
 ```bash
 # Check service status
-docker-compose -f docker-compose.prod.yml ps
+docker-compose -f docker-compose.production.yml ps
 
 # Check logs
-docker-compose -f docker-compose.prod.yml logs -f
+docker-compose -f docker-compose.production.yml logs -f
 
 # Test MQTT connection
 docker exec mosquitto mosquitto_sub -h localhost -p 8883 --cafile /mosquitto/certs/ca.crt -t test -C 1
@@ -186,7 +186,7 @@ cp ca.crt server.crt server.key ./certs/
 cp new-ca.crt new-server.crt new-server.key ./certs/
 
 # Restart services
-docker-compose -f docker-compose.prod.yml restart mosquitto device smartmeter
+docker-compose -f docker-compose.production.yml restart mosquitto device smartmeter
 ```
 
 ---
@@ -238,7 +238,7 @@ To use your organization's CA certificates, see `mosquitto/PRODUCTION_CERTS.md`.
 
 **Solution:**
 - Check if ports are already in use: `netstat -tulpn | grep -E '8080|8883|6379'`
-- Update port mappings in `docker-compose.prod.yml` if needed
+- Update port mappings in `docker-compose.production.yml` if needed
 
 ---
 
@@ -261,9 +261,9 @@ To use your organization's CA certificates, see `mosquitto/PRODUCTION_CERTS.md`.
 
 ---
 
-## Minimal Deployment (Just docker-compose.prod.yml)
+## Minimal Deployment (Just docker-compose.production.yml)
 
-If you only want to copy `docker-compose.prod.yml`, you have two options:
+If you only want to copy `docker-compose.production.yml`, you have two options:
 
 **Option A: Generate certificates on new machine**
 ```bash
@@ -272,7 +272,7 @@ If you only want to copy `docker-compose.prod.yml`, you have two options:
 ./certs/generate-certs.sh
 
 # 3. Start services
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.production.yml up -d
 ```
 
 **Option B: Use pre-generated certificates**
@@ -282,7 +282,7 @@ mkdir -p certs
 cp ca.crt server.crt server.key certs/
 
 # 2. Start services
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.production.yml up -d
 ```
 
 **Note:** Certificates must be present before starting services. The entrypoint will fail if certificates are missing.

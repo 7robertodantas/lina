@@ -59,8 +59,8 @@ export DOCKER_REGISTRY=docker.io/username/lina
 export IMAGE_TAG=latest
 
 # Pull and run
-docker-compose -f docker-compose.prod.yml pull
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.production.yml pull
+docker-compose -f docker-compose.production.yml up -d
 ```
 
 Or create a `.env` file with:
@@ -73,7 +73,7 @@ IMAGE_TAG=latest
 Then run:
 
 ```bash
-docker-compose -f docker-compose.prod.yml up -d
+docker-compose -f docker-compose.production.yml up -d
 ```
 
 ## Manual Build and Push
@@ -190,13 +190,13 @@ Examples:
 
 ## Development vs Production
 
-- **Development**: Use `docker-compose.dev.yml` (builds images locally)
-- **Production**: Use `docker-compose.prod.yml` (pulls pre-built images)
+- **Development**: Use `docker-compose.development.yml` (builds images locally)
+- **Production**: Use `docker-compose.production.yml` (pulls pre-built images)
 
-You can still use `docker-compose.dev.yml` for local development:
+You can still use `docker-compose.development.yml` for local development:
 
 ```bash
-docker-compose -f docker-compose.dev.yml up --build
+docker-compose -f docker-compose.development.yml up --build
 ```
 
 ## Updating Images
@@ -211,8 +211,8 @@ When you make changes to your code:
 2. On other machines, pull the new version:
    ```bash
    export IMAGE_TAG=v1.1.0
-   docker-compose -f docker-compose.prod.yml pull
-   docker-compose -f docker-compose.prod.yml up -d
+   docker-compose -f docker-compose.production.yml pull
+   docker-compose -f docker-compose.production.yml up -d
    ```
 
 ## CI/CD Integration

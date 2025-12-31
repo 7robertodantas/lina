@@ -86,7 +86,7 @@ The Dynamic Security Plugin is initialized automatically on first startup via th
 
 ### Configure Device Service
 
-Set the credentials in your `docker-compose.dev.yml` or as environment variables:
+Set the credentials in your `docker-compose.development.yml` or as environment variables:
 
 ```yaml
 environment:
@@ -98,7 +98,7 @@ The device service will automatically use these credentials when connecting to t
 
 ## Configuration
 
-The Mosquitto configuration is managed via environment variables in `docker-compose.dev.yml`:
+The Mosquitto configuration is managed via environment variables in `docker-compose.development.yml`:
 
 - `MQTT_TLS_PORT` - TLS port (default: 8883)
 - `MQTT_USERNAME` - Username for authentication (required, `allow_anonymous false`)

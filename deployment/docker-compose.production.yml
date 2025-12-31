@@ -121,26 +121,6 @@ services:
         condition: service_healthy      
     restart: unless-stopped
 
-  smartmeter:
-    image: 7robertodantas/lina-smartmeter:latest
-    container_name: smartmeter
-    ports:
-      - "3001:8080" # UI
-    environment:
-      - MQTT_BROKER=mosquitto
-      - DEVICE_ID=smart-meter-001
-      - DEVICE_SECRET=smart-meter-001_password
-    env_file:
-      - .env
-    volumes:
-      - ./certs/ca.crt:/certs/ca.crt:ro
-    depends_on:    
-      mosquitto:
-        condition: service_healthy
-      redis:
-        condition: service_healthy        
-    restart: unless-stopped
-
   jaeger:
     image: jaegertracing/jaeger:2.12.0
     environment:

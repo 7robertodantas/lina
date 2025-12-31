@@ -10,14 +10,16 @@ import (
 
 // InvoiceStreamHandler handles invoice stream events
 type InvoiceStreamHandler struct {
-	receiverLND *LNDClient
-	payerLND    *LNDClient
+	receiverLND    *LNDClient
+	payerLND       *LNDClient
+	autopayEnabled bool
 }
 
-func NewInvoiceStreamHandler(receiverLND, payerLND *LNDClient) *InvoiceStreamHandler {
+func NewInvoiceStreamHandler(receiverLND, payerLND *LNDClient, autopayEnabled bool) *InvoiceStreamHandler {
 	return &InvoiceStreamHandler{
-		receiverLND: receiverLND,
-		payerLND:    payerLND,
+		receiverLND:    receiverLND,
+		payerLND:       payerLND,
+		autopayEnabled: autopayEnabled,
 	}
 }
 
@@ -68,9 +70,10 @@ func (h *InvoiceStreamHandler) handleInvoiceUpdate(ctx context.Context, invoice 
 	stateName := invoice.State.String()
 
 	logger.InfoWithFields(ctx, "Received invoice update", map[string]interface{}{
-		"invoice_id":  invoiceID,
-		"state":       stateName,
-		"amount_msat": amountMsat,
+		"invoice_id":      invoiceID,
+		"state":           stateName,
+		"amount_msat":     amountMsat,
+		"autopay_enabled": h.autopayEnabled,
 	})
 
 	// Only pay invoices that are OPEN or ACCEPTED (newly created)
@@ -85,6 +88,17 @@ func (h *InvoiceStreamHandler) handleInvoiceUpdate(ctx context.Context, invoice 
 	if invoice.PaymentRequest == "" {
 		logger.WarnWithFields(ctx, "Invoice missing payment request", map[string]interface{}{
 			"invoice_id": invoiceID,
+		})
+		return
+	}
+
+	// Check if autopay is enabled - this must be checked BEFORE attempting payment
+	if !h.autopayEnabled {
+		logger.InfoWithFields(ctx, "Autopay disabled - logging invoice (not paying)", map[string]interface{}{
+			"invoice_id":      invoiceID,
+			"amount_msat":     amountMsat,
+			"payment_request": invoice.PaymentRequest,
+			"autopay_enabled": h.autopayEnabled,
 		})
 		return
 	}

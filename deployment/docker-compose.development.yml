@@ -156,7 +156,7 @@ services:
       dockerfile: testing/smartmeter/Dockerfile
     container_name: smartmeter
     ports:
-      - "3001:8080" # UI
+      - "3010:8080" # UI
     environment:
       - MQTT_BROKER=mosquitto
       - DEVICE_ID=smart-meter-001
@@ -295,6 +295,26 @@ services:
     depends_on:
       - prometheus
     restart: unless-stopped
+
+  autopay:
+    build:
+      context: ..
+      dockerfile: services/Dockerfile
+      args:
+        SERVICE: autopay
+    container_name: autopay
+    environment:
+      - NETWORK=regtest
+      - AUTOPAY_ENABLED=${AUTOPAY_ENABLED:-false}
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Note: Autopay connects directly to LND nodes, so it doesn't strictly need
+    # the lightning service, but it's included as a dependency to ensure LND
+    # is available when autopay starts. If LND is external, remove this dependency.
+    # depends_on:
+    #   lightning:
+    #     condition: service_started
 
 volumes:
   mosquitto-data:

@@ -21,6 +21,7 @@ func main() {
 		"receiver_lnd_host": cfg.ReceiverLNDHost,
 		"payer_lnd_host":    cfg.PayerLNDHost,
 		"network":           cfg.Network,
+		"autopay_enabled":   cfg.AutopayEnabled,
 	})
 
 	// Create receiver LND client (listens for invoice creation)
@@ -50,7 +51,7 @@ func main() {
 	defer payerLND.Close()
 
 	// Create invoice stream handler
-	handler := NewInvoiceStreamHandler(receiverLND, payerLND)
+	handler := NewInvoiceStreamHandler(receiverLND, payerLND, cfg.AutopayEnabled)
 
 	// Start listening for invoice creation events
 	if err := handler.Start(ctx); err != nil {

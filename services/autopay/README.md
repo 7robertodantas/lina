@@ -40,6 +40,9 @@ The service requires the following environment variables:
 
 ### General Configuration
 - `NETWORK`: Bitcoin network (default: `regtest`)
+- `AUTOPAY_ENABLED`: Enable/disable automatic payment (default: `false`)
+  - When `true`: Service will automatically pay invoices when they are created
+  - When `false`: Service will only log invoice creation events without paying them
 
 **Note**: If receiver and payer are the same node, you only need to set the base `LND_*` variables and both will use the same node.
 
@@ -53,13 +56,19 @@ docker build -f autopay/Dockerfile -t 7robertodantas/lina-autopay:latest .
 
 ### Using Docker Compose
 
-The service is included in `docker-compose.loadtest.edge.yml` and will automatically start with the measurement stack.
+The service is included in `docker-compose.evaluation.edge.yml` and will automatically start with the measurement stack.
 
-You can also run it standalone using `docker-compose.autopay.yml`:
+You can also run it with the development stack. The service will start automatically, but payments are controlled by the `AUTOPAY_ENABLED` environment variable:
 
 ```bash
 # Make sure your .env file has the LND configuration
-docker-compose -f docker-compose.autopay.yml up -d
+# To enable autopay (actually perform payments):
+AUTOPAY_ENABLED=true docker-compose -f deployment/docker-compose.development.yml up -d
+
+# Or set it in your .env file:
+# AUTOPAY_ENABLED=true
+
+# If AUTOPAY_ENABLED is false or not set, the service will only log invoices without paying them
 ```
 
 ### Standalone Docker

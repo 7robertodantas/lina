@@ -94,10 +94,10 @@ Create a `.env` file at the project root (or copy from `deployment/.env.example`
 
 ```bash
 # Development environment
-docker-compose -f deployment/docker-compose.dev.yml up
+docker-compose -f deployment/docker-compose.development.yml up
 
 # Or start specific services
-docker-compose -f deployment/docker-compose.dev.yml up device ledger lightning consumption
+docker-compose -f deployment/docker-compose.development.yml up device ledger lightning consumption
 ```
 
 4. **Start the smart meter simulator** (in another terminal):
@@ -229,7 +229,7 @@ For detailed deployment instructions, see `deployment/scripts/DEPLOYMENT.md`
 Use the production compose file which pulls pre-built images:
 
 ```bash
-docker-compose -f deployment/docker-compose.prod.yml up -d
+docker-compose -f deployment/docker-compose.production.yml up -d
 ```
 
 ### Building and Pushing Docker Images
@@ -303,12 +303,12 @@ Always run docker-compose from project root with `-f deployment/docker-compose.*
 - Check that Redis is running and accessible
 - Verify certificates are generated (`infrastructure/certs/`)
 - Check `.env` file exists and has required variables
-- Review service logs: `docker-compose -f deployment/docker-compose.dev.yml logs <service>`
+- Review service logs: `docker-compose -f deployment/docker-compose.development.yml logs <service>`
 
 ### MQTT connection issues
 
 - Verify certificates are mounted correctly
-- Check MQTT broker is healthy: `docker-compose -f deployment/docker-compose.dev.yml ps mosquitto`
+- Check MQTT broker is healthy: `docker-compose -f deployment/docker-compose.development.yml ps mosquitto`
 - Verify device credentials in MQTT broker
 
 ### LND connection issues

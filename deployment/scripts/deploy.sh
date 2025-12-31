@@ -26,8 +26,8 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Change to project root directory
 cd "$PROJECT_ROOT"
 
-COMPOSE_FILE="deployment/docker-compose.prod.yml"
-COMPOSE_MEAS_FILE="deployment/docker-compose.loadtest.edge.yml"
+COMPOSE_FILE="deployment/docker-compose.production.yml"
+COMPOSE_MEAS_FILE="deployment/docker-compose.evaluation.edge.yml"
 CERTS_DIR="./infrastructure/certs"
 REMOTE_DIR="~/lina"
 # Extract just the filename for remote operations
@@ -53,7 +53,7 @@ show_usage() {
     echo "  ./deploy.sh remote user@hostname -p 2222"
     echo ""
     echo "Remote deployment will:"
-    echo "  - Copy deployment/docker-compose.prod.yml, deployment/docker-compose.loadtest.edge.yml to ~/lina/deployment on remote"
+    echo "  - Copy deployment/docker-compose.production.yml, deployment/docker-compose.evaluation.edge.yml to ~/lina/deployment on remote"
     echo "  - Copy infrastructure/certs/ to ~/lina/infrastructure/certs on remote"
     echo "  - Verify prerequisites (Docker, docker-compose)"
     echo "  - Pull Docker images"
@@ -193,14 +193,14 @@ check_file() {
     fi
 }
 
-# Check if docker-compose.prod.yml exists locally
+# Check if docker-compose.production.yml exists locally
 if [ ! -f "$COMPOSE_FILE" ]; then
     echo -e "${RED}ERROR: $COMPOSE_FILE not found${NC}"
     echo "Please ensure you're in the project directory"
     exit 1
 fi
 
-# Check if docker-compose.loadtest.edge.yml exists locally (optional, just warn if missing)
+# Check if docker-compose.evaluation.edge.yml exists locally (optional, just warn if missing)
 if [ ! -f "$COMPOSE_MEAS_FILE" ]; then
     echo -e "${YELLOW}Note: $COMPOSE_MEAS_FILE not found (optional file)${NC}"
 fi
@@ -269,16 +269,16 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     run_cmd "mkdir -p $REMOTE_DIR/deployment"
     run_cmd "mkdir -p $REMOTE_DIR/infrastructure/certs"
     
-    # Copy docker-compose.prod.yml
-    echo "Copying docker-compose.prod.yml..."
+    # Copy docker-compose.production.yml
+    echo "Copying docker-compose.production.yml..."
     scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_FILE_BASENAME"
     
-    # Copy docker-compose.loadtest.edge.yml if it exists
+    # Copy docker-compose.evaluation.edge.yml if it exists
     if [ -f "$COMPOSE_MEAS_FILE" ]; then
-        echo "Copying docker-compose.loadtest.edge.yml..."
+        echo "Copying docker-compose.evaluation.edge.yml..."
         scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_FILE_BASENAME"
     else
-        echo -e "${YELLOW}Note: docker-compose.loadtest.edge.yml not found locally, skipping${NC}"
+        echo -e "${YELLOW}Note: docker-compose.evaluation.edge.yml not found locally, skipping${NC}"
     fi
     
     # Copy .env.example if .env doesn't exist on remote (in deployment directory)
@@ -376,9 +376,9 @@ fi
 
 # Check compose file exists
 if run_cmd "test -f $REMOTE_COMPOSE_FILE"; then
-    echo -e "${GREEN}✓ docker-compose.prod.yml found${NC}"
+    echo -e "${GREEN}✓ docker-compose.production.yml found${NC}"
 else
-    echo -e "${RED}ERROR: docker-compose.prod.yml not found${NC}"
+    echo -e "${RED}ERROR: docker-compose.production.yml not found${NC}"
     exit 1
 fi
 

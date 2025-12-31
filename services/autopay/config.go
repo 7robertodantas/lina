@@ -19,7 +19,8 @@ type Config struct {
 	PayerLNDTLSServerName string
 	PayerLNDMacaroonHex   string
 
-	Network string
+	Network        string
+	AutopayEnabled bool
 }
 
 func LoadConfig() *Config {
@@ -36,8 +37,13 @@ func LoadConfig() *Config {
 		PayerLNDTLSServerName: internal.GetEnv("PAYER_LND_TLS_SERVER_NAME", internal.GetEnv("LND_TLS_SERVER_NAME", "localhost")),
 		PayerLNDMacaroonHex:   internal.GetEnv("PAYER_LND_MACAROON_HEX", internal.GetEnv("LND_MACAROON_HEX", "")),
 
-		Network: internal.GetEnv("NETWORK", "regtest"),
+		Network:        internal.GetEnv("NETWORK", "regtest"),
+		AutopayEnabled: internal.BoolEnv("AUTOPAY_ENABLED", false),
 	}
+
+	// Log the autopay enabled status for debugging
+	autopayEnv := internal.GetEnv("AUTOPAY_ENABLED", "")
+	log.Printf("AUTOPAY_ENABLED env var: '%s', parsed as: %v", autopayEnv, cfg.AutopayEnabled)
 
 	// Validate receiver LND configuration
 	if cfg.ReceiverLNDHost == "" {
