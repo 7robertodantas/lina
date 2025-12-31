@@ -1,4 +1,4 @@
-module github.com/robertodantas/lina/testing/loadtest/httpdevice
+module github.com/robertodantas/lina/testing/loadtest/httpdevices
 
 go 1.25.4
 

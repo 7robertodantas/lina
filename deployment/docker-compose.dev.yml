@@ -172,11 +172,11 @@ services:
         condition: service_healthy        
     restart: unless-stopped
 
-  httpdevice:
+  httpdevices:
     build:
       context: ..
-      dockerfile: testing/loadtest/httpdevice/Dockerfile
-    container_name: httpdevice
+      dockerfile: testing/loadtest/httpdevices/Dockerfile
+    container_name: httpdevices
     ports:
       - "3002:8080" # UI
     environment:

@@ -91,10 +91,13 @@ build_and_push "consumption" "./services/Dockerfile" "." "--build-arg" "SERVICE=
 build_and_push "lightning" "./services/Dockerfile" "." "--build-arg" "SERVICE=lightning"
 build_and_push "autopay" "./services/Dockerfile" "." "--build-arg" "SERVICE=autopay"
 
-echo -e "${BLUE}=== Building smartmeter ===${NC}\n"
+echo -e "${BLUE}=== Building testing tools ===${NC}\n"
 
 # Smartmeter WebSocket URL is now dynamically determined from browser location
 build_and_push "smartmeter" "./testing/smartmeter/Dockerfile" "."
+
+# HTTP devices service for load testing
+build_and_push "httpdevices" "./testing/loadtest/httpdevices/Dockerfile" "."
 
 echo -e "${GREEN}=== All images built and pushed successfully! ===${NC}"
 echo -e "${BLUE}You can now use docker-compose.prod.yml to pull and run these images${NC}"

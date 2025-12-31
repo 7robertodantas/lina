@@ -15,26 +15,26 @@ FROM golang:1.25-alpine AS builder
     COPY testing/device/go.mod testing/device/go.sum ./testing/device/
     COPY testing/device/*.go ./testing/device/
 
-    # Copy httpdevice files
-    COPY testing/loadtest/httpdevice/go.mod testing/loadtest/httpdevice/go.sum ./testing/loadtest/httpdevice/
-    WORKDIR /workspace/testing/loadtest/httpdevice
+    # Copy httpdevices files
+    COPY testing/loadtest/httpdevices/go.mod testing/loadtest/httpdevices/go.sum ./testing/loadtest/httpdevices/
+    WORKDIR /workspace/testing/loadtest/httpdevices
     RUN go mod download
 
-    # Copy httpdevice source code
-    COPY testing/loadtest/httpdevice/*.go ./
+    # Copy httpdevices source code
+    COPY testing/loadtest/httpdevices/*.go ./
 
-    # Build the httpdevice application
-    RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o httpdevice .
+    # Build the httpdevices application
+    RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o httpdevices .
 
 # Final Stage
 FROM alpine:3.23
 
-    ENV APP=httpdevice
+    ENV APP=httpdevices
     WORKDIR /app
 
-    COPY --from=builder /workspace/testing/loadtest/httpdevice/httpdevice .
+    COPY --from=builder /workspace/testing/loadtest/httpdevices/httpdevices .
 
     EXPOSE 8080
 
-    CMD ["./httpdevice"]
+    CMD ["./httpdevices"]
 

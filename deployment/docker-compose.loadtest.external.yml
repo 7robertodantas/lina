@@ -22,11 +22,11 @@ services:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
 
-  httpdevice:
+  httpdevices:
     build:
       context: ..
-      dockerfile: testing/loadtest/httpdevice/Dockerfile
-    container_name: httpdevice
+      dockerfile: testing/loadtest/httpdevices/Dockerfile
+    container_name: httpdevices
     ports:
       - "3002:8080"
     env_file:

@@ -210,7 +210,7 @@ export function load_usage() {
   const deviceID = generateDeviceID(vuID);
 
   // k6 calls this function in a loop - each call sends one usage report
-  // The httpdevice handles all the MQTT logic, authorization maintenance, etc.
+  // The httpdevices service handles all the MQTT logic, authorization maintenance, etc.
   // Devices are assumed to be already connected from setup phase
 
   // Generate a random measurement between 0.1 and 1.0 kWh
@@ -224,7 +224,7 @@ export function load_usage() {
     timestamp: getISOTimestamp(),
   });
 
-  // Send usage report via httpdevice
+  // Send usage report via httpdevices service
   const usageRes = http.post(
     `${HTTPDEVICE_BASE_URL}/devices/${deviceID}/usage`,
     usagePayload,

@@ -12,7 +12,7 @@ import (
 	devicepkg "github.com/robertodantas/lina/testing/device"
 )
 
-var logger = internal.NewLogger("httpdevice")
+var logger = internal.NewLogger("httpdevices")
 
 var config = LoadConfig()
 
