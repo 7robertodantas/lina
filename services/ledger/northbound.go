@@ -11,17 +11,17 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/robertodantas/lnpay/internal"
+	"github.com/robertodantas/lina/internal"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 
 // NorthboundInterface handles REST API endpoints
 type NorthboundInterface struct {
-	router   *gin.Engine
-	repo     *LedgerRepository
+	router    *gin.Engine
+	repo      *LedgerRepository
 	publisher *EastWestStreamPublisher
-	cfg      Config
-	server   *http.Server
+	cfg       Config
+	server    *http.Server
 }
 
 // NewNorthboundInterface creates a new northbound interface

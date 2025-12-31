@@ -7,11 +7,12 @@
 package mqtt
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -1247,7 +1248,7 @@ const file_model_model_mqtt_southbound_proto_rawDesc = "" +
 	"\x16INVOICE_STATUS_CREATED\x10\x01\x12\x1a\n" +
 	"\x16INVOICE_STATUS_SETTLED\x10\x02\x12\x1a\n" +
 	"\x16INVOICE_STATUS_EXPIRED\x10\x03\x12\x19\n" +
-	"\x15INVOICE_STATUS_FAILED\x10\x04B5Z3github.com/robertodantas/lnpay/proto/gen/model/mqttb\x06proto3"
+	"\x15INVOICE_STATUS_FAILED\x10\x04B5Z3github.com/robertodantas/lina/proto/gen/model/mqttb\x06proto3"
 
 var (
 	file_model_model_mqtt_southbound_proto_rawDescOnce sync.Once

@@ -9,8 +9,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/robertodantas/lnpay/internal"
-	lightningpb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
+	"github.com/robertodantas/lina/internal"
+	lightningpb "github.com/robertodantas/lina/proto/gen/interfaces/lightning"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 )

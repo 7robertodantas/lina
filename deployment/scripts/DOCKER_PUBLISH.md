@@ -33,20 +33,20 @@ chmod +x scripts/build-and-push.sh
 
 # Build and push to Docker Hub (replace 'username' with your Docker Hub username)
 # By default, builds for both amd64 and arm64
-./scripts/build-and-push.sh docker.io/username/lnpay latest
+./scripts/build-and-push.sh docker.io/username/lina latest
 
 # Or use a specific tag
-./scripts/build-and-push.sh docker.io/username/lnpay v1.0.0
+./scripts/build-and-push.sh docker.io/username/lina v1.0.0
 
 # For a private registry
-./scripts/build-and-push.sh registry.example.com/lnpay latest
+./scripts/build-and-push.sh registry.example.com/lina latest
 
 # Custom platforms (optional third parameter)
 # Build only for amd64
-./scripts/build-and-push.sh docker.io/username/lnpay latest linux/amd64
+./scripts/build-and-push.sh docker.io/username/lina latest linux/amd64
 
 # Build for specific platforms
-./scripts/build-and-push.sh docker.io/username/lnpay latest linux/amd64,linux/arm64,linux/arm/v7
+./scripts/build-and-push.sh docker.io/username/lina latest linux/amd64,linux/arm64,linux/arm/v7
 ```
 
 ### 2. Using Published Images
@@ -55,7 +55,7 @@ On other machines, use the production docker-compose file:
 
 ```bash
 # Set environment variables
-export DOCKER_REGISTRY=docker.io/username/lnpay
+export DOCKER_REGISTRY=docker.io/username/lina
 export IMAGE_TAG=latest
 
 # Pull and run
@@ -66,7 +66,7 @@ docker-compose -f docker-compose.prod.yml up -d
 Or create a `.env` file with:
 
 ```env
-DOCKER_REGISTRY=docker.io/username/lnpay
+DOCKER_REGISTRY=docker.io/username/lina
 IMAGE_TAG=latest
 ```
 
@@ -84,24 +84,24 @@ If you prefer to build and push images manually:
 
 ```bash
 # Build images for current platform only
-docker build -t docker.io/username/lnpay-caddy:latest -f ./caddy/Dockerfile ./caddy
-docker build -t docker.io/username/lnpay-redis:latest -f ./redis/Dockerfile ./redis
-docker build -t docker.io/username/lnpay-mosquitto:latest -f ./mosquitto/Dockerfile ./mosquitto
-docker build -t docker.io/username/lnpay-device:latest -f ./services/Dockerfile --build-arg SERVICE=device .
-docker build -t docker.io/username/lnpay-ledger:latest -f ./services/Dockerfile --build-arg SERVICE=ledger .
-docker build -t docker.io/username/lnpay-consumption:latest -f ./services/Dockerfile --build-arg SERVICE=consumption .
-docker build -t docker.io/username/lnpay-lightning:latest -f ./services/Dockerfile --build-arg SERVICE=lightning .
-docker build -t docker.io/username/lnpay-smartmeter:latest -f ./smartmeter/Dockerfile .
+docker build -t docker.io/username/lina-caddy:latest -f ./caddy/Dockerfile ./caddy
+docker build -t docker.io/username/lina-redis:latest -f ./redis/Dockerfile ./redis
+docker build -t docker.io/username/lina-mosquitto:latest -f ./mosquitto/Dockerfile ./mosquitto
+docker build -t docker.io/username/lina-device:latest -f ./services/Dockerfile --build-arg SERVICE=device .
+docker build -t docker.io/username/lina-ledger:latest -f ./services/Dockerfile --build-arg SERVICE=ledger .
+docker build -t docker.io/username/lina-consumption:latest -f ./services/Dockerfile --build-arg SERVICE=consumption .
+docker build -t docker.io/username/lina-lightning:latest -f ./services/Dockerfile --build-arg SERVICE=lightning .
+docker build -t docker.io/username/lina-smartmeter:latest -f ./smartmeter/Dockerfile .
 
 # Push images
-docker push docker.io/username/lnpay-caddy:latest
-docker push docker.io/username/lnpay-redis:latest
-docker push docker.io/username/lnpay-mosquitto:latest
-docker push docker.io/username/lnpay-device:latest
-docker push docker.io/username/lnpay-ledger:latest
-docker push docker.io/username/lnpay-consumption:latest
-docker push docker.io/username/lnpay-lightning:latest
-docker push docker.io/username/lnpay-smartmeter:latest
+docker push docker.io/username/lina-caddy:latest
+docker push docker.io/username/lina-redis:latest
+docker push docker.io/username/lina-mosquitto:latest
+docker push docker.io/username/lina-device:latest
+docker push docker.io/username/lina-ledger:latest
+docker push docker.io/username/lina-consumption:latest
+docker push docker.io/username/lina-lightning:latest
+docker push docker.io/username/lina-smartmeter:latest
 ```
 
 ### Multi-Architecture Build (Recommended)
@@ -115,46 +115,46 @@ docker buildx inspect --bootstrap
 
 # Build and push for multiple platforms
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-caddy:latest \
+  -t docker.io/username/lina-caddy:latest \
   -f ./caddy/Dockerfile \
   --push ./caddy
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-redis:latest \
+  -t docker.io/username/lina-redis:latest \
   -f ./redis/Dockerfile \
   --push ./redis
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-mosquitto:latest \
+  -t docker.io/username/lina-mosquitto:latest \
   -f ./mosquitto/Dockerfile \
   --push ./mosquitto
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-device:latest \
+  -t docker.io/username/lina-device:latest \
   -f ./services/Dockerfile \
   --build-arg SERVICE=device \
   --push .
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-ledger:latest \
+  -t docker.io/username/lina-ledger:latest \
   -f ./services/Dockerfile \
   --build-arg SERVICE=ledger \
   --push .
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-consumption:latest \
+  -t docker.io/username/lina-consumption:latest \
   -f ./services/Dockerfile \
   --build-arg SERVICE=consumption \
   --push .
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-lightning:latest \
+  -t docker.io/username/lina-lightning:latest \
   -f ./services/Dockerfile \
   --build-arg SERVICE=lightning \
   --push .
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lnpay-smartmeter:latest \
+  -t docker.io/username/lina-smartmeter:latest \
   -f ./smartmeter/Dockerfile \
   --push .
 ```
@@ -164,19 +164,19 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ### Docker Hub
 
 ```bash
-./scripts/build-and-push.sh docker.io/username/lnpay latest
+./scripts/build-and-push.sh docker.io/username/lina latest
 ```
 
 ### GitHub Container Registry
 
 ```bash
-./scripts/build-and-push.sh ghcr.io/username/lnpay latest
+./scripts/build-and-push.sh ghcr.io/username/lina latest
 ```
 
 ### Private Registry
 
 ```bash
-./scripts/build-and-push.sh registry.example.com/lnpay latest
+./scripts/build-and-push.sh registry.example.com/lina latest
 ```
 
 ## Image Naming Convention
@@ -184,9 +184,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 Images are named as: `{REGISTRY}-{SERVICE}:{TAG}`
 
 Examples:
-- `docker.io/username/lnpay-caddy:latest`
-- `docker.io/username/lnpay-device:v1.0.0`
-- `registry.example.com/lnpay-redis:latest`
+- `docker.io/username/lina-caddy:latest`
+- `docker.io/username/lina-device:v1.0.0`
+- `registry.example.com/lina-redis:latest`
 
 ## Development vs Production
 
@@ -205,7 +205,7 @@ When you make changes to your code:
 
 1. Rebuild and push:
    ```bash
-   ./scripts/build-and-push.sh docker.io/username/lnpay v1.1.0
+   ./scripts/build-and-push.sh docker.io/username/lina v1.1.0
    ```
 
 2. On other machines, pull the new version:
@@ -224,6 +224,6 @@ You can integrate the build script into your CI/CD pipeline:
 - name: Build and push Docker images
   run: |
     docker login -u ${{ secrets.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-    ./scripts/build-and-push.sh docker.io/${{ secrets.DOCKER_USERNAME }}/lnpay ${{ github.ref_name }}
+    ./scripts/build-and-push.sh docker.io/${{ secrets.DOCKER_USERNAME }}/lina ${{ github.ref_name }}
 ```
 

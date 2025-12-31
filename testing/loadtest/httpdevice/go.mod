@@ -1,18 +1,18 @@
-module github.com/robertodantas/lnpay/testing/loadtest/httpdevice
+module github.com/robertodantas/lina/testing/loadtest/httpdevice
 
 go 1.25.4
 
 require (
 	github.com/gin-gonic/gin v1.11.0
-	github.com/robertodantas/lnpay/internal v0.0.0
-	github.com/robertodantas/lnpay/testing/device v0.0.0
+	github.com/robertodantas/lina/internal v0.0.0
+	github.com/robertodantas/lina/testing/device v0.0.0
 )
 
-replace github.com/robertodantas/lnpay/services/proto => ../../../services/proto
+replace github.com/robertodantas/lina/services/proto => ../../../services/proto
 
-replace github.com/robertodantas/lnpay/testing/device => ../../device
+replace github.com/robertodantas/lina/testing/device => ../../device
 
-replace github.com/robertodantas/lnpay/internal => ../../../services/internal
+replace github.com/robertodantas/lina/internal => ../../../services/internal
 
 require (
 	github.com/bytedance/sonic v1.14.0 // indirect
@@ -46,7 +46,7 @@ require (
 	github.com/redis/go-redis/extra/rediscmd/v9 v9.17.0 // indirect
 	github.com/redis/go-redis/extra/redisotel/v9 v9.17.0 // indirect
 	github.com/redis/go-redis/v9 v9.17.0 // indirect
-	github.com/robertodantas/lnpay/services/proto v0.0.0 // indirect
+	github.com/robertodantas/lina/services/proto v0.0.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect

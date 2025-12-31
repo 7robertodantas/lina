@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/robertodantas/lnpay/internal"
+	"github.com/robertodantas/lina/internal"
 	"go.opentelemetry.io/otel/attribute"
 	_ "modernc.org/sqlite"
 )

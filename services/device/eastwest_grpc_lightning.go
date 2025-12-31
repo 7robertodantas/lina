@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	internalpkg "github.com/robertodantas/lnpay/internal"
-	lightningpb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	internalpkg "github.com/robertodantas/lina/internal"
+	lightningpb "github.com/robertodantas/lina/proto/gen/interfaces/lightning"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"

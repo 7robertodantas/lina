@@ -8,8 +8,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	devicepb "github.com/robertodantas/lnpay/proto/gen/model/device"
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
+	devicepb "github.com/robertodantas/lina/proto/gen/model/device"
+	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 )
 
 // EastWestStreamPublisher handles publishing messages to Redis streams for east-west communication
@@ -52,11 +52,11 @@ func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.
 
 	// Convert MQTT UsagePayload to device UsageRecord
 	usageRecord := &devicepb.UsageRecord{
-		DeviceId: payload.GetDeviceId(),
-		ReportId: payload.GetReportId(),
-		Strategy: convertReportingStrategy(payload.GetStrategy()),
-		Measure:  payload.GetMeasure(),
-		Unit:     payload.GetUnit(),
+		DeviceId:         payload.GetDeviceId(),
+		ReportId:         payload.GetReportId(),
+		Strategy:         convertReportingStrategy(payload.GetStrategy()),
+		Measure:          payload.GetMeasure(),
+		Unit:             payload.GetUnit(),
 		Timestamp:        payload.GetTimestamp(),
 		PricePerUnitMsat: pricePerUnitMsat,
 	}

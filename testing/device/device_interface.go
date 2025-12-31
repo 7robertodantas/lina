@@ -11,8 +11,8 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"github.com/robertodantas/lnpay/internal"
-	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
+	"github.com/robertodantas/lina/internal"
+	mqttmodel "github.com/robertodantas/lina/services/proto/gen/model/mqtt"
 )
 
 var (

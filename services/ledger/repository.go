@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/robertodantas/lnpay/internal"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	"github.com/robertodantas/lina/internal"
+	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
 	"go.opentelemetry.io/otel/attribute"
 	_ "modernc.org/sqlite"
 )

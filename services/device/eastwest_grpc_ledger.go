@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	internalpkg "github.com/robertodantas/lnpay/internal"
-	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	internalpkg "github.com/robertodantas/lina/internal"
+	ledgerpb "github.com/robertodantas/lina/proto/gen/interfaces/ledger"
+	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"

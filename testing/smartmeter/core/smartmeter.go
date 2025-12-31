@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
-	devicepkg "github.com/robertodantas/lnpay/testing/device"
+	mqttmodel "github.com/robertodantas/lina/services/proto/gen/model/mqtt"
+	devicepkg "github.com/robertodantas/lina/testing/device"
 )
 
 // SmartMeter encapsulates all meter-specific logic and state

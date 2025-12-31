@@ -1,6 +1,6 @@
 # Certificates Directory
 
-This directory contains TLS certificates used across LNPay services (MQTT, gRPC, etc.).
+This directory contains TLS certificates used across LINA services (MQTT, gRPC, etc.).
 
 ## Required Certificates
 

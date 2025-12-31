@@ -1,10 +1,10 @@
-module github.com/robertodantas/lnpay/autopay
+module github.com/robertodantas/lina/autopay
 
 go 1.25.4
 
 require (
 	github.com/lightningnetwork/lnd v0.19.3-beta
-	github.com/robertodantas/lnpay/internal v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/internal v0.0.0-00010101000000-000000000000
 	google.golang.org/grpc v1.75.0
 )
 
@@ -190,9 +190,9 @@ require (
 )
 
 // Local dependencies - adjust paths as needed
-replace github.com/robertodantas/lnpay/proto => ../proto
+replace github.com/robertodantas/lina/proto => ../proto
 
-replace github.com/robertodantas/lnpay/internal => ../internal
+replace github.com/robertodantas/lina/internal => ../internal
 
 // We want to format raw bytes as hex instead of base64. The forked version
 // allows us to specify that as an option.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Generate TLS certificates for LNPay services
+# Generate TLS certificates for LINA services
 # Generates CA and server certificates for use across services (MQTT, gRPC, etc.)
 
 set -e
@@ -18,7 +18,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo "TLS Certificate Generation for LNPay"
+echo "TLS Certificate Generation for LINA"
 echo "====================================="
 echo ""
 
@@ -48,7 +48,7 @@ generate_ca() {
     openssl genrsa -out "$CERT_DIR/ca.key" 2048
     openssl req -new -x509 -days "$CA_VALIDITY_DAYS" -key "$CERT_DIR/ca.key" \
         -out "$CERT_DIR/ca.crt" \
-        -subj "/CN=LNPay-CA/O=LNPay/C=US"
+        -subj "/CN=LINA-CA/O=LINA/C=US"
     echo -e "${GREEN}✓${NC} CA certificate generated (valid for ${CA_VALIDITY_DAYS} days)"
 }
 
@@ -69,8 +69,8 @@ req_extensions = v3_req
 prompt = no
 
 [req_distinguished_name]
-CN = lnpay-server
-O = LNPay
+CN = lina-server
+O = LINA
 C = US
 
 [v3_req]

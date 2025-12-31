@@ -1,6 +1,6 @@
-# k6 Load Testing for LNPay
+# k6 Load Testing for LINA
 
-This directory contains k6 load testing scripts to simulate thousands of devices connecting to the LNPay system.
+This directory contains k6 load testing scripts to simulate thousands of devices connecting to the LINA system.
 
 ## Prerequisites
 

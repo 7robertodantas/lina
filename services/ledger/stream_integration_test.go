@@ -11,8 +11,8 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/robertodantas/lnpay/internal"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	"github.com/robertodantas/lina/internal"
+	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
 )
 
 func TestStreamHandlerPublishesLedgerEvents(t *testing.T) {

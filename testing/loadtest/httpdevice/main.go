@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/robertodantas/lnpay/internal"
-	devicepkg "github.com/robertodantas/lnpay/testing/device"
+	"github.com/robertodantas/lina/internal"
+	devicepkg "github.com/robertodantas/lina/testing/device"
 )
 
 var logger = internal.NewLogger("httpdevice")

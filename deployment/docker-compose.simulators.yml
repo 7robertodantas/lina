@@ -1,6 +1,6 @@
 services:
   sim1:
-    image: 7robertodantas/lnpay-smartmeter:latest
+    image: 7robertodantas/lina-smartmeter:latest
     container_name: sim1
     ports:
       - "3010:8080" # UI
@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
 
   sim2:
-    image: 7robertodantas/lnpay-smartmeter:latest
+    image: 7robertodantas/lina-smartmeter:latest
     container_name: sim2
     ports:
       - "3011:8080" # UI
@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
 
   sim3:
-    image: 7robertodantas/lnpay-smartmeter:latest
+    image: 7robertodantas/lina-smartmeter:latest
     container_name: sim3
     ports:
       - "3012:8080" # UI

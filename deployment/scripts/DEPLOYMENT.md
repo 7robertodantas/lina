@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide explains how to deploy the LNPay system to a new machine.
+This guide explains how to deploy the LINA system to a new machine.
 
 ## Quick Answer: What Files Do I Need?
 

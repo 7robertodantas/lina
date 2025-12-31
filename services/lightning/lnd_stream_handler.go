@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/lightningnetwork/lnd/lnrpc"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 )
 
 type LNDStreamHandler struct {

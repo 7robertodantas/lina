@@ -1,6 +1,6 @@
 # RPC Proto Definitions
 
-This directory contains Protocol Buffer definitions for the LNPay services, organized into:
+This directory contains Protocol Buffer definitions for the LINA services, organized into:
 - **`model/`** - Data model definitions (enums, messages, events, and other data structures)
 - **`interfaces/`** - Service definitions (gRPC services)
 

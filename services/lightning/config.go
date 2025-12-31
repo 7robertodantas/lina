@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/robertodantas/lnpay/internal"
+	"github.com/robertodantas/lina/internal"
 )
 
 type Config struct {

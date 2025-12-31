@@ -8,7 +8,8 @@ package lightning
 
 import (
 	context "context"
-	lightning "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+
+	lightning "github.com/robertodantas/lina/proto/gen/model/lightning"
 	grpc "google.golang.org/grpc"
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"

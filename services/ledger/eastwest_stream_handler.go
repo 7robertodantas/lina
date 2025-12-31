@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	consumptionpb "github.com/robertodantas/lnpay/proto/gen/model/consumption"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	consumptionpb "github.com/robertodantas/lina/proto/gen/model/consumption"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 )
 
 const (

@@ -1,10 +1,10 @@
-# LNPay
+# LINA
 
 A Lightning Network payment system for smart meters and IoT devices. This system enables devices to request Lightning invoices, track consumption, and manage balances through a microservices architecture.
 
 ## Overview
 
-LNPay is a distributed system that connects IoT devices (like smart meters) to the Lightning Network for real-time micropayments. Devices publish consumption data via MQTT, and the system manages device balances, creates Lightning invoices, and tracks energy consumption.
+LINA is a distributed system that connects IoT devices (like smart meters) to the Lightning Network for real-time micropayments. Devices publish consumption data via MQTT, and the system manages device balances, creates Lightning invoices, and tracks energy consumption.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ The system consists of several microservices communicating via:
 ## Project Structure
 
 ```
-lnpay/
+lina/
 ├── services/                    # Core business services
 │   ├── consumption/           # Consumption tracking service
 │   ├── device/                 # Device management service
@@ -137,7 +137,7 @@ All services share a common Dockerfile pattern:
 
 ```bash
 # Build a specific service
-docker build -f services/Dockerfile --build-arg SERVICE=device -t lnpay-device .
+docker build -f services/Dockerfile --build-arg SERVICE=device -t lina-device .
 ```
 
 ### Protocol Buffers

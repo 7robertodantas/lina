@@ -10,7 +10,7 @@ import (
 
 	"github.com/lightningnetwork/lnd/lnrpc"
 	"github.com/lightningnetwork/lnd/lnrpc/routerrpc"
-	internalpkg "github.com/robertodantas/lnpay/internal"
+	internalpkg "github.com/robertodantas/lina/internal"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"

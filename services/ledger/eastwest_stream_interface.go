@@ -11,9 +11,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/robertodantas/lnpay/internal"
-	consumptionpb "github.com/robertodantas/lnpay/proto/gen/model/consumption"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	"github.com/robertodantas/lina/internal"
+	consumptionpb "github.com/robertodantas/lina/proto/gen/model/consumption"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 )
 
 const (

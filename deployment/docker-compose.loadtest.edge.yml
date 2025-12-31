@@ -1,6 +1,6 @@
 services:
   caddy:
-    image: 7robertodantas/lnpay-caddy:latest
+    image: 7robertodantas/lina-caddy:latest
     container_name: caddy
     ports:
       - "8080:80" # Northbound
@@ -14,7 +14,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: 7robertodantas/lnpay-redis:latest
+    image: 7robertodantas/lina-redis:latest
     container_name: redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   mosquitto:
-    image: 7robertodantas/lnpay-mosquitto:latest
+    image: 7robertodantas/lina-mosquitto:latest
     container_name: mosquitto
     ports:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
@@ -49,7 +49,7 @@ services:
     restart: unless-stopped
 
   device:
-    image: 7robertodantas/lnpay-device:latest
+    image: 7robertodantas/lina-device:latest
     container_name: device
     ports:
       - "9466:9464" # Metrics    
@@ -84,7 +84,7 @@ services:
         condition: service_started
 
   ledger:
-    image: 7robertodantas/lnpay-ledger:latest
+    image: 7robertodantas/lina-ledger:latest
     container_name: ledger
     ports:
       - "9460:9464"
@@ -106,7 +106,7 @@ services:
     restart: unless-stopped
 
   consumption:
-    image: 7robertodantas/lnpay-consumption:latest
+    image: 7robertodantas/lina-consumption:latest
     container_name: consumption
     ports:
       - "9465:9464"    
@@ -128,7 +128,7 @@ services:
     restart: unless-stopped
 
   lightning:
-    image: 7robertodantas/lnpay-lightning:latest
+    image: 7robertodantas/lina-lightning:latest
     container_name: lightning
     environment:
       - REDIS_HOST=redis

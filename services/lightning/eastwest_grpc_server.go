@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	lightningservicepb "github.com/robertodantas/lnpay/proto/gen/interfaces/lightning"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	lightningservicepb "github.com/robertodantas/lina/proto/gen/interfaces/lightning"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

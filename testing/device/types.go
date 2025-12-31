@@ -1,7 +1,7 @@
 package device
 
 import (
-	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
+	mqttmodel "github.com/robertodantas/lina/services/proto/gen/model/mqtt"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

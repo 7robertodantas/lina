@@ -8,9 +8,9 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/robertodantas/lnpay/internal"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
+	"github.com/robertodantas/lina/internal"
+	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 )
 
 // EastWestStreamInterface wraps the internal StreamClient with device-specific methods for east-west stream communication

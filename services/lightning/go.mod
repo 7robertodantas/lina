@@ -1,4 +1,4 @@
-module github.com/robertodantas/lnpay/lightning
+module github.com/robertodantas/lina/lightning
 
 go 1.25.4
 
@@ -6,8 +6,8 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/lightningnetwork/lnd v0.19.3-beta
 	github.com/redis/go-redis/v9 v9.17.0
-	github.com/robertodantas/lnpay/internal v0.0.0-00010101000000-000000000000
-	github.com/robertodantas/lnpay/proto v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/internal v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/proto v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.63.0
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.46.0
 	go.opentelemetry.io/otel v1.39.0
@@ -226,6 +226,6 @@ replace github.com/btcsuite/btcd/btcec => github.com/btcsuite/btcd/btcec/v2 v2.3
 replace google.golang.org/protobuf => github.com/lightninglabs/protobuf-go-hex-display v1.33.0-hex-display
 
 // Local dependencies - adjust paths as needed
-replace github.com/robertodantas/lnpay/proto => ../proto
+replace github.com/robertodantas/lina/proto => ../proto
 
-replace github.com/robertodantas/lnpay/internal => ../internal
+replace github.com/robertodantas/lina/internal => ../internal

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Deployment script for LNPay system
+# Deployment script for LINA system
 # Supports both local and remote (SSH) deployment
 #
 # Usage:
@@ -29,14 +29,14 @@ cd "$PROJECT_ROOT"
 COMPOSE_FILE="deployment/docker-compose.prod.yml"
 COMPOSE_MEAS_FILE="deployment/docker-compose.loadtest.edge.yml"
 CERTS_DIR="./infrastructure/certs"
-REMOTE_DIR="~/lnpay"
+REMOTE_DIR="~/lina"
 # Extract just the filename for remote operations
 COMPOSE_FILE_BASENAME=$(basename "$COMPOSE_FILE")
 COMPOSE_MEAS_FILE_BASENAME=$(basename "$COMPOSE_MEAS_FILE")
 
 # Show usage/help
 show_usage() {
-    echo "LNPay Deployment Script"
+    echo "LINA Deployment Script"
     echo "======================"
     echo ""
     echo "Usage:"
@@ -53,8 +53,8 @@ show_usage() {
     echo "  ./deploy.sh remote user@hostname -p 2222"
     echo ""
     echo "Remote deployment will:"
-    echo "  - Copy deployment/docker-compose.prod.yml, deployment/docker-compose.loadtest.edge.yml to ~/lnpay/deployment on remote"
-    echo "  - Copy infrastructure/certs/ to ~/lnpay/infrastructure/certs on remote"
+    echo "  - Copy deployment/docker-compose.prod.yml, deployment/docker-compose.loadtest.edge.yml to ~/lina/deployment on remote"
+    echo "  - Copy infrastructure/certs/ to ~/lina/infrastructure/certs on remote"
     echo "  - Verify prerequisites (Docker, docker-compose)"
     echo "  - Pull Docker images"
     echo "  - Provide instructions to start services"
@@ -100,14 +100,14 @@ if [ "$DEPLOY_TYPE" = "remote" ]; then
     REMOTE_DEPLOY=true
     # Collect remaining SSH options (e.g., -p 2222)
     SSH_OPTS="${@:3}"
-    echo -e "${BLUE}LNPay Remote Deployment Script${NC}"
+    echo -e "${BLUE}LINA Remote Deployment Script${NC}"
     echo "======================================"
     echo "Target: $SSH_TARGET"
     [ -n "$SSH_OPTS" ] && echo "SSH Options: $SSH_OPTS"
     echo ""
 else
     REMOTE_DEPLOY=false
-    echo -e "${BLUE}LNPay Local Deployment Script${NC}"
+    echo -e "${BLUE}LINA Local Deployment Script${NC}"
     echo "===================================="
     echo ""
 fi
@@ -115,7 +115,7 @@ fi
 # Setup SSH connection multiplexing for remote deployments
 if [ "$REMOTE_DEPLOY" = "true" ]; then
     # Create a unique control path for this connection
-    SSH_CONTROL_DIR="$HOME/.ssh/lnpay-deploy"
+    SSH_CONTROL_DIR="$HOME/.ssh/lina-deploy"
     mkdir -p "$SSH_CONTROL_DIR"
     SSH_CONTROL_PATH="$SSH_CONTROL_DIR/$(echo "$SSH_TARGET" | tr '@:' '_')"
     
@@ -293,7 +293,7 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
             else
                 echo -e "${YELLOW}  ssh $SSH_TARGET${NC}"
             fi
-            echo -e "${YELLOW}  cd ~/lnpay/deployment${NC}"
+            echo -e "${YELLOW}  cd ~/lina/deployment${NC}"
             echo -e "${YELLOW}  mv .env.example .env${NC}"
             echo -e "${YELLOW}  nano .env  # Update with your actual values${NC}"
             echo ""
@@ -417,7 +417,7 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
         else
             echo -e "${YELLOW}  ssh $SSH_TARGET${NC}"
         fi
-        echo -e "${YELLOW}  cd ~/lnpay/deployment${NC}"
+        echo -e "${YELLOW}  cd ~/lina/deployment${NC}"
         echo -e "${YELLOW}  mv .env.example .env${NC}"
         echo -e "${YELLOW}  nano .env  # Update with your actual values${NC}"
         echo ""
@@ -430,28 +430,28 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     else
         echo -e "${YELLOW}  ssh $SSH_TARGET${NC}"
     fi
-    echo -e "${YELLOW}  cd ~/lnpay/deployment${NC}"
+    echo -e "${YELLOW}  cd ~/lina/deployment${NC}"
     echo -e "${YELLOW}  $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d${NC}"
     echo ""
     echo "Or run from local machine:"
     if [ -n "$SSH_OPTS" ]; then
-        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lina/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d\"${NC}"
     else
-        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lina/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME up -d\"${NC}"
     fi
     echo ""
     echo "To check status:"
     if [ -n "$SSH_OPTS" ]; then
-        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME ps\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lina/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME ps\"${NC}"
     else
-        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME ps\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lina/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME ps\"${NC}"
     fi
     echo ""
     echo "To view logs:"
     if [ -n "$SSH_OPTS" ]; then
-        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lnpay/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME logs -f\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET \"cd ~/lina/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME logs -f\"${NC}"
     else
-        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lnpay/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME logs -f\"${NC}"
+        echo -e "${YELLOW}  ssh $SSH_TARGET \"cd ~/lina/deployment && $DOCKER_COMPOSE -f $COMPOSE_FILE_BASENAME logs -f\"${NC}"
     fi
 else
     echo "To start the services, run:"

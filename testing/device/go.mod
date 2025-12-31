@@ -1,11 +1,11 @@
-module github.com/robertodantas/lnpay/testing/device
+module github.com/robertodantas/lina/testing/device
 
 go 1.25.4
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
-	github.com/robertodantas/lnpay/internal v0.0.0
-	github.com/robertodantas/lnpay/services/proto v0.0.0
+	github.com/robertodantas/lina/internal v0.0.0
+	github.com/robertodantas/lina/services/proto v0.0.0
 	google.golang.org/protobuf v1.36.8
 )
 
@@ -38,6 +38,6 @@ require (
 	google.golang.org/grpc v1.75.0 // indirect
 )
 
-replace github.com/robertodantas/lnpay/services/proto => ../../services/proto
+replace github.com/robertodantas/lina/services/proto => ../../services/proto
 
-replace github.com/robertodantas/lnpay/internal => ../../services/internal
+replace github.com/robertodantas/lina/internal => ../../services/internal

@@ -8,8 +8,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	"github.com/robertodantas/lnpay/internal"
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
+	"github.com/robertodantas/lina/internal"
+	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
 )
 
 // EastWestStreamPublisher handles publishing messages to Redis streams for east-west communication

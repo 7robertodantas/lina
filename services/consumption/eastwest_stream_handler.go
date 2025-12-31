@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 
-	devicepb "github.com/robertodantas/lnpay/proto/gen/model/device"
+	devicepb "github.com/robertodantas/lina/proto/gen/model/device"
 )
 
 var (

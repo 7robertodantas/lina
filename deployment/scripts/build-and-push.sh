@@ -2,9 +2,9 @@
 
 # Script to build and push Docker images to a registry (multi-architecture: amd64 and arm64)
 # Usage: ./build-and-push.sh [registry/repository] [tag] [platforms]
-# Example: ./build-and-push.sh myregistry/lnpay latest
-# Example: ./build-and-push.sh docker.io/username/lnpay v1.0.0
-# Example: ./build-and-push.sh docker.io/username/lnpay latest linux/amd64,linux/arm64
+# Example: ./build-and-push.sh myregistry/lina latest
+# Example: ./build-and-push.sh docker.io/username/lina v1.0.0
+# Example: ./build-and-push.sh docker.io/username/lina latest linux/amd64,linux/arm64
 
 set -e
 
@@ -12,7 +12,7 @@ set -e
 cd "$(dirname "$0")/../.."
 
 # Default values
-REGISTRY="${1:-docker.io/username/lnpay}"
+REGISTRY="${1:-docker.io/username/lina}"
 TAG="${2:-latest}"
 PLATFORMS="${3:-linux/amd64,linux/arm64}"
 
@@ -33,7 +33,7 @@ if ! docker buildx version > /dev/null 2>&1; then
 fi
 
 # Create or use a multi-platform builder
-BUILDER_NAME="lnpay-multiarch-builder"
+BUILDER_NAME="lina-multiarch-builder"
 if ! docker buildx inspect "$BUILDER_NAME" > /dev/null 2>&1; then
     echo -e "${YELLOW}Creating multi-platform builder: ${BUILDER_NAME}...${NC}"
     docker buildx create --name "$BUILDER_NAME" --driver docker-container --use

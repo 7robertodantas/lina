@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/robertodantas/lnpay/internal"
+	"github.com/robertodantas/lina/internal"
 )
 
 var logger = internal.NewLogger("device")

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	devicepkg "github.com/robertodantas/lnpay/testing/device"
+	devicepkg "github.com/robertodantas/lina/testing/device"
 )
 
 // HTTPDevice implements DeviceCallback and manages device state for HTTP load testing

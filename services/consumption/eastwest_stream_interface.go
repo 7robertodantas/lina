@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"github.com/robertodantas/lnpay/internal"
-	devicepb "github.com/robertodantas/lnpay/proto/gen/model/device"
+	"github.com/robertodantas/lina/internal"
+	devicepb "github.com/robertodantas/lina/proto/gen/model/device"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 

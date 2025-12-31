@@ -1,4 +1,4 @@
-module github.com/robertodantas/lnpay/consumption
+module github.com/robertodantas/lina/consumption
 
 go 1.25.4
 
@@ -6,8 +6,8 @@ require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.0
-	github.com/robertodantas/lnpay/internal v0.0.0-00010101000000-000000000000
-	github.com/robertodantas/lnpay/proto v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/internal v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/proto v0.0.0-00010101000000-000000000000
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.63.0
 	go.opentelemetry.io/otel v1.39.0
 	go.opentelemetry.io/otel/exporters/prometheus v0.61.0
@@ -77,6 +77,6 @@ require (
 )
 
 // Local dependencies - adjust paths as needed
-replace github.com/robertodantas/lnpay/proto => ../proto
+replace github.com/robertodantas/lina/proto => ../proto
 
-replace github.com/robertodantas/lnpay/internal => ../internal
+replace github.com/robertodantas/lina/internal => ../internal

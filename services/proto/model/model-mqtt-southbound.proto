@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package iot.payperuse.edge.model.mqtt;
 
-option go_package = "github.com/robertodantas/lnpay/proto/gen/model/mqtt";
+option go_package = "github.com/robertodantas/lina/proto/gen/model/mqtt";
 
 // ============================================================================
 // Heartbeat Channel (Device → Server)

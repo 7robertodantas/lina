@@ -3,9 +3,9 @@ package main
 import (
 	"context"
 
-	ledgermodel "github.com/robertodantas/lnpay/proto/gen/model/ledger"
-	lightningmodel "github.com/robertodantas/lnpay/proto/gen/model/lightning"
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
+	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
+	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
+	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 )
 
 // EastWestStreamHandler handles processing of Redis stream messages from east-west services

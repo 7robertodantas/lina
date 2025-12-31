@@ -7,11 +7,12 @@
 package ledger
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -1279,7 +1280,7 @@ const file_model_model_ledger_service_proto_rawDesc = "" +
 	"!LEDGER_EVENT_TYPE_DEVICE_CREDITED\x10\x04\x12$\n" +
 	" LEDGER_EVENT_TYPE_DEVICE_DEBITED\x10\x05\x12+\n" +
 	"'LEDGER_EVENT_TYPE_AUTHORIZATION_DEBITED\x10\x06\x120\n" +
-	",LEDGER_EVENT_TYPE_AUTHORIZATION_DEBIT_FAILED\x10\aB7Z5github.com/robertodantas/lnpay/proto/gen/model/ledgerb\x06proto3"
+	",LEDGER_EVENT_TYPE_AUTHORIZATION_DEBIT_FAILED\x10\aB7Z5github.com/robertodantas/lina/proto/gen/model/ledgerb\x06proto3"
 
 var (
 	file_model_model_ledger_service_proto_rawDescOnce sync.Once

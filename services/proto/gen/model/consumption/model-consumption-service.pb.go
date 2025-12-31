@@ -7,11 +7,12 @@
 package consumption
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -219,7 +220,7 @@ const file_model_model_consumption_service_proto_rawDesc = "" +
 	"\apayload*v\n" +
 	"\x14ConsumptionEventType\x12&\n" +
 	"\"CONSUMPTION_EVENT_TYPE_UNSPECIFIED\x10\x00\x126\n" +
-	"2CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED\x10\x01B<Z:github.com/robertodantas/lnpay/proto/gen/model/consumptionb\x06proto3"
+	"2CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED\x10\x01B<Z:github.com/robertodantas/lina/proto/gen/model/consumptionb\x06proto3"
 
 var (
 	file_model_model_consumption_service_proto_rawDescOnce sync.Once

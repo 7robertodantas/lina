@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package iot.payperuse.edge.model.consumption;
 
-option go_package = "github.com/robertodantas/lnpay/proto/gen/model/consumption";
+option go_package = "github.com/robertodantas/lina/proto/gen/model/consumption";
 
 // event.consumption: emitted after pricing a usage record.
 message DeviceConsumptionRecordedEvent {

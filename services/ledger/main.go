@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/robertodantas/lnpay/internal"
-	ledgerpb "github.com/robertodantas/lnpay/proto/gen/interfaces/ledger"
+	"github.com/robertodantas/lina/internal"
+	ledgerpb "github.com/robertodantas/lina/proto/gen/interfaces/ledger"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 )

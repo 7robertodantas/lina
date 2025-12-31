@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
+	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 )
 

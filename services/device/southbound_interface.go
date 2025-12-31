@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
+	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 )
 
 // SouthboundInterface handles MQTT subscriptions and message decoding for device messages

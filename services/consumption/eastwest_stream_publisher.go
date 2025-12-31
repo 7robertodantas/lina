@@ -9,7 +9,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"google.golang.org/protobuf/encoding/protojson"
 
-	consumptionpb "github.com/robertodantas/lnpay/proto/gen/model/consumption"
+	consumptionpb "github.com/robertodantas/lina/proto/gen/model/consumption"
 )
 
 // EastWestStreamPublisher handles publishing messages to Redis streams for east-west communication

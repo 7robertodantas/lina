@@ -6,7 +6,7 @@ import (
 
 	"google.golang.org/protobuf/encoding/protojson"
 
-	mqttpb "github.com/robertodantas/lnpay/proto/gen/model/mqtt"
+	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 )
 
 // SouthboundPublisher handles publishing messages to devices via MQTT

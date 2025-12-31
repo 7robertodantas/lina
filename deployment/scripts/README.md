@@ -1,6 +1,6 @@
 # Scripts
 
-This directory contains deployment and build scripts for the LNPay system.
+This directory contains deployment and build scripts for the LINA system.
 
 ## Scripts
 
@@ -38,13 +38,13 @@ Builds and pushes Docker images to a registry.
 **Examples:**
 ```bash
 # Build and push to Docker Hub
-./scripts/build-and-push.sh docker.io/username/lnpay latest
+./scripts/build-and-push.sh docker.io/username/lina latest
 
 # With specific tag
-./scripts/build-and-push.sh docker.io/username/lnpay v1.0.0
+./scripts/build-and-push.sh docker.io/username/lina v1.0.0
 
 # For specific platforms
-./scripts/build-and-push.sh docker.io/username/lnpay latest linux/amd64,linux/arm64
+./scripts/build-and-push.sh docker.io/username/lina latest linux/amd64,linux/arm64
 ```
 
 See `DOCKER_PUBLISH.md` for detailed documentation.

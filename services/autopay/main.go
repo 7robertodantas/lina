@@ -6,7 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	internalpkg "github.com/robertodantas/lnpay/internal"
+	internalpkg "github.com/robertodantas/lina/internal"
 )
 
 var logger = internalpkg.NewLogger("autopay")

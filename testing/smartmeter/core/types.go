@@ -1,9 +1,9 @@
 package main
 
 import (
-	mqttmodel "github.com/robertodantas/lnpay/services/proto/gen/model/mqtt"
+	mqttmodel "github.com/robertodantas/lina/services/proto/gen/model/mqtt"
+	devicepkg "github.com/robertodantas/lina/testing/device"
 	"google.golang.org/protobuf/encoding/protojson"
-	devicepkg "github.com/robertodantas/lnpay/testing/device"
 )
 
 // Proto type aliases (re-exported from device package for convenience)

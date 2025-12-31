@@ -1,4 +1,4 @@
-module github.com/robertodantas/lnpay/ledger
+module github.com/robertodantas/lina/ledger
 
 go 1.25.4
 
@@ -7,8 +7,8 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/redis/go-redis/v9 v9.17.0
-	github.com/robertodantas/lnpay/internal v0.0.0-00010101000000-000000000000
-	github.com/robertodantas/lnpay/proto v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/internal v0.0.0-00010101000000-000000000000
+	github.com/robertodantas/lina/proto v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go v0.33.0
 	go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin v0.63.0
@@ -117,6 +117,6 @@ require (
 )
 
 // Local dependencies - adjust paths as needed
-replace github.com/robertodantas/lnpay/proto => ../proto
+replace github.com/robertodantas/lina/proto => ../proto
 
-replace github.com/robertodantas/lnpay/internal => ../internal
+replace github.com/robertodantas/lina/internal => ../internal

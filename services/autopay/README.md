@@ -46,7 +46,7 @@ The service requires the following environment variables:
 ## Building
 
 ```bash
-docker build -f autopay/Dockerfile -t 7robertodantas/lnpay-autopay:latest .
+docker build -f autopay/Dockerfile -t 7robertodantas/lina-autopay:latest .
 ```
 
 ## Running
@@ -74,7 +74,7 @@ docker run -d \
   -e PAYER_LND_HOST=${PAYER_LND_HOST:-${LND_HOST}} \
   -e PAYER_LND_TLS_CERT_HEX=${PAYER_LND_TLS_CERT_HEX:-${LND_TLS_CERT_HEX}} \
   -e PAYER_LND_MACAROON_HEX=${PAYER_LND_MACAROON_HEX:-${LND_MACAROON_HEX}} \
-  7robertodantas/lnpay-autopay:latest
+  7robertodantas/lina-autopay:latest
 ```
 
 ## Limitations

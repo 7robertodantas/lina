@@ -1,4 +1,4 @@
-module github.com/robertodantas/lnpay/proto
+module github.com/robertodantas/lina/proto
 
 go 1.25.4
 
@@ -7,6 +7,6 @@ require (
 	google.golang.org/protobuf v1.34.1
 )
 
-// If your actual repository is at github.com/7robertodantas/lnpay,
+// If your actual repository is at github.com/7robertodantas/lina,
 // you can use a replace directive to map the module to the actual repo:
-// replace github.com/robertodantas/lnpay/proto => github.com/7robertodantas/lnpay/proto v0.0.0
+// replace github.com/robertodantas/lina/proto => github.com/7robertodantas/lina/proto v0.0.0
