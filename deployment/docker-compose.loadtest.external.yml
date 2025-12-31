@@ -5,7 +5,7 @@ services:
     environment:
       - NETWORK=regtest
     env_file:
-      - .env.loadtest
+      - .env
     restart: unless-stopped
 
   smartmeter:
@@ -16,6 +16,7 @@ services:
     environment:
       - DEVICE_ID=smart-meter-001
       - DEVICE_SECRET=smart-meter-001_password
+      - MQTT_BROKER=${SMARTMETER_MQTT_BROKER}
     env_file:
       - .env.simulators
     volumes:
@@ -23,39 +24,32 @@ services:
     restart: unless-stopped
 
   httpdevices:
-    build:
-      context: ..
-      dockerfile: testing/loadtest/httpdevices/Dockerfile
+    image: 7robertodantas/lina-httpdevices:latest
     container_name: httpdevices
     ports:
       - "3002:8080"
     env_file:
-      - .env.loadtest
+      - .env
     environment:
-      - MQTT_BROKER=192.168.0.170
+      - MQTT_BROKER=${HTTP_DEVICES_MQTT_BROKER}
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     restart: unless-stopped
 
   prometheus:
-    build:
-      context: ../infrastructure/prometheus
-      dockerfile: Dockerfile
+    image: 7robertodantas/lina-prometheus:latest
     container_name: prometheus
     ports:
       - "9090:9090"  # Prometheus UI
     env_file:
-      - .env.loadtest
-    environment:
-      - TARGET_HOST=192.168.0.170
+      - .env
     volumes:
-      - ../infrastructure/prometheus:/etc/prometheus
       - prometheus-data:/prometheus
     entrypoint:
       - /bin/sh
       - /etc/prometheus/entrypoint.sh
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--config.file=/tmp/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
@@ -64,20 +58,18 @@ services:
     restart: unless-stopped
 
   grafana:  
-    image: grafana/grafana:12.3
+    image: 7robertodantas/lina-grafana:latest
     container_name: grafana
     ports:
       - "3000:3000" # Grafana UI
     env_file:
-      - .env.loadtest
+      - .env
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ../infrastructure/grafana/provisioning:/etc/grafana/provisioning
-      - ../infrastructure/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
     restart: unless-stopped

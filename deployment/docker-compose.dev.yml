@@ -261,7 +261,7 @@ services:
     env_file:
       - .env
     environment:
-      - TARGET_HOST=host.docker.internal
+      - PROMETHEUS_TARGET_HOST=host.docker.internal
     volumes:
       - ../infrastructure/prometheus:/etc/prometheus
       - prometheus-data:/prometheus
@@ -269,7 +269,7 @@ services:
       - /bin/sh
       - /etc/prometheus/entrypoint.sh
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--config.file=/tmp/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
@@ -278,7 +278,9 @@ services:
     restart: unless-stopped
 
   grafana:  
-    image: grafana/grafana:12.3
+    build:
+      context: ../infrastructure/grafana
+      dockerfile: Dockerfile
     container_name: grafana
     ports:
       - "3000:3000"
@@ -290,8 +292,6 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana-data:/var/lib/grafana
-      - ../infrastructure/grafana/provisioning:/etc/grafana/provisioning
-      - ../infrastructure/grafana/dashboards:/var/lib/grafana/dashboards
     depends_on:
       - prometheus
     restart: unless-stopped

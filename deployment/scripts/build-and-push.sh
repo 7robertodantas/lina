@@ -82,6 +82,8 @@ echo -e "${BLUE}=== Building infrastructure services ===${NC}\n"
 build_and_push "caddy" "./infrastructure/caddy/Dockerfile" "./infrastructure/caddy"
 build_and_push "redis" "./infrastructure/redis/Dockerfile" "./infrastructure/redis"
 build_and_push "mosquitto" "./infrastructure/mosquitto/Dockerfile" "./infrastructure/mosquitto"
+build_and_push "prometheus" "./infrastructure/prometheus/Dockerfile" "./infrastructure/prometheus"
+build_and_push "grafana" "./infrastructure/grafana/Dockerfile" "./infrastructure/grafana"
 
 echo -e "${BLUE}=== Building application services ===${NC}\n"
 
