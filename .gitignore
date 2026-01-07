@@ -88,7 +88,12 @@ yarn-error.log*
 *.crt
 
 measurements/
+
+# Ignore all logs
 *.log
+
+# Except evaluation logs
+!/evaluation/*.log
 
 venv/
 
