@@ -16,6 +16,7 @@ type Config struct {
 	MQTTTLSCACert     string
 	MQTTTLSSkipVerify bool
 	MQTTTLSServerName string
+	UsageMode         string
 }
 
 // LoadConfig loads runtime configuration from environment variables.
@@ -29,6 +30,7 @@ func LoadConfig() *Config {
 		MQTTTLSCACert:     getEnvCfg("MQTT_TLS_CA_CERT", "/certs/ca.crt"),
 		MQTTTLSSkipVerify: boolEnvCfg("MQTT_TLS_SKIP_VERIFY", false),
 		MQTTTLSServerName: getEnvCfg("MQTT_TLS_SERVER_NAME", "mosquitto"),
+		UsageMode:         getEnvCfg("USAGE_MODE", "simulation"),
 	}
 }
 
