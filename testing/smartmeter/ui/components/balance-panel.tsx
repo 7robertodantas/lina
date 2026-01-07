@@ -58,7 +58,7 @@ export function BalancePanel({ balance, onRequestTopUp, isOnline }: BalancePanel
         </div>
 
         <div className="grid grid-cols-3 gap-2">
-          {[1000, 5000, 10000].map((amount) => (
+          {[10, 15, 20, 100, 150, 200].map((amount) => (
             <Button
               key={amount}
               variant="outline"
