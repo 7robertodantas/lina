@@ -22,25 +22,28 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // s
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
-const BASELINE_VUS = 25;
-const INCREMENT_VUS = 25;
-const WARMUP = '30s';
-const MEASURE = '60s';
-
+const LEVEL_VUS = 25;
+const WARMUP = '60s';
+const MEASURE = '120s';
+const IDLE = '60s';
+const TEARDOWN = '60s'
 
 // Define load test stages
 const loadTestStages = [
-  { duration: WARMUP, target: BASELINE_VUS },
-  { duration: MEASURE, target: BASELINE_VUS },   // warmup
-  { duration: WARMUP, target: BASELINE_VUS + INCREMENT_VUS },
-  { duration: MEASURE, target: BASELINE_VUS + INCREMENT_VUS },
-  { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 2) },
-  { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 2) },
-  { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 3) },
-  { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 3) },
-  { duration: WARMUP, target: BASELINE_VUS + (INCREMENT_VUS * 4) },
-  { duration: MEASURE, target: BASELINE_VUS + (INCREMENT_VUS * 4) },
-  { duration: MEASURE, target: 0 },
+  { duration: IDLE, target: 0 },
+  { duration: WARMUP, target: LEVEL_VUS },
+  { duration: MEASURE, target: LEVEL_VUS },   // warmup
+  { duration: WARMUP, target: LEVEL_VUS * 2 },
+  { duration: MEASURE, target: LEVEL_VUS * 2 },
+  { duration: WARMUP, target: LEVEL_VUS * 3 },
+  { duration: MEASURE, target: LEVEL_VUS * 3 },
+  { duration: WARMUP, target: LEVEL_VUS * 4 },
+  { duration: MEASURE, target: LEVEL_VUS * 4 },
+  { duration: WARMUP, target: LEVEL_VUS * 5 },
+  { duration: MEASURE, target: LEVEL_VUS * 5 },
+  { duration: WARMUP, target: LEVEL_VUS * 6 },
+  { duration: MEASURE, target: LEVEL_VUS * 6 },
+  { duration: TEARDOWN, target: 0 },
 ];
 
 // Calculate maximum VU count from stages (for setup - register all devices that will be used)
@@ -136,7 +139,7 @@ export function setup() {
   }
 
   // Connect devices in batches
-  const CONNECT_BATCH_SIZE = parseInt(__ENV.CONNECT_BATCH_SIZE || INCREMENT_VUS); // Devices per batch
+  const CONNECT_BATCH_SIZE = parseInt(__ENV.CONNECT_BATCH_SIZE || LEVEL_VUS); // Devices per batch
   const CONNECT_BATCH_SLEEP = parseInt(__ENV.CONNECT_BATCH_SLEEP || '5'); // Seconds to sleep between batches
   const CONNECT_TIMEOUT = __ENV.CONNECT_TIMEOUT || '120s'; // Timeout for each connect request
 
