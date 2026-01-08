@@ -131,7 +131,7 @@ func (h *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Reques
 
 // handleCommand processes commands from WebSocket clients
 func (h *WebSocketHandler) handleCommand(ctx context.Context, cmd WSCommand) {
-	logger.InfoWithFields(ctx, "Received command via northbound REST", map[string]interface{}{
+	logger.InfoWithFields(ctx, "Received command via websocket", map[string]interface{}{
 		"action": cmd.Action,
 	})
 
