@@ -184,3 +184,16 @@ python3 plot_exported_metrics.py
 
 # Evaluation and Observations
 
+### CPU Usage
+
+- It was observed that the core services is not CPU bound. The CPU usage has increased with the increase of load but there are still plenty of CPU resource available. The highest peak of cpu core usage was the ledger service using around 0.5 cpu cores, the other services used below that.
+
+### Memory Consumption
+
+- It was observed that in idle the whole system services consumed around 160 MB.
+- The core services consumed around 10 to 20 MB of ram each (device, consumption, ledger, lightning)
+- The redis service has increased its memory usage linearly when the number of connected devices increased, while the other services kept a constant memory usage.
+    - The redis instance increased from 6 MB to 100 MB of ram usage in its peak, this can be due to the lag and accumulated messages in memory.
+
+
+
