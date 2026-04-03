@@ -125,19 +125,26 @@
       lina_mosquitto_dynsec_enable: false for anonymous/plain auth only.
   when: lina_mosquitto_dynsec_enable | default(true) | bool
 
-- name: Initialize dynamic security plugin datastore
-  ansible.builtin.command:
-    argv:
-      - mosquitto_ctrl
-      - dynsec
-      - init
-      - "{{ lina_mosquitto_dynsec_config_file }}"
-      - "{{ lina_mqtt_dynsec_admin_user }}"
-      - "{{ lina_mqtt_dynsec_admin_password }}"
-    creates: "{{ lina_mosquitto_dynsec_config_file }}"
+- name: Install Mosquitto dynsec init script (Docker entrypoint parity)
+  ansible.builtin.template:
+    src: lina-mosquitto-dynsec-init.sh.j2
+    dest: "{{ lina_mosquitto_dynsec_init_script_dest }}"
+    owner: root
+    group: root
+    mode: "0755"
   when: lina_mosquitto_dynsec_enable | default(true) | bool
 
-- name: Ensure dynamic-security.json ownership for mosquitto
+- name: Initialize dynamic security datastore and permissions
+  ansible.builtin.command:
+    cmd: "{{ lina_mosquitto_dynsec_init_script_dest }}"
+  environment:
+    MQTT_DYNSEC_ADMIN_USER: "{{ lina_mqtt_dynsec_admin_user }}"
+    MQTT_DYNSEC_ADMIN_PASSWORD: "{{ lina_mqtt_dynsec_admin_password }}"
+  register: lina_mosquitto_dynsec_init_result
+  changed_when: "'initialized successfully' in lina_mosquitto_dynsec_init_result.stdout"
+  when: lina_mosquitto_dynsec_enable | default(true) | bool
+
+- name: Ensure dynamic-security.json ownership and mode for mosquitto
   ansible.builtin.file:
     path: "{{ lina_mosquitto_dynsec_config_file }}"
     owner: mosquitto

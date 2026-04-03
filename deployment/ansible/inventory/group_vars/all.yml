@@ -55,9 +55,9 @@ lina_mqtt_broker: "127.0.0.1"
 
 # Device ↔ MQTT (must match mosquitto / dynsec provisioning)
 lina_device_mqtt_username: "device-service"
-lina_device_mqtt_password: "change-me"
+lina_device_mqtt_password: "device-service_password"
 lina_mqtt_dynsec_admin_user: "dynsec_admin"
-lina_mqtt_dynsec_admin_password: "change-me"
+lina_mqtt_dynsec_admin_password: "dynsec_admin_password"
 
 # Northbound HTTP APIs: bind loopback only; external access is via Caddy (lina_caddy_listen).
 # Device REST must not use Caddy's public port (8080).

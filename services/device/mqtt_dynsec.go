@@ -118,7 +118,6 @@ func isAlreadyExistsError(errMsg string) bool {
 func (mds *MQTTDynSecService) listRoles(ctx context.Context) ([]string, error) {
 	commandID := mds.getNextCommandID()
 	command := map[string]interface{}{
-		"command": commandID,
 		"commands": []map[string]interface{}{
 			{
 				"command": "listRoles",
@@ -198,7 +197,6 @@ sendCommand:
 func (mds *MQTTDynSecService) listClients(ctx context.Context) ([]string, error) {
 	commandID := mds.getNextCommandID()
 	command := map[string]interface{}{
-		"command": commandID,
 		"commands": []map[string]interface{}{
 			{
 				"command": "listClients",
@@ -307,7 +305,6 @@ func (mds *MQTTDynSecService) clientExists(ctx context.Context, username string)
 func (mds *MQTTDynSecService) listGroups(ctx context.Context) ([]string, error) {
 	commandID := mds.getNextCommandID()
 	command := map[string]interface{}{
-		"command": commandID,
 		"commands": []map[string]interface{}{
 			{
 				"command": "listGroups",
@@ -400,7 +397,7 @@ func (mds *MQTTDynSecService) groupExists(ctx context.Context, groupName string)
 // executeCommand sends a command to the dynamic security plugin and waits for response
 func (mds *MQTTDynSecService) executeCommand(ctx context.Context, command map[string]interface{}) error {
 	commandID := mds.getNextCommandID()
-	command["command"] = commandID
+	// Do not add a root-level "command" key: the broker plugin only accepts {"commands":[...]}.
 
 	// Drain any old responses from the channel to ensure we get the response for this command
 	// This prevents matching responses from previous commands
