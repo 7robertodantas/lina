@@ -1,0 +1,7 @@
+---
+# Northbound entry (matches docker-compose mapping 8080:80)
+lina_caddy_listen: ":8080"
+# Bind admin API on loopback only (docker image used 0.0.0.0:2019)
+lina_caddy_admin: "127.0.0.1:2019"
+# Upstreams use loopback; ports follow lina_*_listen_addr / lina_device_api_addr from group_vars
+lina_caddy_upstream_host: "127.0.0.1"
