@@ -154,7 +154,7 @@ func main() {
 	streamInterface.StartLightningInvoiceSubscriber(serviceCtx, southboundPublisher)
 
 	logger.Info(ctx, "Device service is running. Press Ctrl+C to stop")
-	logger.Infof(ctx, "Northbound REST API available at http://localhost%s", cfg.APIAddr)
+	logger.Infof(ctx, "Northbound REST API listening on %s", cfg.APIAddr)
 
 	metricsAddr := internal.GetEnv("METRICS_ADDR", ":9464")
 	go func() {

@@ -3,68 +3,61 @@
 }
 
 :80 {
-    # Device service endpoints
-    route /devices* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy device:8080
+    # Nested handles: ledger/consumption paths before device catch-all under /devices*.
+    handle /devices* {
+        handle /devices/*/balance* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy ledger:8080
+        }
+        handle /devices/*/entries* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy ledger:8080
+        }
+        handle /devices/*/credit* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy ledger:8080
+        }
+        handle /devices/*/debit* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy ledger:8080
+        }
+        handle /devices/*/authorizations* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy ledger:8080
+        }
+        handle /devices/*/invoices* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy ledger:8080
+        }
+        handle /devices/*/consumptions* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy consumption:8080
+        }
+        handle /devices/*/accumulations* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy consumption:8080
+        }
+        handle {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy device:8080
+        }
     }
 
-    # Ledger service endpoints - balance, entries, authorizations, invoices
-    route /devices/*/balance* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
-    }
-
-    route /devices/*/entries* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
-    }
-
-    route /devices/*/credit* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
-    }
-
-    route /devices/*/debit* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
-    }
-
-    route /devices/*/authorizations* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
-    }
-
-    route /devices/*/invoices* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy ledger:8080
-    }
-
-    # Consumption service endpoints
-    route /devices/*/consumptions* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy consumption:8080
-    }
-
-    route /devices/*/accumulations* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy consumption:8080
-    }
-
-    # Lightning service endpoints
-    route /lnd/info* {
+    handle /lnd/info* {
         uri path_regexp ^(.*)$ /api/v1$1
         reverse_proxy lightning:8080
     }
 
-    route /lnd/wallet* {
+    handle /lnd/wallet* {
         uri path_regexp ^(.*)$ /api/v1$1
         reverse_proxy lightning:8080
     }
 
-    # Health check endpoint
-    respond /health 200
+    handle /health {
+        respond 200
+    }
 
-    # Default 404 for unmatched routes
-    respond 404
+    handle {
+        respond 404
+    }
 }

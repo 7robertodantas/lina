@@ -21,6 +21,8 @@ lina_binaries_dir: ""
 lina_mosquitto_tls_enable: true
 lina_mosquitto_tls_port: 8883
 lina_mosquitto_plain_port: 1883
+# Dynamic Security + WebSockets: see roles/mosquitto/defaults/main.yml (lina_mosquitto_dynsec_*,
+# lina_mosquitto_websocket_*). Dynsec admin must match device-service env below.
 # Target paths (Ansible copies from controller; see lina_mosquitto_certs_src in mosquitto role defaults)
 lina_mosquitto_cert_dir: /etc/lina/mosquitto
 lina_mosquitto_cafile: /etc/lina/mosquitto/ca.crt
@@ -57,22 +59,22 @@ lina_device_mqtt_password: "change-me"
 lina_mqtt_dynsec_admin_user: "dynsec_admin"
 lina_mqtt_dynsec_admin_password: "change-me"
 
-# Single-host ports (avoid collisions; REST and gRPC are loopback-only by default)
-lina_device_api_addr: ":8080"
-lina_ledger_listen_addr: ":8081"
-lina_consumption_listen_addr: ":8082"
-lina_lightning_listen_addr: ":8083"
-lina_ledger_grpc_addr: ":9090"
-lina_consumption_grpc_addr: ":9091"
-lina_lightning_grpc_addr: ":9092"
-lina_device_metrics_addr: ":9466"
-lina_ledger_metrics_addr: ":9460"
-lina_consumption_metrics_addr: ":9465"
+# Northbound HTTP APIs: bind loopback only; external access is via Caddy (lina_caddy_listen).
+# Device REST must not use Caddy's public port (8080).
+lina_device_api_addr: "127.0.0.1:8084"
+lina_ledger_listen_addr: "127.0.0.1:8081"
+lina_consumption_listen_addr: "127.0.0.1:8082"
+lina_lightning_listen_addr: "127.0.0.1:8083"
+lina_ledger_grpc_addr: "127.0.0.1:9090"
+lina_consumption_grpc_addr: "127.0.0.1:9091"
+lina_lightning_grpc_addr: "127.0.0.1:9092"
+lina_device_metrics_addr: "127.0.0.1:9466"
+lina_ledger_metrics_addr: "127.0.0.1:9460"
+lina_consumption_metrics_addr: "127.0.0.1:9465"
 
 # Caddy northbound reverse proxy (see roles/caddy; mirrors infrastructure/caddy/Caddyfile)
 lina_caddy_listen: ":8080"
 lina_caddy_admin: "127.0.0.1:2019"
-lina_caddy_upstream_host: "127.0.0.1"
 
 # Monitoring
 lina_install_systemd_exporter: true

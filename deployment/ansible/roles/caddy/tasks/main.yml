@@ -43,10 +43,10 @@
 
 - name: Compute northbound upstream addresses for Caddy
   ansible.builtin.set_fact:
-    lina_caddy_upstream_device: "{{ lina_caddy_upstream_host }}:{{ lina_device_api_addr | regex_replace('^:', '') }}"
-    lina_caddy_upstream_ledger: "{{ lina_caddy_upstream_host }}:{{ lina_ledger_listen_addr | regex_replace('^:', '') }}"
-    lina_caddy_upstream_consumption: "{{ lina_caddy_upstream_host }}:{{ lina_consumption_listen_addr | regex_replace('^:', '') }}"
-    lina_caddy_upstream_lightning: "{{ lina_caddy_upstream_host }}:{{ lina_lightning_listen_addr | regex_replace('^:', '') }}"
+    lina_caddy_upstream_device: "{{ lina_device_api_addr }}"
+    lina_caddy_upstream_ledger: "{{ lina_ledger_listen_addr }}"
+    lina_caddy_upstream_consumption: "{{ lina_consumption_listen_addr }}"
+    lina_caddy_upstream_lightning: "{{ lina_lightning_listen_addr }}"
 
 - name: Caddy systemd drop-in directory
   ansible.builtin.file:
