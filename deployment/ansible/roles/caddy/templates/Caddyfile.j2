@@ -4,62 +4,61 @@
 }
 
 {{ lina_caddy_listen }} {
-    route /devices* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_device }}
+    # Nested handles: first match under /devices* wins (ledger/consumption before device catch-all).
+    handle /devices* {
+        handle /devices/*/balance* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_ledger }}
+        }
+        handle /devices/*/entries* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_ledger }}
+        }
+        handle /devices/*/credit* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_ledger }}
+        }
+        handle /devices/*/debit* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_ledger }}
+        }
+        handle /devices/*/authorizations* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_ledger }}
+        }
+        handle /devices/*/invoices* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_ledger }}
+        }
+        handle /devices/*/consumptions* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_consumption }}
+        }
+        handle /devices/*/accumulations* {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_consumption }}
+        }
+        handle {
+            uri path_regexp ^(.*)$ /api/v1$1
+            reverse_proxy {{ lina_caddy_upstream_device }}
+        }
     }
 
-    route /devices/*/balance* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_ledger }}
-    }
-
-    route /devices/*/entries* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_ledger }}
-    }
-
-    route /devices/*/credit* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_ledger }}
-    }
-
-    route /devices/*/debit* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_ledger }}
-    }
-
-    route /devices/*/authorizations* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_ledger }}
-    }
-
-    route /devices/*/invoices* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_ledger }}
-    }
-
-    route /devices/*/consumptions* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_consumption }}
-    }
-
-    route /devices/*/accumulations* {
-        uri path_regexp ^(.*)$ /api/v1$1
-        reverse_proxy {{ lina_caddy_upstream_consumption }}
-    }
-
-    route /lnd/info* {
+    handle /lnd/info* {
         uri path_regexp ^(.*)$ /api/v1$1
         reverse_proxy {{ lina_caddy_upstream_lightning }}
     }
 
-    route /lnd/wallet* {
+    handle /lnd/wallet* {
         uri path_regexp ^(.*)$ /api/v1$1
         reverse_proxy {{ lina_caddy_upstream_lightning }}
     }
 
-    respond /health 200
+    handle /health {
+        respond 200
+    }
 
-    respond 404
+    handle {
+        respond 404
+    }
 }

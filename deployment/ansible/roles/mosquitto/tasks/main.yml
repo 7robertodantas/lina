@@ -43,6 +43,109 @@
       - mosquitto-clients
     state: present
 
+# Stock Debian/Ubuntu configs often define listener 1883 in mosquitto.conf or conf.d;
+# 99-lina.conf adds the same ports → duplicate listener and broker exit. See README.
+- name: Comment stock listener/port lines in main mosquitto.conf
+  ansible.builtin.replace:
+    path: /etc/mosquitto/mosquitto.conf
+    regexp: '^(\s*)(listener|port)(\s+.*)$'
+    replace: '\1# \2\3  # LINA: listeners in conf.d/99-lina.conf'
+    backup: true
+  notify: Restart mosquitto
+
+- name: Comment stock persistence lines in main mosquitto.conf
+  ansible.builtin.replace:
+    path: /etc/mosquitto/mosquitto.conf
+    regexp: '^(\s*)(persistence|persistence_location)(\s+.*)$'
+    replace: '\1# \2\3  # LINA: persistence in conf.d/99-lina.conf'
+    backup: true
+  notify: Restart mosquitto
+
+- name: Find mosquitto conf.d drop-ins
+  ansible.builtin.find:
+    paths: /etc/mosquitto/conf.d
+    patterns: "*.conf"
+    file_type: file
+  register: lina_mosquitto_conf_d_files
+
+- name: Comment listener/port lines in conf.d (except LINA drop-in)
+  ansible.builtin.replace:
+    path: "{{ item.path }}"
+    regexp: '^(\s*)(listener|port)(\s+.*)$'
+    replace: '\1# \2\3  # LINA: listeners in 99-lina.conf'
+    backup: true
+  loop: "{{ lina_mosquitto_conf_d_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: "'99-lina.conf' not in item.path"
+  notify: Restart mosquitto
+
+- name: Comment persistence lines in conf.d (except LINA drop-in)
+  ansible.builtin.replace:
+    path: "{{ item.path }}"
+    regexp: '^(\s*)(persistence|persistence_location)(\s+.*)$'
+    replace: '\1# \2\3  # LINA: persistence in 99-lina.conf'
+    backup: true
+  loop: "{{ lina_mosquitto_conf_d_files.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: "'99-lina.conf' not in item.path"
+  notify: Restart mosquitto
+
+- name: Discover Mosquitto dynamic security plugin path (dpkg)
+  ansible.builtin.shell: dpkg -L mosquitto 2>/dev/null | grep -E 'mosquitto_dynamic_security\.so$' | head -n1
+  register: lina_mosquitto_dynsec_plugin_dpkg
+  changed_when: false
+  failed_when: false
+  when:
+    - lina_mosquitto_dynsec_enable | default(true) | bool
+    - (lina_mosquitto_dynsec_plugin | default('') | trim | length) == 0
+
+- name: Set dynamic security plugin path fact
+  ansible.builtin.set_fact:
+    lina_mosquitto_dynsec_plugin_path: >-
+      {{ lina_mosquitto_dynsec_plugin | trim if (lina_mosquitto_dynsec_plugin | default('') | trim | length) > 0
+      else (lina_mosquitto_dynsec_plugin_dpkg.stdout | default('') | trim) }}
+  when: lina_mosquitto_dynsec_enable | default(true) | bool
+
+- name: Verify dynamic security plugin file exists
+  ansible.builtin.stat:
+    path: "{{ lina_mosquitto_dynsec_plugin_path }}"
+  register: lina_mosquitto_dynsec_plugin_stat
+  when: lina_mosquitto_dynsec_enable | default(true) | bool
+
+- name: Fail if dynamic security plugin is missing
+  ansible.builtin.assert:
+    that:
+      - (lina_mosquitto_dynsec_plugin_path | default('') | length) > 0
+      - lina_mosquitto_dynsec_plugin_stat.stat.exists | default(false)
+    fail_msg: >-
+      mosquitto_dynamic_security.so not found (expected from mosquitto 2.x package).
+      Set lina_mosquitto_dynsec_plugin to the full path to the .so file, or set
+      lina_mosquitto_dynsec_enable: false for anonymous/plain auth only.
+  when: lina_mosquitto_dynsec_enable | default(true) | bool
+
+- name: Initialize dynamic security plugin datastore
+  ansible.builtin.command:
+    argv:
+      - mosquitto_ctrl
+      - dynsec
+      - init
+      - "{{ lina_mosquitto_dynsec_config_file }}"
+      - "{{ lina_mqtt_dynsec_admin_user }}"
+      - "{{ lina_mqtt_dynsec_admin_password }}"
+    creates: "{{ lina_mosquitto_dynsec_config_file }}"
+  when: lina_mosquitto_dynsec_enable | default(true) | bool
+
+- name: Ensure dynamic-security.json ownership for mosquitto
+  ansible.builtin.file:
+    path: "{{ lina_mosquitto_dynsec_config_file }}"
+    owner: mosquitto
+    group: mosquitto
+    mode: "0700"
+    state: file
+  when: lina_mosquitto_dynsec_enable | default(true) | bool
+
 - name: Create Mosquitto TLS directory on target
   ansible.builtin.file:
     path: "{{ lina_mosquitto_cert_dir }}"
