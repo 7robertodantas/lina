@@ -56,6 +56,7 @@ services:
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
       - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - LEDGER_GRPC_HOST=ledger
       - LEDGER_GRPC_PORT=${GRPC_PORT}
       - LIGHTNING_GRPC_HOST=lightning
@@ -81,6 +82,7 @@ services:
     container_name: ledger
     environment:
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DB_PATH=/data/ledger.db
     env_file:
       - .env
@@ -96,6 +98,7 @@ services:
     container_name: consumption
     environment:
       - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=6379
       - DB_PATH=/data/consumption.db
     env_file:
       - .env
@@ -111,6 +114,7 @@ services:
     container_name: lightning
     environment:
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DB_PATH=/data/lightning.db
     env_file:
       - .env

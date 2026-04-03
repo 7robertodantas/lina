@@ -58,6 +58,8 @@ services:
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
       - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
       - REDIS_HOST=redis
+      # In-cluster Redis port (must be 6379); .env REDIS_PORT is only for host publish mapping on redis service
+      - REDIS_PORT=6379
       - LEDGER_GRPC_HOST=ledger
       - LEDGER_GRPC_PORT=${GRPC_PORT}
       - LIGHTNING_GRPC_HOST=lightning
@@ -90,6 +92,7 @@ services:
       - "9460:9464"
     environment:
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DB_PATH=/data/ledger.db
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -112,6 +115,7 @@ services:
       - "9465:9464"    
     environment:
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DB_PATH=/data/consumption.db
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -132,6 +136,7 @@ services:
     container_name: lightning
     environment:
       - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - DB_PATH=/data/lightning.db
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -196,6 +201,35 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
       - "9463:9100"   # remove this if you use network_mode: host
+
+  # Host /proc via pid + mount (same idea as Ansible process-exporter on bare metal).
+  process_exporter:
+    image: ncabatoff/process-exporter:0.8.7
+    container_name: process_exporter
+    restart: unless-stopped
+    pid: host
+    ports:
+      - "9256:9256"
+    volumes:
+      - /proc:/host/proc:ro
+      - ../infrastructure/process-exporter/process-exporter.yaml:/config/process-exporter.yaml:ro
+    command:
+      - --procfs=/host/proc
+      - --config.path=/config/process-exporter.yaml
+      - --web.listen-address=:9256
+
+  # Talks to the host systemd over D-Bus. Linux only; typically unusable on Docker Desktop (macOS).
+  systemd_exporter:
+    image: prometheuscommunity/systemd-exporter:v0.7.0
+    container_name: systemd_exporter
+    restart: unless-stopped
+    pid: host
+    ports:
+      - "9558:9558"
+    volumes:
+      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
+    command:
+      - --web.listen-address=:9558
 
 
 volumes:

@@ -35,10 +35,10 @@ Ansible loads `ansible.cfg` here, including `inventory/hosts` and `roles/`.
 
 - **Northbound HTTP** via **Caddy** on **`8080`** by default (same path rules as `infrastructure/caddy/Caddyfile`: `/devices*`, ledger/consumption/lightning routes, `/health`). Override `lina_caddy_listen` / `lina_caddy_admin` in `inventory/group_vars/all.yml`.
 - Application metrics: device `9466`, ledger `9460`, consumption `9465` (defaults; overridable via `METRICS_ADDR` in each env file template).
-- Node exporter (package): port **9100**.
-- Process exporter: **9256** (`lina_process_exporter_listen`).
-- Redis exporter: **9121** (`lina_redis_exporter_listen`).
-- Systemd exporter (optional): **9558**.
+- Node exporter (package): port **9463** (`lina_node_exporter_listen`; matches Docker host mapping `9463:9100`).
+- Process exporter: **9256** (`lina_process_exporter_listen`; same as `docker-compose.evaluation.edge.yml`).
+- Redis exporter: **9461** (`lina_redis_exporter_listen`; matches Docker `9461:9121`).
+- Systemd exporter (optional): **9558** (Linux host / D-Bus; same as evaluation edge compose when enabled).
 
 **TLS** for Mosquitto is **on** by default (`8883`): Ansible copies `ca.crt`, `server.crt`, and `server.key` from **`infrastructure/certs`** on the controller (run `infrastructure/certs/generate-certs.sh` first) or from **`lina_mosquitto_certs_src`** if you set it. Plain MQTT is on **1883**. With **`lina_mosquitto_dynsec_enable: true`** (default), the broker loads **`mosquitto_dynamic_security.so`**, keeps **`allow_anonymous false`**, and initializes **`/var/lib/mosquitto/dynamic-security.json`** via `mosquitto_ctrl dynsec init` using **`lina_mqtt_dynsec_admin_user`** / **`lina_mqtt_dynsec_admin_password`** (must match device-service). WebSocket listeners default to **9001** (plain) and **9002** (TLS when TLS is enabled), like `infrastructure/mosquitto/config/mosquitto.conf`. Set **`lina_mosquitto_dynsec_enable: false`** only for lab anonymous access. For real certificates, set `lina_mqtt_tls_skip_verify: false` and `lina_mqtt_tls_server_name` as needed in `inventory/group_vars/all.yml`.
 

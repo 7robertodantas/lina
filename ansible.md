@@ -107,7 +107,7 @@ Define dependencies where appropriate:
 Install Prometheus node_exporter:
 
 - Run as systemd service
-- Default port: `9100`
+- Listen port: `9463` (aligned with `docker-compose.evaluation.edge.yml` host mapping and `prometheus.template.yml`)
 - Collect:
   - CPU
   - Memory
@@ -167,8 +167,10 @@ Ensure the following ports are exposed:
 
 - MQTT: 1883 / 8883 (if TLS)
 - Redis: 6379
-- Node exporter: 9100
-- Process exporter: 9256 (or chosen port)
+- Node exporter: 9463
+- Redis exporter: 9461
+- Process exporter: 9256
+- Systemd exporter: 9558 (optional; Linux + host D-Bus)
 - Service metrics: configurable per service
 
 ---

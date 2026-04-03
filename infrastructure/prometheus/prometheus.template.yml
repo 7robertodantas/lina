@@ -39,3 +39,13 @@ scrape_configs:
   - job_name: 'node'
     static_configs:
       - targets: ['${PROMETHEUS_TARGET_HOST}:9463']
+
+  # Process exporter (host processes; Docker edge uses pid: host)
+  - job_name: 'process'
+    static_configs:
+      - targets: ['${PROMETHEUS_TARGET_HOST}:9256']
+
+  # Systemd exporter (host systemd; Linux hosts with D-Bus mount)
+  - job_name: 'systemd'
+    static_configs:
+      - targets: ['${PROMETHEUS_TARGET_HOST}:9558']

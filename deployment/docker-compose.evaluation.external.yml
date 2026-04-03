@@ -37,7 +37,9 @@ services:
     restart: unless-stopped
 
   prometheus:
-    image: 7robertodantas/lina-prometheus:latest
+    build:
+      context: ../infrastructure/prometheus
+      dockerfile: Dockerfile
     container_name: prometheus
     ports:
       - "9090:9090"  # Prometheus UI

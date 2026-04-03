@@ -18,6 +18,15 @@
     name: prometheus-node-exporter
     state: present
 
+- name: Node exporter listen address (matches evaluation edge published port 9463)
+  ansible.builtin.template:
+    src: prometheus-node-exporter.default.j2
+    dest: /etc/default/prometheus-node-exporter
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart prometheus-node-exporter
+
 - name: Enable node exporter
   ansible.builtin.systemd:
     name: prometheus-node-exporter

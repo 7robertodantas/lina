@@ -37,17 +37,21 @@ lina_mqtt_use_tls: true
 lina_mqtt_tls_skip_verify: true
 lina_mqtt_tls_server_name: ""
 
-# Redis (optional password; leave empty for none)
+# Redis — used by stream client env (REDIS_HOST / REDIS_PORT / REDIS_DB), not REDIS_ADDR.
+# lightning-service uses the same vars as ledger/consumption/device (see internal.NewStreamClientFromEnv).
+lina_redis_host: "127.0.0.1"
+lina_redis_port: "6379"
+# Optional password; leave empty for none
 lina_redis_password: ""
 
 # Shared service auth
 lina_service_token: "change-me-in-production"
 
 # Lightning / LND (required for lightning-service; hex strings from your node)
-lina_lnd_host: "127.0.0.1:10009"
-lina_lnd_tls_cert_hex: ""
+lina_lnd_host: "192.168.2.1:10001"
+lina_lnd_tls_cert_hex: "2d2d2d2d2...."
 lina_lnd_tls_server_name: "localhost"
-lina_lnd_macaroon_hex: ""
+lina_lnd_macaroon_hex: "0201036c6e640...
 lina_lightning_network: "mainnet"
 
 # MQTT broker address (plain + TLS listeners; see lina_mosquitto_* above)
@@ -68,19 +72,23 @@ lina_lightning_listen_addr: "127.0.0.1:8083"
 lina_ledger_grpc_addr: "127.0.0.1:9090"
 lina_consumption_grpc_addr: "127.0.0.1:9091"
 lina_lightning_grpc_addr: "127.0.0.1:9092"
-lina_device_metrics_addr: "127.0.0.1:9466"
-lina_ledger_metrics_addr: "127.0.0.1:9460"
-lina_consumption_metrics_addr: "127.0.0.1:9465"
+# Metrics: bind all interfaces so Prometheus (or other scrapers) can reach this host from the network.
+# Northbound REST/gRPC above stay on loopback; only /metrics endpoints are exposed this way.
+lina_device_metrics_addr: ":9466"
+lina_ledger_metrics_addr: ":9460"
+lina_consumption_metrics_addr: ":9465"
 
 # Caddy northbound reverse proxy (see roles/caddy; mirrors infrastructure/caddy/Caddyfile)
 lina_caddy_listen: ":8080"
 lina_caddy_admin: "127.0.0.1:2019"
 
-# Monitoring
+# Monitoring — listen on all interfaces (same as :port below) for external scrape; host ports match
+# docker-compose.evaluation.edge.yml + prometheus.template.yml
 lina_install_systemd_exporter: true
 lina_process_exporter_version: "0.8.7"
 lina_redis_exporter_version: "v1.80.1"
 lina_systemd_exporter_version: "0.7.0"
-lina_redis_exporter_listen: ":9121"
+lina_node_exporter_listen: ":9463"
+lina_redis_exporter_listen: ":9461"
 lina_process_exporter_listen: ":9256"
 lina_systemd_exporter_listen: ":9558"
