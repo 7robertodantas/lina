@@ -1,0 +1,89 @@
+---
+- name: Packages for Caddy apt repository
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+    state: present
+
+- name: Download Cloudsmith Caddy GPG key (ASCII)
+  ansible.builtin.get_url:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    dest: /tmp/caddy-stable-archive-keyring.asc
+    mode: "0644"
+    force: false
+
+- name: Install Cloudsmith Caddy apt keyring
+  ansible.builtin.command:
+    argv:
+      - gpg
+      - --dearmor
+      - --yes
+      - -o
+      - /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      - /tmp/caddy-stable-archive-keyring.asc
+  args:
+    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+
+- name: Caddy apt source (Ubuntu or Debian)
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/caddy-stable.list
+    content: |
+      deb [signed-by=/usr/share/keyrings/caddy-stable-archive-keyring.gpg] https://dl.cloudsmith.io/public/caddy/stable/deb/{{ lina_caddy_cloudsmith_distro }} any-version main
+    mode: "0644"
+  vars:
+    lina_caddy_cloudsmith_distro: "{{ 'ubuntu' if ansible_distribution == 'Ubuntu' else 'debian' }}"
+
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+
+- name: Compute northbound upstream addresses for Caddy
+  ansible.builtin.set_fact:
+    lina_caddy_upstream_device: "{{ lina_caddy_upstream_host }}:{{ lina_device_api_addr | regex_replace('^:', '') }}"
+    lina_caddy_upstream_ledger: "{{ lina_caddy_upstream_host }}:{{ lina_ledger_listen_addr | regex_replace('^:', '') }}"
+    lina_caddy_upstream_consumption: "{{ lina_caddy_upstream_host }}:{{ lina_consumption_listen_addr | regex_replace('^:', '') }}"
+    lina_caddy_upstream_lightning: "{{ lina_caddy_upstream_host }}:{{ lina_lightning_listen_addr | regex_replace('^:', '') }}"
+
+- name: Caddy systemd drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/caddy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Start Caddy after LINA northbound services
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/caddy.service.d/lina-ordering.conf
+    content: |
+      [Unit]
+      After=network-online.target ledger-service.service device-service.service consumption-service.service lightning-service.service
+      Wants=ledger-service.service device-service.service consumption-service.service lightning-service.service
+    mode: "0644"
+  notify:
+    - Reload systemd for caddy
+    - Restart caddy
+
+- name: Install Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart caddy
+
+- name: Validate Caddyfile
+  ansible.builtin.command: caddy validate --config /etc/caddy/Caddyfile
+  changed_when: false
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd:
+    name: caddy
+    enabled: true
+    state: started
+    daemon_reload: true

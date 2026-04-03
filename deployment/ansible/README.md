@@ -33,6 +33,7 @@ Ansible loads `ansible.cfg` here, including `inventory/hosts` and `roles/`.
 
 ## After deploy
 
+- **Northbound HTTP** via **Caddy** on **`8080`** by default (same path rules as `infrastructure/caddy/Caddyfile`: `/devices*`, ledger/consumption/lightning routes, `/health`). Override `lina_caddy_listen` / `lina_caddy_admin` in `inventory/group_vars/all.yml`.
 - Application metrics: device `9466`, ledger `9460`, consumption `9465` (defaults; overridable via `METRICS_ADDR` in each env file template).
 - Node exporter (package): port **9100**.
 - Process exporter: **9256** (`lina_process_exporter_listen`).

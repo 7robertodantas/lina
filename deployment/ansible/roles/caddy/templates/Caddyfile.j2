@@ -1,0 +1,65 @@
+# Managed by Ansible — same routing as infrastructure/caddy/Caddyfile
+{
+    admin {{ lina_caddy_admin }}
+}
+
+{{ lina_caddy_listen }} {
+    route /devices* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_device }}
+    }
+
+    route /devices/*/balance* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_ledger }}
+    }
+
+    route /devices/*/entries* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_ledger }}
+    }
+
+    route /devices/*/credit* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_ledger }}
+    }
+
+    route /devices/*/debit* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_ledger }}
+    }
+
+    route /devices/*/authorizations* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_ledger }}
+    }
+
+    route /devices/*/invoices* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_ledger }}
+    }
+
+    route /devices/*/consumptions* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_consumption }}
+    }
+
+    route /devices/*/accumulations* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_consumption }}
+    }
+
+    route /lnd/info* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_lightning }}
+    }
+
+    route /lnd/wallet* {
+        uri path_regexp ^(.*)$ /api/v1$1
+        reverse_proxy {{ lina_caddy_upstream_lightning }}
+    }
+
+    respond /health 200
+
+    respond 404
+}

@@ -69,6 +69,11 @@ lina_device_metrics_addr: ":9466"
 lina_ledger_metrics_addr: ":9460"
 lina_consumption_metrics_addr: ":9465"
 
+# Caddy northbound reverse proxy (see roles/caddy; mirrors infrastructure/caddy/Caddyfile)
+lina_caddy_listen: ":8080"
+lina_caddy_admin: "127.0.0.1:2019"
+lina_caddy_upstream_host: "127.0.0.1"
+
 # Monitoring
 lina_install_systemd_exporter: true
 lina_process_exporter_version: "0.8.7"

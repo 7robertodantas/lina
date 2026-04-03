@@ -32,4 +32,5 @@
     - role: redis
     - role: mosquitto
     - role: lina-services
+    - role: caddy
     - role: monitoring
