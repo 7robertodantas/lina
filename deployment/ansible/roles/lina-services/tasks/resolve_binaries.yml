@@ -1,0 +1,11 @@
+---
+- name: Binary staging path (pre-built artefacts on controller)
+  ansible.builtin.set_fact:
+    lina_effective_binaries_dir: "{{ lina_binaries_dir }}"
+  when: not (lina_build_binaries | default(true) | bool)
+
+- name: Binary output path and repo root (build on controller)
+  ansible.builtin.set_fact:
+    lina_effective_repo_root: "{{ lina_repo_root if (lina_repo_root | default('') | length) > 0 else (playbook_dir | dirname | dirname | dirname) }}"
+    lina_effective_binaries_dir: "{{ lina_build_output_dir if (lina_build_output_dir | default('') | length) > 0 else (playbook_dir | dirname ~ '/.build/' ~ lina_build_goos ~ '-' ~ lina_build_goarch) }}"
+  when: lina_build_binaries | default(true) | bool
