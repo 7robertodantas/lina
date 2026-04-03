@@ -1,0 +1,26 @@
+---
+- name: Ensure build output directory exists on controller
+  ansible.builtin.file:
+    path: "{{ lina_effective_binaries_dir }}"
+    state: directory
+    mode: "0755"
+  delegate_to: localhost
+  run_once: true
+  become: false
+
+- name: Compile LINA service binaries for target OS/arch
+  ansible.builtin.command:
+    cmd: >-
+      go build -trimpath
+      -o {{ lina_effective_binaries_dir }}/{{ item.binary }}
+      .
+    chdir: "{{ lina_effective_repo_root }}/services/{{ item.binary }}"
+  environment:
+    GOOS: "{{ lina_build_goos }}"
+    GOARCH: "{{ lina_build_goarch }}"
+    CGO_ENABLED: "{{ lina_build_cgo_enabled }}"
+  loop: "{{ lina_services }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  changed_when: true

@@ -1,12 +1,40 @@
 ---
-- name: TLS requires cert paths
+- name: Resolve TLS certificate source on controller
+  ansible.builtin.set_fact:
+    lina_mosquitto_effective_certs_src: >-
+      {{ lina_mosquitto_certs_src
+         if (lina_mosquitto_certs_src | default('') | length) > 0
+         else (playbook_dir | dirname | dirname | dirname ~ '/infrastructure/certs') }}
+  when: lina_mosquitto_tls_enable | default(false) | bool
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Verify TLS cert files exist on controller
+  ansible.builtin.stat:
+    path: "{{ lina_mosquitto_effective_certs_src }}/{{ item }}"
+  loop:
+    - ca.crt
+    - server.crt
+    - server.key
+  register: lina_mqtt_tls_cert_stat
+  when: lina_mosquitto_tls_enable | default(false) | bool
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Fail if TLS cert missing on controller
   ansible.builtin.assert:
     that:
-      - (lina_mosquitto_cafile | string | length) > 0
-      - (lina_mosquitto_certfile | string | length) > 0
-      - (lina_mosquitto_keyfile | string | length) > 0
-    fail_msg: "Set lina_mosquitto_cafile, lina_mosquitto_certfile, and lina_mosquitto_keyfile when lina_mosquitto_tls_enable is true."
-  when: lina_mosquitto_tls_enable | bool
+      - item.stat.exists
+    fail_msg: >-
+      Missing {{ lina_mosquitto_effective_certs_src }}/{{ item.item }} —
+      run infrastructure/certs/generate-certs.sh or set lina_mosquitto_certs_src.
+  loop: "{{ lina_mqtt_tls_cert_stat.results }}"
+  when: lina_mosquitto_tls_enable | default(false) | bool
+  run_once: true
+  loop_control:
+    label: "{{ item.item }}"
 
 - name: Install Mosquitto
   ansible.builtin.apt:
@@ -14,6 +42,28 @@
       - mosquitto
       - mosquitto-clients
     state: present
+
+- name: Create Mosquitto TLS directory on target
+  ansible.builtin.file:
+    path: "{{ lina_mosquitto_cert_dir }}"
+    state: directory
+    owner: root
+    mode: "0755"
+  when: lina_mosquitto_tls_enable | default(false) | bool
+
+- name: Copy TLS certificates for Mosquitto
+  ansible.builtin.copy:
+    src: "{{ lina_mosquitto_effective_certs_src }}/{{ item }}"
+    dest: "{{ lina_mosquitto_cert_dir }}/{{ item }}"
+    owner: root
+    group: mosquitto
+    mode: "{{ '0640' if item == 'server.key' else '0644' }}"
+  loop:
+    - ca.crt
+    - server.crt
+    - server.key
+  when: lina_mosquitto_tls_enable | default(false) | bool
+  notify: Restart mosquitto
 
 - name: Deploy Mosquitto configuration
   ansible.builtin.template:

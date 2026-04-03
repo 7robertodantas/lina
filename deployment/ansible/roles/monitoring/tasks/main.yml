@@ -28,15 +28,21 @@
   ansible.builtin.set_fact:
     lina_go_arch: >-
       {{
-        'arm64' if ansible_architecture == 'aarch64'
-        else ('amd64' if ansible_architecture == 'x86_64'
-        else ansible_architecture)
+        'arm64' if ansible_facts['architecture'] == 'aarch64'
+        else ('amd64' if ansible_facts['architecture'] == 'x86_64'
+        else ansible_facts['architecture'])
       }}
 
 - name: Remove stale process-exporter unpack directory
   ansible.builtin.file:
     path: /tmp/lina-pe-unpack
     state: absent
+
+- name: Create process-exporter unpack directory
+  ansible.builtin.file:
+    path: /tmp/lina-pe-unpack
+    state: directory
+    mode: "0755"
 
 - name: Download process-exporter
   ansible.builtin.get_url:
@@ -105,6 +111,12 @@
     path: /tmp/lina-redis-exporter-unpack
     state: absent
 
+- name: Create redis_exporter unpack directory
+  ansible.builtin.file:
+    path: /tmp/lina-redis-exporter-unpack
+    state: directory
+    mode: "0755"
+
 - name: Download redis_exporter
   ansible.builtin.get_url:
     url: >-
@@ -163,6 +175,13 @@
   ansible.builtin.file:
     path: /tmp/lina-systemd-exporter-unpack
     state: absent
+  when: lina_install_systemd_exporter | bool
+
+- name: Create systemd_exporter unpack directory
+  ansible.builtin.file:
+    path: /tmp/lina-systemd-exporter-unpack
+    state: directory
+    mode: "0755"
   when: lina_install_systemd_exporter | bool
 
 - name: Download systemd_exporter

@@ -2,12 +2,13 @@
 persistence true
 persistence_location /var/lib/mosquitto/
 
-{% if lina_mosquitto_tls_enable | bool %}
+{% if lina_mosquitto_tls_enable | default(false) | bool %}
 listener {{ lina_mosquitto_tls_port | int }}
 protocol mqtt
 cafile {{ lina_mosquitto_cafile }}
 certfile {{ lina_mosquitto_certfile }}
 keyfile {{ lina_mosquitto_keyfile }}
+require_certificate false
 {% endif %}
 
 listener {{ lina_mosquitto_plain_port | int }}

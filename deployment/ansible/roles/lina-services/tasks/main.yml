@@ -1,4 +1,11 @@
 ---
+- name: Resolve where binaries come from on the controller
+  ansible.builtin.import_tasks: resolve_binaries.yml
+
+- name: Build Go binaries on the controller (cross-compile)
+  ansible.builtin.import_tasks: build.yml
+  when: lina_build_binaries | default(true) | bool
+
 - name: Users, directories, and permissions
   ansible.builtin.import_tasks: users_and_dirs.yml
 

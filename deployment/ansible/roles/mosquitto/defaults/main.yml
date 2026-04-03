@@ -1,0 +1,6 @@
+---
+# Target directory for broker TLS files (must match lina_mosquitto_cafile / certfile / keyfile).
+lina_mosquitto_cert_dir: /etc/lina/mosquitto
+
+# Controller path to ca.crt, server.crt, server.key. Empty = <repo>/infrastructure/certs
+lina_mosquitto_certs_src: ""
