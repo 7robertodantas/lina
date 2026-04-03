@@ -1,4 +1,10 @@
 ---
+# Docker evaluation stack mounts one writable volume per service at /data (see
+# deployment/docker-compose.evaluation.edge.yml). On the host we use
+# {{ lina_lib_dir }}/<binary>/ with the same ownership model: each service user
+# owns its subtree. The parent {{ lina_lib_dir }} must stay traversable (0755);
+# if it is created implicitly with a tight umask it can end up 0700 root, and
+# lina-* users cannot reach their DB paths under it.
 - name: Create LINA service users
   ansible.builtin.user:
     name: "{{ item.user }}"
@@ -19,7 +25,15 @@
     - "{{ lina_install_root }}/bin"
     - "{{ lina_config_dir }}"
 
-- name: Service data directories
+- name: LINA data root (traversable by all service users)
+  ansible.builtin.file:
+    path: "{{ lina_lib_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Service data directories (per-service /data, like compose named volumes)
   ansible.builtin.file:
     path: "{{ lina_lib_dir }}/{{ item.binary }}"
     state: directory
