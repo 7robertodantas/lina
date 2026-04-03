@@ -1,0 +1,10 @@
+# Keep aligned with deployment/ansible/roles/monitoring/templates/process-exporter.yaml.j2
+# Requires process_exporter in docker-compose with pid: host and /proc mounted (see compose file).
+process_names:
+  - comm:
+      - device
+      - ledger
+      - consumption
+      - lightning
+      - mosquitto
+      - redis-server
