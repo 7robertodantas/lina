@@ -8,6 +8,8 @@ lina_mosquitto_certs_src: ""
 # Dynamic Security plugin (matches infrastructure/mosquitto/config/mosquitto.conf)
 lina_mosquitto_dynsec_enable: true
 lina_mosquitto_dynsec_config_file: /var/lib/mosquitto/dynamic-security.json
+# Installed script: same behavior as Docker entrypoint dynsec + generate-dynsec.sh init-only
+lina_mosquitto_dynsec_init_script_dest: /usr/local/sbin/lina-mosquitto-dynsec-init.sh
 # Empty = discover from Debian/Ubuntu package (dpkg -L mosquitto); set explicitly if needed
 lina_mosquitto_dynsec_plugin: ""
 
