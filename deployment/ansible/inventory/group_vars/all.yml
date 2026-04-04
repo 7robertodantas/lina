@@ -83,7 +83,7 @@ lina_caddy_listen: ":8080"
 lina_caddy_admin: "127.0.0.1:2019"
 
 # Monitoring — listen on all interfaces (same as :port below) for external scrape; host ports match
-# docker-compose.evaluation.edge.yml + prometheus.template.yml
+# docker-compose.evaluation.edge.yml. Prometheus container: PROMETHEUS_SCRAPE_JOBS=job:port,... + PROMETHEUS_TARGET_HOST.
 lina_install_systemd_exporter: true
 lina_process_exporter_version: "0.8.7"
 lina_redis_exporter_version: "v1.80.1"

@@ -266,6 +266,7 @@ services:
       - .env
     environment:
       - PROMETHEUS_TARGET_HOST=host.docker.internal
+      - PROMETHEUS_SCRAPE_JOBS=ledger:9460,consumption:9465,device:9466,redis:9461,cadvisor:9462,node:9463,process:9256,systemd:9558
     volumes:
       - ../infrastructure/prometheus:/etc/prometheus
       - prometheus-data:/prometheus

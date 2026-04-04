@@ -45,6 +45,8 @@ services:
       - "9090:9090"  # Prometheus UI
     env_file:
       - .env
+    environment:
+      - PROMETHEUS_SCRAPE_JOBS=${PROMETHEUS_SCRAPE_JOBS:-ledger:9460,consumption:9465,device:9466,redis:9461,node:9463,process:9256,systemd:9558}
     volumes:
       - prometheus-data:/prometheus
     entrypoint:
