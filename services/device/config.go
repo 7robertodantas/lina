@@ -28,9 +28,9 @@ type Config struct {
 	MQTTTLSEdgeCert        string
 	MQTTTLSEdgeKey         string
 
-	// MQTT Dynamic Security
-	MQTTDynSecAdminUser     string
-	MQTTDynSecAdminPassword string
+	// MQTTAuthAddr is the listen address for the NanoMQ HTTP auth callback server.
+	// Must be reachable from the NanoMQ container before the MQTT client connects.
+	MQTTAuthAddr string
 
 	// Ledger gRPC
 	LedgerGRPCHost string
@@ -58,7 +58,7 @@ func LoadConfig() Config {
 		APIAddr: internal.GetEnv("API_ADDR", ":8080"),
 
 		// MQTT Configuration
-		MQTTBroker:             internal.GetEnv("MQTT_BROKER", "mosquitto"),
+		MQTTBroker:             internal.GetEnv("MQTT_BROKER", "nanomq"),
 		MQTTUseTLS:             internal.BoolEnv("MQTT_USE_TLS", true),
 		MQTTPort:               internal.IntEnv("MQTT_PORT", 1883),
 		MQTTTLSPort:            internal.IntEnv("MQTT_TLS_PORT", 8883),
@@ -73,9 +73,7 @@ func LoadConfig() Config {
 		MQTTTLSEdgeCert:        internal.GetEnv("MQTT_TLS_EDGE_CERT", ""),
 		MQTTTLSEdgeKey:         internal.GetEnv("MQTT_TLS_EDGE_KEY", ""),
 
-		// MQTT Dynamic Security
-		MQTTDynSecAdminUser:     internal.GetEnv("MQTT_DYNSEC_ADMIN_USER", "admin"),
-		MQTTDynSecAdminPassword: internal.GetEnv("MQTT_DYNSEC_ADMIN_PASSWORD", "admin"),
+		MQTTAuthAddr: internal.GetEnv("MQTT_AUTH_ADDR", ":8082"),
 
 		// Ledger gRPC
 		LedgerGRPCHost: internal.GetEnv("LEDGER_GRPC_HOST", "ledger"),

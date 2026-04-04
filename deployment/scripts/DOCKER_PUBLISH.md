@@ -86,7 +86,7 @@ If you prefer to build and push images manually:
 # Build images for current platform only
 docker build -t docker.io/username/lina-caddy:latest -f ./caddy/Dockerfile ./caddy
 docker build -t docker.io/username/lina-redis:latest -f ./redis/Dockerfile ./redis
-docker build -t docker.io/username/lina-mosquitto:latest -f ./mosquitto/Dockerfile ./mosquitto
+docker build -t docker.io/username/lina-nanomq:latest -f ./infrastructure/nanomq/Dockerfile ./infrastructure/nanomq
 docker build -t docker.io/username/lina-device:latest -f ./services/Dockerfile --build-arg SERVICE=device .
 docker build -t docker.io/username/lina-ledger:latest -f ./services/Dockerfile --build-arg SERVICE=ledger .
 docker build -t docker.io/username/lina-consumption:latest -f ./services/Dockerfile --build-arg SERVICE=consumption .
@@ -96,7 +96,7 @@ docker build -t docker.io/username/lina-smartmeter:latest -f ./smartmeter/Docker
 # Push images
 docker push docker.io/username/lina-caddy:latest
 docker push docker.io/username/lina-redis:latest
-docker push docker.io/username/lina-mosquitto:latest
+docker push docker.io/username/lina-nanomq:latest
 docker push docker.io/username/lina-device:latest
 docker push docker.io/username/lina-ledger:latest
 docker push docker.io/username/lina-consumption:latest
@@ -125,9 +125,9 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   --push ./redis
 
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t docker.io/username/lina-mosquitto:latest \
-  -f ./mosquitto/Dockerfile \
-  --push ./mosquitto
+  -t docker.io/username/lina-nanomq:latest \
+  -f ./infrastructure/nanomq/Dockerfile \
+  --push ./infrastructure/nanomq
 
 docker buildx build --platform linux/amd64,linux/arm64 \
   -t docker.io/username/lina-device:latest \

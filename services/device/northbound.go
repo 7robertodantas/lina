@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // CreateDeviceRequest represents the request body for creating a device
@@ -46,13 +47,13 @@ type CreateDevicesBatchRequest struct {
 type NorthboundInterface struct {
 	router     *gin.Engine
 	repo       *DeviceRepository
-	dynSec     *MQTTDynSecService
 	mqttClient *MQTTClient
+	cfg        Config
 	server     *http.Server
 }
 
 // NewNorthboundInterface creates a new northbound interface
-func NewNorthboundInterface(repo *DeviceRepository, dynSec *MQTTDynSecService, mqttClient *MQTTClient) *NorthboundInterface {
+func NewNorthboundInterface(repo *DeviceRepository, mqttClient *MQTTClient, cfg Config) *NorthboundInterface {
 	router := gin.Default()
 
 	// Add OpenTelemetry middleware for automatic route-based span naming
@@ -62,8 +63,8 @@ func NewNorthboundInterface(repo *DeviceRepository, dynSec *MQTTDynSecService, m
 	nb := &NorthboundInterface{
 		router:     router,
 		repo:       repo,
-		dynSec:     dynSec,
 		mqttClient: mqttClient,
+		cfg:        cfg,
 	}
 
 	// Register routes
@@ -158,23 +159,23 @@ func (nb *NorthboundInterface) createDevice(c *gin.Context) {
 			Info(ctx, "Device created in database via northbound REST")
 	}
 
-	// Trigger dynsec provisioning (using device_secret as password)
-	logger.WithDeviceID(device.DeviceID).
-		Info(ctx, "Provisioning device in dynsec via northbound REST")
-	if err := nb.dynSec.ProvisionDevice(ctx, device.DeviceID, req.DeviceSecret); err != nil {
-		logger.WithDeviceID(device.DeviceID).
-			Warnf(ctx, "Failed to provision device in dynsec via northbound REST: %v", err)
-		// Continue even if provisioning fails - device is already in database
-	} else {
-		logger.WithDeviceID(device.DeviceID).
-			Info(ctx, "Device provisioned successfully in dynsec via northbound REST")
+	// Store hashed MQTT credentials so the NanoMQ HTTP auth callback can verify the device.
+	if req.DeviceSecret != "" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.DeviceSecret), bcrypt.DefaultCost)
+		if err != nil {
+			logger.WithDeviceID(device.DeviceID).
+				Warnf(ctx, "Failed to hash device secret via northbound REST: %v", err)
+		} else if err := nb.repo.StoreDeviceSecret(ctx, device.DeviceID, string(hash)); err != nil {
+			logger.WithDeviceID(device.DeviceID).
+				Warnf(ctx, "Failed to store device secret via northbound REST: %v", err)
+		}
 	}
 
 	// Publish device configuration to /devices/{device_id}/config
 	if err := nb.publishDeviceConfig(ctx, device); err != nil {
 		logger.WithDeviceID(device.DeviceID).
 			Warnf(ctx, "Failed to publish device config on southbound mqtt via northbound REST: %v", err)
-		// Continue even if publishing fails - device is already in database and provisioned
+		// Continue even if publishing fails — device is already in the database with stored credentials
 	} else {
 		logger.WithDeviceID(device.DeviceID).
 			InfoWithFields(ctx, "Device config published on southbound mqtt via northbound REST", map[string]interface{}{
@@ -447,23 +448,25 @@ func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
 		logger.Infof(ctx, "Created device batch %d-%d (%d devices)", i, end-1, len(batch))
 	}
 
-	// Use shared devices_any_role for all batch-provisioned devices
-	// groupName and roleName are kept for backward compatibility but no longer used
-	groupName := ""
-	roleName := ""
-
-	// Provision devices in dynsec in batches (uses shared devices_any_role internally)
-	logger.Infof(ctx, "Provisioning %d devices in dynsec with shared devices_any_role", totalDevices)
-	if err := nb.dynSec.ProvisionDevicesBatch(ctx, devices, deviceSecrets, groupName, roleName, req.DeviceIDPattern); err != nil {
-		logger.Errorf(ctx, "Failed to provision devices in dynsec: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("failed to provision devices in dynsec: %v", err),
-		})
-		return
+	// Store hashed MQTT credentials for each device so the NanoMQ HTTP auth callback can verify them.
+	// bcrypt.MinCost is used here for acceptable throughput on large batches.
+	logger.Infof(ctx, "Storing credentials for %d devices", totalDevices)
+	for deviceID, secret := range deviceSecrets {
+		if secret == "" {
+			continue
+		}
+		hash, err := bcrypt.GenerateFromPassword([]byte(secret), bcrypt.MinCost)
+		if err != nil {
+			logger.Warnf(ctx, "Failed to hash secret for device %s: %v", deviceID, err)
+			continue
+		}
+		if err := nb.repo.StoreDeviceSecret(ctx, deviceID, string(hash)); err != nil {
+			logger.Warnf(ctx, "Failed to store secret for device %s: %v", deviceID, err)
+		}
 	}
-	logger.Infof(ctx, "Successfully provisioned %d devices in dynsec", totalDevices)
+	logger.Infof(ctx, "Stored credentials for %d devices", totalDevices)
 
-	// Publish device configurations in batches (only if dynsec provisioning succeeded)
+	// Publish device configurations in batches
 	logger.Infof(ctx, "Publishing configs for %d devices", totalDevices)
 	for i := 0; i < len(devices); i += batchSize {
 		end := i + batchSize
@@ -474,7 +477,7 @@ func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
 		for _, device := range batch {
 			if err := nb.publishDeviceConfig(ctx, device); err != nil {
 				logger.Warnf(ctx, "Failed to publish config for device %s: %v", device.DeviceID, err)
-				// Continue even if publishing fails - devices are already in database and dynsec
+				// Continue even if publishing fails — devices are already in the database with stored credentials
 			}
 		}
 		logger.Infof(ctx, "Published configs for device batch %d-%d", i, end-1)
