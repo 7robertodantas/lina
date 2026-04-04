@@ -61,6 +61,8 @@ lina_mqtt_broker: "127.0.0.1"
 # Device ↔ MQTT
 lina_device_mqtt_username: "device-service"
 lina_device_mqtt_password: "device-service_password"
+lina_device_mqtt_auth_addr: "127.0.0.1:8884"
+lina_nanomq_device_service_http_auth_url: "http://127.0.0.1:8884"
 
 # Northbound HTTP APIs: bind loopback only; external access is via Caddy (lina_caddy_listen).
 # Device REST must not use Caddy's public port (8080).
