@@ -4,6 +4,7 @@ lina_nanomq_binary: ""
 lina_nanomq_conf_path: /etc/lina/nanomq.conf
 lina_nanomq_tls_enable: true
 lina_nanomq_tls_port: 8883
+lina_nanomq_plain_enable: false
 lina_nanomq_plain_port: 1883
 lina_nanomq_cert_dir: /etc/lina/nanomq
 lina_nanomq_cafile: /etc/lina/nanomq/ca.crt

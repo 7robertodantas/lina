@@ -21,7 +21,9 @@ lina_binaries_dir: ""
 lina_mqtt_broker_service_name: nanomq
 lina_nanomq_tls_enable: true
 lina_nanomq_tls_port: 8883
+lina_nanomq_plain_enable: false
 lina_nanomq_plain_port: 1883
+lina_nanomq_http_port: 8881
 # Target paths (Ansible copies from controller)
 lina_nanomq_cert_dir: /etc/lina/nanomq
 lina_nanomq_cafile: /etc/lina/nanomq/ca.crt

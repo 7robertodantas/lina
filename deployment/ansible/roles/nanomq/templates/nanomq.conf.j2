@@ -4,9 +4,11 @@ system {
   daemon = false
 }
 
+{% if lina_nanomq_plain_enable | default(false) | bool %}
 listeners.tcp {
   bind = "0.0.0.0:{{ lina_nanomq_plain_port | int }}"
 }
+{% endif %}
 
 listeners.ssl {
   enable = {{ (lina_nanomq_tls_enable | default(false) | bool) | lower }}
