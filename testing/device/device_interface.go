@@ -228,6 +228,7 @@ func (di *deviceInterfaceImpl) createTLSConfig() (*tls.Config, error) {
 		InsecureSkipVerify: skipVerify,
 		ServerName:         serverName,
 	}
+	internal.ApplyNanomqMQTTTLSCompat(tlsConfig)
 
 	return tlsConfig, nil
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/robertodantas/lina/internal"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -59,9 +60,9 @@ func createTLSConfig(ctx context.Context, cfg Config) (*tls.Config, error) {
 
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: skipVerify,
-		MinVersion:         tls.VersionTLS12,
-		ServerName:         serverName, // Set server name for SNI and hostname verification
+		ServerName:         serverName, // SNI and hostname verification
 	}
+	internal.ApplyNanomqMQTTTLSCompat(tlsConfig)
 
 	if serverName != broker {
 		logger.InfoWithFields(ctx, "Using custom TLS server name on southbound mqtt", map[string]interface{}{

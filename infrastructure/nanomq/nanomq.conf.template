@@ -1,0 +1,92 @@
+system {
+	daemon = false
+}
+
+listeners.tcp {
+	bind = "0.0.0.0:1883"
+}
+
+listeners.ssl {
+	enable = true
+	bind = "0.0.0.0:8883"
+	keyfile = "/etc/certs/server.key"
+	certfile = "/etc/certs/server.crt"
+	cacertfile = "/etc/certs/ca.crt"
+	verify_peer = false
+	fail_if_no_peer_cert = false
+	tls_version = tlsv1.2
+}
+
+http_server {
+	port = 8081
+	parallel = 2
+	username = admin
+	password = public
+	auth_type = basic
+}
+
+log {
+	to = [console]
+	level = warn
+}
+
+# Authentication: NanoMQ calls the device service HTTP endpoints to verify credentials.
+#   auth_req  – verifies username/password at CONNECT time.
+#   super_req – if 200, the client is a superuser and bypasses topic ACL checks.
+#   acl_req   – HTTP topic ACL check; file authorization below also enforces publish/subscribe.
+#
+# The device service returns HTTP 200 to allow and 4xx to deny.
+auth {
+	allow_anonymous = false
+	no_match = deny
+	deny_action = disconnect
+
+	http_auth = {
+		auth_req {
+			url = "@DEVICE_SERVICE_HTTP_AUTH_URL@/api/v1/mqtt/auth"
+			method = "POST"
+			headers.content-type = "application/x-www-form-urlencoded"
+			params = {clientid = "%c", username = "%u", password = "%P"}
+		}
+
+		super_req {
+			url = "@DEVICE_SERVICE_HTTP_AUTH_URL@/api/v1/mqtt/super"
+			method = "POST"
+			headers.content-type = "application/x-www-form-urlencoded"
+			params = {clientid = "%c", username = "%u"}
+		}
+
+		acl_req {
+			url = "@DEVICE_SERVICE_HTTP_AUTH_URL@/api/v1/mqtt/acl"
+			method = "POST"
+			headers.content-type = "application/x-www-form-urlencoded"
+			params = {clientid = "%c", username = "%u", access = "%A", topic = "%t"}
+		}
+
+		timeout = 5s
+		connect_timeout = 5s
+		pool_size = 32
+		cache_ttl = 60s
+	}
+}
+
+# Per-message topic ACL using ${username} placeholder.
+# The device service user is a superuser (super_req returns 200) so it bypasses these rules.
+# Device clients are restricted to their own /devices/{username}/... topics.
+authorization {
+	no_match = deny
+	deny_action = disconnect
+	sources = [
+		{
+			type = file
+			rules = [
+				{"permit": "deny",  "username": "#", "action": "subscribe", "topics": ["$SYS/#"]}
+				{"permit": "allow", "username": "@DEVICE_SERVICE_USERNAME@", "action": "subscribe", "topics": ["/devices/+/heartbeat", "/devices/+/usage", "/devices/+/request/authorize", "/devices/+/request/invoice"]}
+				{"permit": "allow", "username": "@DEVICE_SERVICE_USERNAME@", "action": "publish",   "topics": ["/devices/+/response/authorize", "/devices/+/response/invoice", "/devices/+/events/invoice", "/devices/+/config", "/devices/+/control", "/devices/+/balance"]}
+				{"permit": "allow", "username": "#", "action": "publish",   "topics": ["/devices/${username}/heartbeat", "/devices/${username}/usage", "/devices/${username}/request/authorize", "/devices/${username}/request/invoice"]}
+				{"permit": "allow", "username": "#", "action": "subscribe", "topics": ["/devices/${username}/#"]}
+				{"permit": "deny"}
+			]
+		}
+	]
+}

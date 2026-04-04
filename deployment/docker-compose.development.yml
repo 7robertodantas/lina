@@ -34,24 +34,25 @@ services:
       start_period: 5s
     restart: unless-stopped
 
-  mosquitto:
+  nanomq:
     build:
-      context: ../infrastructure/mosquitto
+      context: ../infrastructure/nanomq
       dockerfile: Dockerfile
-    container_name: mosquitto      
+    container_name: nanomq
     ports:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
+    environment:
+      - DEVICE_SERVICE_MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
+      - DEVICE_SERVICE_HTTP_AUTH_URL=http://device:8082
     volumes:
-      - mosquitto-data:/mosquitto/data
-      - ../infrastructure/certs:/mosquitto/certs:rw
-    env_file:
-      - .env
+      - nanomq-data:/nanomq/data
+      - ../infrastructure/certs:/etc/certs:rw
     healthcheck:
-      test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
+      test: ["CMD-SHELL", "/usr/local/bin/lina-nanomq-healthcheck.sh"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 20s
+      start_period: 10s
     restart: unless-stopped
 
   device:
@@ -64,9 +65,11 @@ services:
     ports:
       - "9466:9464" # Metrics
     environment:
-      - MQTT_BROKER=mosquitto
+      - MQTT_BROKER=nanomq
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
       - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
+      - MQTT_AUTH_ADDR=:8082
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - LEDGER_GRPC_HOST=ledger
@@ -80,7 +83,7 @@ services:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
       - device-data:/data
     depends_on:
-      mosquitto:
+      nanomq:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -162,7 +165,8 @@ services:
     ports:
       - "3010:8080" # UI
     environment:
-      - MQTT_BROKER=mosquitto
+      - MQTT_BROKER=nanomq
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
       - DEVICE_ID=smart-meter-001
       - DEVICE_SECRET=smart-meter-001_password
     env_file:
@@ -170,7 +174,7 @@ services:
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     depends_on:    
-      mosquitto:
+      nanomq:
         condition: service_healthy
       redis:
         condition: service_healthy        
@@ -184,13 +188,14 @@ services:
     ports:
       - "3002:8080" # UI
     environment:
-      - MQTT_BROKER=mosquitto
+      - MQTT_BROKER=nanomq
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
     env_file:
       - .env
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
     depends_on:    
-      mosquitto:
+      nanomq:
         condition: service_healthy
       redis:
         condition: service_healthy        
@@ -322,7 +327,7 @@ services:
     #     condition: service_started
 
 volumes:
-  mosquitto-data:
+  nanomq-data:
   redis-data:
   device-data:
   ledger-data:

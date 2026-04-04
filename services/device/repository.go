@@ -64,6 +64,13 @@ func NewDeviceRepository(ctx context.Context, dbPath string, busyTimeoutMS int) 
 		return nil, fmt.Errorf("failed to create table: %w", err)
 	}
 
+	// Add device_secret_hash column if it doesn't exist yet (idempotent migration).
+	if _, err := db.ExecContext(ctx, `ALTER TABLE devices ADD COLUMN device_secret_hash TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return nil, fmt.Errorf("failed to add device_secret_hash column: %w", err)
+		}
+	}
+
 	return repo, nil
 }
 
@@ -416,6 +423,36 @@ func (r *DeviceRepository) CreateDevicesBatch(ctx context.Context, devices []*De
 		logger.Infof(ctx, "Batch created %d devices in database", insertedCount)
 	}
 	return nil
+}
+
+// StoreDeviceSecret persists a bcrypt-hashed MQTT password for the given device.
+// Called after CreateDevice / CreateDevicesBatch so the auth server can verify credentials.
+func (r *DeviceRepository) StoreDeviceSecret(ctx context.Context, deviceID, passwordHash string) error {
+	query := `UPDATE devices SET device_secret_hash = ? WHERE device_id = ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPDATE"),
+		attribute.String("db.table", "devices"),
+		attribute.String("device.id", deviceID),
+	}
+	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] store device secret", attrs, r.db, query, passwordHash, deviceID)
+	return err
+}
+
+// GetDeviceSecretHash returns the stored bcrypt hash for a device.
+// Returns an error if the device is not found.
+func (r *DeviceRepository) GetDeviceSecretHash(ctx context.Context, deviceID string) (string, error) {
+	query := `SELECT device_secret_hash FROM devices WHERE device_id = ?`
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "SELECT"),
+		attribute.String("db.table", "devices"),
+		attribute.String("device.id", deviceID),
+	}
+	var hash string
+	err := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get device secret hash", attrs, r.db, query, deviceID).Scan(&hash)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("device not found: %s", deviceID)
+	}
+	return hash, err
 }
 
 // Close closes the database connection
