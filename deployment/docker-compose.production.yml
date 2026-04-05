@@ -38,7 +38,6 @@ services:
     environment:
       - DEVICE_SERVICE_MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
       - DEVICE_SERVICE_HTTP_AUTH_URL=http://device:8082
-      - NANOMQ_TLS_ENABLE=false
     volumes:
       - nanomq-data:/nanomq/data
       - ../infrastructure/certs:/nanomq/certs:ro
