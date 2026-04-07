@@ -125,16 +125,21 @@ func (e Env) WaitGatewayHealthy(t *testing.T, timeout time.Duration) {
 	t.Fatalf("gateway not healthy at %s/health: %v", e.BaseURL, lastErr)
 }
 
-// DeviceMQTTConfig returns MQTT settings for testing/device.Config.
+// DeviceMQTTConfig returns MQTT settings for testing/device.Config (aligned with services/device env semantics).
 func (e Env) DeviceMQTTConfig() *devicepkg.Config {
 	return &devicepkg.Config{
-		MQTTBroker:        e.MQTTHost,
-		MQTTUseTLS:        true,
-		MQTTPort:          1883,
-		MQTTTLSPort:       e.MQTTTLSPort,
-		MQTTTLSCACert:     e.MQTTCACert,
-		MQTTTLSSkipVerify: e.MQTTSkipTLSVerify,
-		MQTTTLSServerName: e.MQTTServerName,
+		MQTTBroker:             e.MQTTHost,
+		MQTTUseTLS:             true,
+		MQTTPort:               1883,
+		MQTTTLSPort:            e.MQTTTLSPort,
+		MQTTTLSProtocol:        "tls",
+		MQTTClientID:           "",
+		MQTTTLSSkipVerify:      e.MQTTSkipTLSVerify,
+		MQTTTLSServerName:      e.MQTTServerName,
+		MQTTTLSCACert:          e.MQTTCACert,
+		MQTTTLSRequireEdgeCert: false,
+		MQTTTLSEdgeCert:        "",
+		MQTTTLSEdgeKey:         "",
 	}
 }
 

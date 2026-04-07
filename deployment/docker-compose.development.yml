@@ -166,7 +166,7 @@ services:
       - "3010:8080" # UI
     environment:
       - MQTT_BROKER=nanomq
-      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-nanomq}
       - DEVICE_ID=smart-meter-001
       - DEVICE_SECRET=smart-meter-001_password
     env_file:
@@ -189,7 +189,7 @@ services:
       - "3002:8080" # UI
     environment:
       - MQTT_BROKER=nanomq
-      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-nanomq}
     env_file:
       - .env
     volumes:

@@ -226,24 +226,31 @@ func (di *deviceInterfaceImpl) Connect(deviceID, deviceSecret string) {
 	var protocol string
 	if useTLS {
 		port = di.cfg.MQTTTLSPort
-		protocol = "ssl"
+		protocol = di.cfg.MQTTTLSProtocol
+		if protocol == "" {
+			protocol = "tls"
+		}
 	} else {
 		port = di.cfg.MQTTPort
 		protocol = "tcp"
 	}
 
+	clientID := deviceID + "_device_" + GenerateID()
+	if di.cfg.MQTTClientID != "" {
+		clientID = di.cfg.MQTTClientID + "-" + deviceID + "-" + GenerateID()
+	}
+
 	dial := internal.MQTTConnectConfig{
 		Connection: internal.MQTTConnectionSpec{
-			ClientID:            deviceID + "_device_" + GenerateID(),
-			Username:            deviceID,
-			Password:            deviceSecret,
-			UseTLS:              useTLS,
-			Broker:              broker,
-			Port:                port,
-			Protocol:            protocol,
-			ConnectTimeout:      3 * time.Second,
-			DisableConnectRetry: true,
-			KeepAlive:           60 * time.Second,
+			ClientID:       clientID,
+			Username:       deviceID,
+			Password:       deviceSecret,
+			UseTLS:         useTLS,
+			Broker:         broker,
+			Port:           port,
+			Protocol:       protocol,
+			ConnectTimeout: 30 * time.Second,
+			KeepAlive:      60 * time.Second,
 		},
 		Hooks: &internal.MQTTSessionHooks{
 			OnConnect: func(client mqtt.Client) {
@@ -267,10 +274,13 @@ func (di *deviceInterfaceImpl) Connect(deviceID, deviceSecret string) {
 	}
 	if useTLS {
 		dial.TLS = &internal.MQTTTLSParams{
-			BrokerHost: broker,
-			SkipVerify: di.cfg.MQTTTLSSkipVerify,
-			ServerName: di.cfg.MQTTTLSServerName,
-			CACertPath: di.cfg.MQTTTLSCACert,
+			BrokerHost:      broker,
+			SkipVerify:      di.cfg.MQTTTLSSkipVerify,
+			ServerName:      di.cfg.MQTTTLSServerName,
+			CACertPath:      di.cfg.MQTTTLSCACert,
+			RequireEdgeCert: di.cfg.MQTTTLSRequireEdgeCert,
+			EdgeCertPath:    di.cfg.MQTTTLSEdgeCert,
+			EdgeKeyPath:     di.cfg.MQTTTLSEdgeKey,
 		}
 	}
 

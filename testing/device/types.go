@@ -39,16 +39,24 @@ type DeviceState struct {
 	MQTTStatus           string           `json:"mqttStatus"`
 }
 
-// Config holds MQTT connection configuration
+// Config holds HTTP listen address and MQTT dial settings.
+// Env keys and defaults match services/device/config.go where applicable.
+// MQTT username/password are not configured here: Connect(deviceID, deviceSecret) supplies broker credentials (per-device), unlike the device service which uses a single service account from env.
 type Config struct {
-	HTTPPort          string
-	MQTTBroker        string
-	MQTTUseTLS        bool
-	MQTTPort          int
-	MQTTTLSPort       int
-	MQTTTLSCACert     string
-	MQTTTLSSkipVerify bool
-	MQTTTLSServerName string
+	HTTPPort string
+
+	MQTTBroker             string
+	MQTTUseTLS             bool
+	MQTTPort               int
+	MQTTTLSPort            int
+	MQTTTLSProtocol        string
+	MQTTClientID           string
+	MQTTTLSSkipVerify      bool
+	MQTTTLSServerName      string
+	MQTTTLSCACert          string
+	MQTTTLSRequireEdgeCert bool
+	MQTTTLSEdgeCert        string
+	MQTTTLSEdgeKey         string
 }
 
 // Proto marshal/unmarshal options (shared)

@@ -25,17 +25,8 @@ type HTTPDevice struct {
 }
 
 // NewHTTPDevice creates a new HTTP device instance
-func NewHTTPDevice(deviceID, secret string, config *Config) *HTTPDevice {
-	// Create device interface config from runtime config
-	deviceCfg := &devicepkg.Config{
-		MQTTBroker:        config.MQTTBroker,
-		MQTTUseTLS:        config.MQTTUseTLS,
-		MQTTPort:          config.MQTTPort,
-		MQTTTLSPort:       config.MQTTTLSPort,
-		MQTTTLSCACert:     config.MQTTTLSCACert,
-		MQTTTLSSkipVerify: config.MQTTTLSSkipVerify,
-		MQTTTLSServerName: config.MQTTTLSServerName,
-	}
+func NewHTTPDevice(deviceID, secret string, config devicepkg.Config) *HTTPDevice {
+	deviceCfg := config
 
 	device := &HTTPDevice{
 		DeviceID:          deviceID,
@@ -45,7 +36,7 @@ func NewHTTPDevice(deviceID, secret string, config *Config) *HTTPDevice {
 	}
 
 	// Create device interface with this device as the callback
-	device.device = devicepkg.NewDeviceInterface(device, deviceCfg, deviceID)
+	device.device = devicepkg.NewDeviceInterface(device, &deviceCfg, deviceID)
 
 	return device
 }

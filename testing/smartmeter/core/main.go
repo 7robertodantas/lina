@@ -27,7 +27,7 @@ func main() {
 		logger.Fatal(ctx, "DEVICE_SECRET environment variable is required", nil)
 	}
 
-	meter := NewSmartMeter(deviceID, deviceSecret, cfg)
+	meter := NewSmartMeter(deviceID, deviceSecret, &cfg)
 
 	// Create WebSocket handler
 	wsHandler := NewWebSocketHandler(meter)

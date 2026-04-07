@@ -14,7 +14,7 @@ import (
 
 var logger = internal.NewLogger("httpdevices")
 
-var config = LoadConfig()
+var config = devicepkg.LoadConfig()
 
 // Store active connections
 type DeviceSession struct {

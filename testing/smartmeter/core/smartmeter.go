@@ -56,17 +56,8 @@ func NewSmartMeter(deviceID, deviceSecret string, cfg *Config) *SmartMeter {
 		savedApplianceStates: make(map[string]bool),
 	}
 	// attach device interface - SmartMeter implements DeviceCallback directly
-	deviceCfg := &devicepkg.Config{
-		HTTPPort:          cfg.HTTPPort,
-		MQTTBroker:        cfg.MQTTBroker,
-		MQTTUseTLS:        cfg.MQTTUseTLS,
-		MQTTPort:          cfg.MQTTPort,
-		MQTTTLSPort:       cfg.MQTTTLSPort,
-		MQTTTLSCACert:     cfg.MQTTTLSCACert,
-		MQTTTLSSkipVerify: cfg.MQTTTLSSkipVerify,
-		MQTTTLSServerName: cfg.MQTTTLSServerName,
-	}
-	m.device = devicepkg.NewDeviceInterface(m, deviceCfg, deviceID)
+	dc := cfg.Config
+	m.device = devicepkg.NewDeviceInterface(m, &dc, deviceID)
 	// Initialize device context with default config (DeviceInterface will manage it)
 	// The config will be updated via MQTT retained message, but we set a default here
 	// Note: DeviceInterface doesn't expose ctx, so we'll rely on MQTT config update
