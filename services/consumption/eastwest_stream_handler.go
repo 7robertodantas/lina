@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -20,6 +21,8 @@ var (
 type EastWestStreamHandler struct {
 	repository *ConsumptionRepository
 	publisher  *EastWestStreamPublisher
+	// persistMu serializes SQLite debit transactions so the main consumer and retry loop do not contend on the writer lock.
+	persistMu sync.Mutex
 }
 
 // NewEastWestStreamHandler creates a new east-west stream handler
@@ -49,37 +52,6 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 			"price_per_unit_msat": usage.GetPricePerUnitMsat(),
 		})
 
-	tx, err := esh.repository.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	// Check idempotency: if report_id already exists, skip
-	exists, err := esh.repository.CheckReportExists(ctx, tx, reportID)
-	if err != nil {
-		return err
-	}
-	if exists {
-		// Report already processed, skip (idempotency)
-		logger.WithDeviceID(deviceID).
-			DebugWithFields(ctx, "Report already processed, skipping (idempotency)", map[string]interface{}{
-				"report_id": reportID,
-			})
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("failed to commit: %w", err)
-		}
-		return nil
-	}
-
-	logger.WithDeviceID(deviceID).
-		InfoWithFields(ctx, "Processing report", map[string]interface{}{
-			"report_id":  reportID,
-			"measure":    measure,
-			"unit":       usage.GetUnit(),
-			"price_msat": pricePerUnitMsat,
-		})
-
 	// Calculate exact debit amount from this usage report
 	usageDebitMsat := float64(pricePerUnitMsat) * measure
 
@@ -93,22 +65,46 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 		debitMsat = 1 // Minimum 1 msat
 	}
 
-	// Extract trace context to store in database
 	carrier := make(propagation.MapCarrier)
 	consumptionPropagator.Inject(ctx, carrier)
 
-	// Create consumption record with rounded-up amount and fractional part for auditability
-	// We store the original device/MQTT timestamp from the usage record,
-	// while created_at in the DB will reflect the record_timestamp.
-	err = esh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
+	inserted, err := func() (bool, error) {
+		esh.persistMu.Lock()
+		defer esh.persistMu.Unlock()
+
+		tx, err := esh.repository.BeginTx(ctx, nil)
+		if err != nil {
+			return false, fmt.Errorf("failed to begin transaction: %w", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		inserted, err := esh.repository.CreateConsumptionRecord(ctx, tx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
+		if err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("failed to commit transaction: %w", err)
+		}
+		return inserted, nil
+	}()
 	if err != nil {
 		return err
 	}
-
-	// Commit transaction
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	if !inserted {
+		logger.WithDeviceID(deviceID).
+			DebugWithFields(ctx, "Report already processed, skipping (idempotency)", map[string]interface{}{
+				"report_id": reportID,
+			})
+		return nil
 	}
+
+	logger.WithDeviceID(deviceID).
+		InfoWithFields(ctx, "Processing report", map[string]interface{}{
+			"report_id":  reportID,
+			"measure":    measure,
+			"unit":       usage.GetUnit(),
+			"price_msat": pricePerUnitMsat,
+		})
 
 	// Publish consumption event
 	// Use explicit timestamp semantics:

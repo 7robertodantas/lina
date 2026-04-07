@@ -15,3 +15,5 @@ lina_nanomq_websocket_plain_enable: true
 lina_nanomq_websocket_plain_port: 9001
 lina_nanomq_websocket_tls_enable: true
 lina_nanomq_websocket_tls_port: 9002
+# HTTP auth callbacks to device-service; increase if many clients connect at once (NanoMQ client pool).
+lina_nanomq_http_auth_pool_size: 128

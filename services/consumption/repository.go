@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +15,10 @@ import (
 type ConsumptionRepository struct {
 	db        *sql.DB
 	sqlTracer *internal.SQLTracer
+
+	insertConsumptionStmt *sql.Stmt
+	insertOutboxStmt      *sql.Stmt
+	markPublishedStmt     *sql.Stmt
 }
 
 // NewConsumptionRepository creates and initializes the SQLite database with schema
@@ -74,9 +77,7 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 			traceparent TEXT,
 			created_at INTEGER NOT NULL
 		)`,
-		// Indexes for consumption_records
-		`CREATE INDEX IF NOT EXISTS idx_device_id ON consumption_records (device_id)`,
-		// Index for consumption_outbox
+		// Index for consumption_outbox polling (published=0 ordered by created_at)
 		`CREATE INDEX IF NOT EXISTS idx_published_created ON consumption_outbox (published, created_at)`,
 	}
 
@@ -95,6 +96,36 @@ func NewConsumptionRepository(dbPath string, busyTimeoutMS int) (*ConsumptionRep
 		}
 	}
 
+	insertConsumptionSQL := `
+		INSERT OR IGNORE INTO consumption_records (
+			report_id, device_id, debit_msat, fractional_msat,
+			measure, price_per_unit_msat, unit, timestamp, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	repo.insertConsumptionStmt, err = db.PrepareContext(ctx, insertConsumptionSQL)
+	if err != nil {
+		return nil, fmt.Errorf("prepare insert consumption: %w", err)
+	}
+
+	insertOutboxSQL := `
+		INSERT INTO consumption_outbox (report_id, published, traceparent, created_at)
+		VALUES (?, 0, ?, ?)`
+	repo.insertOutboxStmt, err = db.PrepareContext(ctx, insertOutboxSQL)
+	if err != nil {
+		_ = repo.insertConsumptionStmt.Close()
+		return nil, fmt.Errorf("prepare insert outbox: %w", err)
+	}
+
+	markPublishedSQL := `
+		UPDATE consumption_outbox
+		SET published = 1, published_at = ?
+		WHERE report_id = ?`
+	repo.markPublishedStmt, err = db.PrepareContext(ctx, markPublishedSQL)
+	if err != nil {
+		_ = repo.insertConsumptionStmt.Close()
+		_ = repo.insertOutboxStmt.Close()
+		return nil, fmt.Errorf("prepare mark published: %w", err)
+	}
+
 	return repo, nil
 }
 
@@ -108,61 +139,42 @@ type OutboxEvent struct {
 	TraceContext map[string]string
 }
 
-// CheckReportExists checks if a report_id already exists (for idempotency)
-func (r *ConsumptionRepository) CheckReportExists(ctx context.Context, tx *sql.Tx, reportID string) (bool, error) {
-	query := `SELECT report_id FROM consumption_records WHERE report_id = ?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "consumption_records"),
-		attribute.String("report.id", reportID),
-	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] check report exists", attrs, tx, query, reportID)
-
-	var existingReportID string
-	err := row.Scan(&existingReportID)
-
-	if err == nil {
-		return true, nil
-	} else if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	return false, fmt.Errorf("failed to check idempotency: %w", err)
-}
-
-// CreateConsumptionRecord creates a new consumption record and outbox entry in a transaction
-// Only creates outbox entry if debitMsat >= 1 (actual debit will occur)
-// fractionalMsat is the fractional part that was rounded up (for auditability)
-func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx *sql.Tx, reportID, deviceID string, debitMsat int64, fractionalMsat float64, measure float64, pricePerUnitMsat int64, unit, timestamp string, traceContext map[string]string) error {
+// CreateConsumptionRecord inserts a consumption row and optional outbox row inside tx.
+// Idempotency: uses INSERT OR IGNORE on report_id (PRIMARY KEY). Returns inserted=false if duplicate.
+// Only creates an outbox entry when inserted=true and debitMsat >= 1.
+func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx *sql.Tx, reportID, deviceID string, debitMsat int64, fractionalMsat float64, measure float64, pricePerUnitMsat int64, unit, timestamp string, traceContext map[string]string) (inserted bool, err error) {
 	now := time.Now().Unix()
 
-	// Insert into consumption_records
 	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "INSERT"),
+		attribute.String("db.operation", "INSERT OR IGNORE"),
 		attribute.String("db.table", "consumption_records"),
 		attribute.String("report.id", reportID),
 		attribute.String("device.id", deviceID),
 		attribute.Int64("debit_msat", debitMsat),
 		attribute.Float64("fractional_msat", fractionalMsat),
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create consumption record", attrs, tx, `
-		INSERT INTO consumption_records (
-			report_id, device_id, debit_msat, fractional_msat,
-			measure, price_per_unit_msat, unit, timestamp, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
+	tcStmt := tx.StmtContext(ctx, r.insertConsumptionStmt)
+	defer tcStmt.Close()
+
+	res, err := r.sqlTracer.ExecStmtWithSpan(ctx, "[repository] create consumption record", attrs, tcStmt,
 		reportID, deviceID, debitMsat, fractionalMsat,
 		measure, pricePerUnitMsat, unit, timestamp, now,
 	)
 	if err != nil {
-		return fmt.Errorf("failed to insert consumption record: %w", err)
+		return false, fmt.Errorf("failed to insert consumption record: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("rows affected: %w", err)
+	}
+	if n == 0 {
+		return false, nil
 	}
 
-	// Only insert into outbox if there's an actual debit to publish (>= 1 msat)
-	// If debitMsat is 0, the fractional amount was accumulated but not debited yet
 	if debitMsat >= 1 {
-		// Extract W3C traceparent from trace context (single string, not JSON)
 		traceparent := ""
 		if traceContext != nil {
-			// W3C Trace Context uses "traceparent" key
 			traceparent = traceContext["traceparent"]
 		}
 
@@ -171,17 +183,17 @@ func (r *ConsumptionRepository) CreateConsumptionRecord(ctx context.Context, tx 
 			attribute.String("db.table", "consumption_outbox"),
 			attribute.String("report.id", reportID),
 		}
-		_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create outbox entry", outboxAttrs, tx, `
-			INSERT INTO consumption_outbox (report_id, published, traceparent, created_at)
-			VALUES (?, 0, ?, ?)`,
+		toStmt := tx.StmtContext(ctx, r.insertOutboxStmt)
+		defer toStmt.Close()
+		_, err := r.sqlTracer.ExecStmtWithSpan(ctx, "[repository] create outbox entry", outboxAttrs, toStmt,
 			reportID, traceparent, now,
 		)
 		if err != nil {
-			return fmt.Errorf("failed to insert into outbox: %w", err)
+			return false, fmt.Errorf("failed to insert into outbox: %w", err)
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // GetUnpublishedOutboxEvents retrieves unpublished events from the outbox
@@ -231,18 +243,15 @@ func (r *ConsumptionRepository) GetUnpublishedOutboxEvents(ctx context.Context, 
 	return events, nil
 }
 
-// MarkOutboxAsPublished marks an outbox entry as published
+// MarkOutboxAsPublished marks an outbox entry as published (separate write from the debit insert).
+// Ordering is intentional: consumption row is committed before Redis publish; this UPDATE runs after a successful publish.
 func (r *ConsumptionRepository) MarkOutboxAsPublished(ctx context.Context, reportID string) error {
-	query := `
-		UPDATE consumption_outbox
-		SET published = 1, published_at = ?
-		WHERE report_id = ?`
 	attrs := []attribute.KeyValue{
 		attribute.String("db.operation", "UPDATE"),
 		attribute.String("db.table", "consumption_outbox"),
 		attribute.String("report.id", reportID),
 	}
-	if _, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] mark outbox as published", attrs, r.db, query, time.Now().Unix(), reportID); err != nil {
+	if _, err := r.sqlTracer.ExecStmtWithSpan(ctx, "[repository] mark outbox as published", attrs, r.markPublishedStmt, time.Now().Unix(), reportID); err != nil {
 		return fmt.Errorf("failed to mark report %s as published: %w", reportID, err)
 	}
 	return nil
@@ -281,6 +290,15 @@ func (r *ConsumptionRepository) BeginTx(ctx context.Context, opts *sql.TxOptions
 
 // Close closes the database connection
 func (r *ConsumptionRepository) Close() error {
+	if r.insertConsumptionStmt != nil {
+		_ = r.insertConsumptionStmt.Close()
+	}
+	if r.insertOutboxStmt != nil {
+		_ = r.insertOutboxStmt.Close()
+	}
+	if r.markPublishedStmt != nil {
+		_ = r.markPublishedStmt.Close()
+	}
 	return r.db.Close()
 }
 

@@ -2,10 +2,7 @@ package device
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -206,33 +203,6 @@ func (di *deviceInterfaceImpl) GetAuthorization() *Authorization {
 	return di.ctx.getAuthorization()
 }
 
-// createTLSConfig creates TLS configuration for MQTT connection
-func (di *deviceInterfaceImpl) createTLSConfig() (*tls.Config, error) {
-	caFile := di.cfg.MQTTTLSCACert
-	skipVerify := di.cfg.MQTTTLSSkipVerify
-	serverName := di.cfg.MQTTTLSServerName
-
-	// Load CA cert
-	caCert, err := os.ReadFile(caFile)
-	if err != nil {
-		return nil, err
-	}
-
-	caCertPool := x509.NewCertPool()
-	if !caCertPool.AppendCertsFromPEM(caCert) {
-		return nil, err
-	}
-
-	tlsConfig := &tls.Config{
-		RootCAs:            caCertPool,
-		InsecureSkipVerify: skipVerify,
-		ServerName:         serverName,
-	}
-	internal.ApplyNanomqMQTTTLSCompat(tlsConfig)
-
-	return tlsConfig, nil
-}
-
 // Connect establishes MQTT connection
 func (di *deviceInterfaceImpl) Connect(deviceID, deviceSecret string) {
 	// Check if already connected
@@ -252,91 +222,81 @@ func (di *deviceInterfaceImpl) Connect(deviceID, deviceSecret string) {
 
 	useTLS := di.cfg.MQTTUseTLS
 	broker := di.cfg.MQTTBroker
-	var brokerURL string
-
+	var port int
+	var protocol string
 	if useTLS {
-		brokerURL = fmt.Sprintf("ssl://%s:%d", broker, di.cfg.MQTTTLSPort)
+		port = di.cfg.MQTTTLSPort
+		protocol = "ssl"
 	} else {
-		brokerURL = fmt.Sprintf("tcp://%s:%d", broker, di.cfg.MQTTPort)
+		port = di.cfg.MQTTPort
+		protocol = "tcp"
 	}
 
-	opts := mqtt.NewClientOptions()
-	opts.AddBroker(brokerURL)
-	opts.SetClientID(deviceID + "_device_" + GenerateID())
-	opts.SetUsername(deviceID)
-	opts.SetPassword(deviceSecret)
-	opts.SetCleanSession(true)
-	opts.SetAutoReconnect(true)
-
-	// Configure TLS if enabled
+	dial := internal.MQTTConnectConfig{
+		Connection: internal.MQTTConnectionSpec{
+			ClientID:            deviceID + "_device_" + GenerateID(),
+			Username:            deviceID,
+			Password:            deviceSecret,
+			UseTLS:              useTLS,
+			Broker:              broker,
+			Port:                port,
+			Protocol:            protocol,
+			ConnectTimeout:      3 * time.Second,
+			DisableConnectRetry: true,
+			KeepAlive:           60 * time.Second,
+		},
+		Hooks: &internal.MQTTSessionHooks{
+			OnConnect: func(client mqtt.Client) {
+				di.setMQTTStatus("connected")
+				di.callbacks.OnMQTTStatus("connected")
+				di.callbacks.OnLog("Connected to MQTT broker", "success")
+				di.subscribeToTopics()
+				di.completeConnectionSequence()
+			},
+			OnConnectionLost: func(client mqtt.Client, err error) {
+				di.setMQTTStatus("disconnected")
+				di.callbacks.OnMQTTStatus("disconnected")
+				di.callbacks.OnLog("MQTT connection lost: "+err.Error(), "error")
+				currentStatus := di.ctx.getDeviceStatus()
+				if currentStatus != "OFFLINE" {
+					di.setDeviceStatus("OFFLINE")
+					di.callbacks.OnDeviceStatus("OFFLINE")
+				}
+			},
+		},
+	}
 	if useTLS {
-		tlsConfig, err := di.createTLSConfig()
-		if err != nil {
-			di.callbacks.OnLog("Failed to create TLS config: "+err.Error(), "error")
-			return
+		dial.TLS = &internal.MQTTTLSParams{
+			BrokerHost: broker,
+			SkipVerify: di.cfg.MQTTTLSSkipVerify,
+			ServerName: di.cfg.MQTTTLSServerName,
+			CACertPath: di.cfg.MQTTTLSCACert,
 		}
-		opts.SetTLSConfig(tlsConfig)
 	}
 
-	// Set connection status callback
-	opts.SetOnConnectHandler(func(client mqtt.Client) {
-		di.setMQTTStatus("connected")
-		di.callbacks.OnMQTTStatus("connected")
-		di.callbacks.OnLog("Connected to MQTT broker", "success")
-		// Subscribe to topics and complete startup sequence
-		di.subscribeToTopics()
-		di.completeConnectionSequence()
-	})
-	opts.SetConnectionLostHandler(func(client mqtt.Client, err error) {
-		di.setMQTTStatus("disconnected")
-		di.callbacks.OnMQTTStatus("disconnected")
-		di.callbacks.OnLog("MQTT connection lost: "+err.Error(), "error")
-		// Set device status to OFFLINE when connection is lost
-		currentStatus := di.ctx.getDeviceStatus()
-		if currentStatus != "OFFLINE" {
-			di.setDeviceStatus("OFFLINE")
-			di.callbacks.OnDeviceStatus("OFFLINE")
-		}
-	})
-
-	di.mqttClient = mqtt.NewClient(opts)
-
-	// Set device status to STARTING and connecting status
 	di.setDeviceStatus("STARTING")
 	di.callbacks.OnDeviceStatus("STARTING")
 	di.setMQTTStatus("connecting")
 	di.callbacks.OnMQTTStatus("connecting")
 	di.callbacks.OnLog("Connecting to MQTT broker...", "info")
 
-	// Use WaitTimeout to avoid blocking indefinitely (reduced to 3 seconds for faster failure detection)
-	token := di.mqttClient.Connect()
-	if token.WaitTimeout(3 * time.Second) {
-		if token.Error() != nil {
-			err := token.Error()
-			errMsg := err.Error()
-			di.setMQTTStatus("error")
-			di.callbacks.OnMQTTStatus("error")
-			di.callbacks.OnLog("MQTT connection failed: "+errMsg, "error")
-			// Set device status back to OFFLINE when connection fails
-			di.setDeviceStatus("OFFLINE")
-			di.callbacks.OnDeviceStatus("OFFLINE")
-			if isMQTTAuthError(errMsg) {
-				di.callbacks.OnLog("MQTT credentials rejected: shutting down", "error")
-				// Call shutdown if callback supports it
-				if shutdownCallback, ok := di.callbacks.(interface{ Shutdown() }); ok {
-					shutdownCallback.Shutdown()
-				}
-			}
-		}
-		// If no error, connection succeeded - OnConnectHandler will be called
-	} else {
-		// Timeout occurred
+	client, err := internal.DialMQTT(dial)
+	if err != nil {
+		errMsg := err.Error()
 		di.setMQTTStatus("error")
 		di.callbacks.OnMQTTStatus("error")
-		di.callbacks.OnLog("MQTT connection timeout after 3 seconds", "error")
+		di.callbacks.OnLog("MQTT connection failed: "+errMsg, "error")
 		di.setDeviceStatus("OFFLINE")
 		di.callbacks.OnDeviceStatus("OFFLINE")
+		if isMQTTAuthError(errMsg) {
+			di.callbacks.OnLog("MQTT credentials rejected: shutting down", "error")
+			if shutdownCallback, ok := di.callbacks.(interface{ Shutdown() }); ok {
+				shutdownCallback.Shutdown()
+			}
+		}
+		return
 	}
+	di.mqttClient = client
 }
 
 func isMQTTAuthError(errMsg string) bool {

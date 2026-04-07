@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	mqttpb "github.com/robertodantas/lina/proto/gen/model/mqtt"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/errgroup"
 )
 
 // CreateDeviceRequest represents the request body for creating a device
@@ -268,13 +270,40 @@ func (nb *NorthboundInterface) publishDeviceConfig(ctx context.Context, device *
 		return fmt.Errorf("failed to marshal config payload: %w", err)
 	}
 
-	// Publish to /devices/{device_id}/config (retained message)
+	// Publish to /devices/{device_id}/config (retained message). QoS 0 avoids broker PUBACK
+	// backlog under large batches while retained delivery still applies for new subscribers.
 	configTopic := fmt.Sprintf("/devices/%s/config", device.DeviceID)
-	if err := nb.mqttClient.Publish(ctx, configTopic, 1, true, configJSON); err != nil {
+	if err := nb.mqttClient.Publish(ctx, configTopic, 0, true, configJSON); err != nil {
 		return fmt.Errorf("failed to publish config: %w", err)
 	}
 
 	return nil
+}
+
+// maxConcurrentMQTTConfigPublishes caps parallel config publishes so bursts stay within
+// what the broker can handle; each publish still runs in its own goroutine (via errgroup).
+const maxConcurrentMQTTConfigPublishes = 32
+
+// publishDeviceConfigsInParallel publishes configs with bounded concurrency. Failures are
+// logged; the returned count is successful publishes only.
+func (nb *NorthboundInterface) publishDeviceConfigsInParallel(ctx context.Context, devices []*Device) int {
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(maxConcurrentMQTTConfigPublishes)
+	var ok atomic.Int32
+	for _, d := range devices {
+		device := d
+		g.Go(func() error {
+			if err := nb.publishDeviceConfig(gctx, device); err != nil {
+				logger.WithDeviceID(device.DeviceID).
+					Warnf(gctx, "Failed to publish device config on southbound mqtt: %v", err)
+				return nil
+			}
+			ok.Add(1)
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return int(ok.Load())
 }
 
 // RepublishAllDeviceConfigs republishes the configuration for all devices in the repository.
@@ -301,15 +330,7 @@ func (nb *NorthboundInterface) RepublishAllDeviceConfigs(ctx context.Context) er
 		page++
 		logger.Infof(ctx, "Republishing configs on southbound mqtt for page %d (offset=%d, count=%d)", page, offset, len(devices))
 
-		pageSuccess := 0
-		for _, device := range devices {
-			if err := nb.publishDeviceConfig(ctx, device); err != nil {
-				logger.WithDeviceID(device.DeviceID).
-					Warnf(ctx, "Failed to republish config on southbound mqtt: %v", err)
-				continue
-			}
-			pageSuccess++
-		}
+		pageSuccess := nb.publishDeviceConfigsInParallel(ctx, devices)
 
 		totalSuccess += pageSuccess
 		offset += len(devices)
@@ -474,13 +495,8 @@ func (nb *NorthboundInterface) createDevicesBatch(c *gin.Context) {
 			end = len(devices)
 		}
 		batch := devices[i:end]
-		for _, device := range batch {
-			if err := nb.publishDeviceConfig(ctx, device); err != nil {
-				logger.Warnf(ctx, "Failed to publish config for device %s: %v", device.DeviceID, err)
-				// Continue even if publishing fails — devices are already in the database with stored credentials
-			}
-		}
-		logger.Infof(ctx, "Published configs for device batch %d-%d", i, end-1)
+		pageOK := nb.publishDeviceConfigsInParallel(ctx, batch)
+		logger.Infof(ctx, "Published configs for device batch %d-%d (%d/%d succeeded)", i, end-1, pageOK, len(batch))
 	}
 
 	c.JSON(http.StatusCreated, gin.H{

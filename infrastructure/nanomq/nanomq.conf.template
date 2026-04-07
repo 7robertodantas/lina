@@ -65,7 +65,8 @@ auth {
 
 		timeout = 5s
 		connect_timeout = 5s
-		pool_size = 32
+		# Outbound HTTP connections to device-service auth; raise for many simultaneous MQTT CONNECTs.
+		pool_size = 128
 		cache_ttl = 60s
 	}
 }

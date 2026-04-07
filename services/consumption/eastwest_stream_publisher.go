@@ -128,7 +128,8 @@ func (esp *EastWestStreamPublisher) publishOutboxEvents(ctx context.Context) err
 		return nil // No events to publish
 	}
 
-	// Publish each event
+	// Publish each event; mark after each successful publish so a later DB failure does not
+	// leave every row unpublished (which would republish the whole batch to Redis).
 	for _, e := range events {
 		// Extract parent context from stored trace context
 		var publishCtx context.Context
@@ -150,11 +151,9 @@ func (esp *EastWestStreamPublisher) publishOutboxEvents(ctx context.Context) err
 			continue
 		}
 
-		// Mark as published
 		if err := esp.repository.MarkOutboxAsPublished(ctx, e.ReportID); err != nil {
 			logger.WithDeviceID(e.DeviceID).
 				Errorf(ctx, "Failed to mark report %s as published: %v", e.ReportID, err)
-			// Continue anyway, we'll retry on next run
 		}
 	}
 

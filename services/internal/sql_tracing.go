@@ -45,6 +45,21 @@ func (st *SQLTracer) ExecWithSpan(ctx context.Context, spanName string, attrs []
 	return result, nil
 }
 
+// ExecStmtWithSpan executes a prepared statement with automatic tracing
+func (st *SQLTracer) ExecStmtWithSpan(ctx context.Context, spanName string, attrs []attribute.KeyValue, stmt *sql.Stmt, args ...interface{}) (sql.Result, error) {
+	ctx, span := st.tracer.Start(ctx, spanName, trace.WithAttributes(attrs...))
+	defer span.End()
+
+	result, err := stmt.ExecContext(ctx, args...)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, err
+	}
+	span.SetStatus(codes.Ok, "success")
+	return result, nil
+}
+
 // QueryWithSpan executes a SQL query with automatic tracing
 func (st *SQLTracer) QueryWithSpan(ctx context.Context, spanName string, attrs []attribute.KeyValue, exec SQLExecutor, query string, args ...interface{}) (*sql.Rows, error) {
 	ctx, span := st.tracer.Start(ctx, spanName, trace.WithAttributes(attrs...))
