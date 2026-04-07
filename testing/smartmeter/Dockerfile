@@ -25,7 +25,7 @@ FROM golang:1.25-alpine AS core-builder
     # Copy Smart Meter Core files
     COPY testing/smartmeter/core/go.mod testing/smartmeter/core/go.sum ./testing/smartmeter/core/
     WORKDIR /workspace/testing/smartmeter/core
-    RUN go mod download
+    RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
     # Copy Smart Meter Core source code
     COPY testing/smartmeter/core/*.go ./

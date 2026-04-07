@@ -16,7 +16,7 @@ FROM golang:1.25-alpine AS builder
     # Copy target service files
     COPY services/${SERVICE}/go.mod services/${SERVICE}/go.sum ./services/${SERVICE}/
     WORKDIR /workspace/services/${SERVICE}
-    RUN go mod download
+    RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
     # Copy target service source code
     COPY services/${SERVICE} ./
