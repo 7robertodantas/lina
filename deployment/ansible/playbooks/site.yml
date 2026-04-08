@@ -30,7 +30,7 @@
   roles:
     - role: common
     - role: redis
-    - role: nanomq
+    - role: mosquitto
     - role: lina-services
     - role: caddy
     - role: monitoring
