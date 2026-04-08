@@ -101,7 +101,10 @@ func TestRegressionDuplicateReportIdempotent(t *testing.T) {
 		return di.IsConnected() && di.GetDeviceConfig() != nil && di.HasActiveAuthorization()
 	}, DiagMQTT(env, deviceID, di, nil))
 
-	rid := "fixed-report-id-e2e-idem"
+	// report_id is globally unique in consumption DB (PRIMARY KEY), not per device.
+	// A constant id collides with rows from earlier runs/other devices and INSERT OR IGNORE
+	// then yields no row for this device_id — scope the id to this device.
+	rid := deviceID + "-idem-fixed"
 	t.Logf("e2e: publish same report_id twice: %s", rid)
 	di.PublishUsageReport(rid, 0.5)
 	time.Sleep(800 * time.Millisecond)

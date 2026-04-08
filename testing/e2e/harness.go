@@ -18,6 +18,27 @@ import (
 
 const e2eWaitLogInterval = 3 * time.Second
 
+// requestBodyCloser runs cancel when the response body is closed. net/http ties
+// Body.Read to the request context; deferring cancel() at the end of GET/POSTJSON
+// cancels that context before the caller reads the body and yields context.Canceled.
+type requestBodyCloser struct {
+	rc     io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func (b *requestBodyCloser) Read(p []byte) (int, error) {
+	return b.rc.Read(p)
+}
+
+func (b *requestBodyCloser) Close() error {
+	err := b.rc.Close()
+	if b.cancel != nil {
+		b.cancel()
+		b.cancel = nil
+	}
+	return err
+}
+
 // Env holds connectivity settings for integration tests against a running stack
 // (e.g. deployment/docker-compose.evaluation.edge.yml + Caddy on 8080, Mosquitto TLS on 8883).
 //
@@ -32,11 +53,11 @@ const e2eWaitLogInterval = 3 * time.Second
 //   - LINA_E2E_MQTT_TLS_SERVER_NAME: TLS ServerName if cert does not match host (e.g. mosquitto).
 //   - LINA_E2E_DEVICE_TRACE: if "1", RecordingCallback forwards all device OnLog lines (verbose).
 type Env struct {
-	BaseURL       string
-	ServiceToken  string
-	MQTTHost      string
-	MQTTTLSPort   int
-	MQTTCACert    string
+	BaseURL           string
+	ServiceToken      string
+	MQTTHost          string
+	MQTTTLSPort       int
+	MQTTCACert        string
 	MQTTSkipTLSVerify bool
 	MQTTServerName    string
 }
@@ -163,9 +184,9 @@ func (e Env) POSTJSON(t *testing.T, path string, body any, extraHeaders map[stri
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.BaseURL+path, bytes.NewReader(b))
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -174,17 +195,19 @@ func (e Env) POSTJSON(t *testing.T, path string, body any, extraHeaders map[stri
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
+	resp.Body = &requestBodyCloser{rc: resp.Body, cancel: cancel}
 	return resp
 }
 
 func (e Env) GET(t *testing.T, path string, extraHeaders map[string]string) *http.Response {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.BaseURL+path, nil)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
 	for k, v := range extraHeaders {
@@ -192,8 +215,10 @@ func (e Env) GET(t *testing.T, path string, extraHeaders map[string]string) *htt
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
+	resp.Body = &requestBodyCloser{rc: resp.Body, cancel: cancel}
 	return resp
 }
 
