@@ -14,7 +14,6 @@ listeners.ssl {
 	cacertfile = "/etc/certs/ca.crt"
 	verify_peer = false
 	fail_if_no_peer_cert = false
-	tls_version = tlsv1.2
 }
 
 http_server {
@@ -69,25 +68,4 @@ auth {
 		pool_size = 128
 		cache_ttl = 60s
 	}
-}
-
-# Per-message topic ACL using ${username} placeholder.
-# The device service user is a superuser (super_req returns 200) so it bypasses these rules.
-# Device clients are restricted to their own /devices/{username}/... topics.
-authorization {
-	no_match = deny
-	deny_action = disconnect
-	sources = [
-		{
-			type = file
-			rules = [
-				{"permit": "deny",  "username": "#", "action": "subscribe", "topics": ["$SYS/#"]}
-				{"permit": "allow", "username": "@DEVICE_SERVICE_USERNAME@", "action": "subscribe", "topics": ["/devices/+/heartbeat", "/devices/+/usage", "/devices/+/request/authorize", "/devices/+/request/invoice"]}
-				{"permit": "allow", "username": "@DEVICE_SERVICE_USERNAME@", "action": "publish",   "topics": ["/devices/+/response/authorize", "/devices/+/response/invoice", "/devices/+/events/invoice", "/devices/+/config", "/devices/+/control", "/devices/+/balance"]}
-				{"permit": "allow", "username": "#", "action": "publish",   "topics": ["/devices/${username}/heartbeat", "/devices/${username}/usage", "/devices/${username}/request/authorize", "/devices/${username}/request/invoice"]}
-				{"permit": "allow", "username": "#", "action": "subscribe", "topics": ["/devices/${username}/#"]}
-				{"permit": "deny"}
-			]
-		}
-	]
 }
