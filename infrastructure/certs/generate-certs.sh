@@ -13,6 +13,13 @@ fi
 CA_VALIDITY_DAYS="${CA_VALIDITY_DAYS:-3650}"      # Default: 10 years
 SERVER_VALIDITY_DAYS="${SERVER_VALIDITY_DAYS:-365}" # Default: 1 year
 
+# Extra Subject Alternative Name IPs for the server cert (LAN brokers, MQTT Explorer, etc.).
+# X.509 has no IP ranges—list each address. Space- or comma-separated, e.g.:
+#   EXTRA_TLS_IP_SANS="192.168.0.170" ./generate-certs.sh
+#   EXTRA_TLS_IP_SANS="192.168.0.170,192.168.0.171" FORCE_REGEN_SERVER=1 ./generate-certs.sh
+# FORCE_REGEN_SERVER=1 removes existing server.crt/server.key so SANs are rebuilt (CA unchanged).
+
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -54,15 +61,22 @@ generate_ca() {
 
 # Function to generate server certificate with SANs
 generate_server() {
+    if [ "${FORCE_REGEN_SERVER:-}" = "1" ] || [ "${FORCE_REGEN_SERVER:-}" = "true" ]; then
+        rm -f "$CERT_DIR/server.crt" "$CERT_DIR/server.key"
+    fi
     if check_cert "$CERT_DIR/server.crt"; then
         return 0
     fi
     
     echo "Generating server certificate with Subject Alternative Names (SANs)..."
+    if [ -n "${EXTRA_TLS_IP_SANS:-}" ]; then
+        echo "  Extra IP SANs: ${EXTRA_TLS_IP_SANS}"
+    fi
     
     # Create OpenSSL config file for server certificate with SANs
     SERVER_CONF="$CERT_DIR/server.conf"
-    cat > "$SERVER_CONF" <<EOF
+    {
+        cat <<'EOF'
 [req]
 distinguished_name = req_distinguished_name
 req_extensions = v3_req
@@ -87,6 +101,13 @@ DNS.5 = *.nanomq
 IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
+        ip_idx=3
+        while IFS= read -r ip || [ -n "$ip" ]; do
+            [ -z "$ip" ] && continue
+            printf 'IP.%d = %s\n' "$ip_idx" "$ip"
+            ip_idx=$((ip_idx + 1))
+        done < <(echo "${EXTRA_TLS_IP_SANS:-}" | tr ', ' '\n' | sed '/^[[:space:]]*$/d')
+    } > "$SERVER_CONF"
     
     openssl genrsa -out "$CERT_DIR/server.key" 2048
     openssl req -new -key "$CERT_DIR/server.key" \
@@ -137,4 +158,7 @@ echo "Certificate location: $CERT_DIR"
 echo ""
 echo "Note: Only ca.crt should be shared with client services."
 echo "      Private keys (ca.key, server.key) should be kept secure."
+echo ""
+echo "LAN / IP clients (e.g. MQTT Explorer to 192.168.x.x): add IPs via EXTRA_TLS_IP_SANS"
+echo "and regenerate the server cert (FORCE_REGEN_SERVER=1 or rm server.crt server.key)."
 
