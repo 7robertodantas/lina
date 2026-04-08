@@ -52,6 +52,7 @@ build_and_push() {
     local build_args=("$@")
     
     local image_name="${REGISTRY}-${service_name}:${TAG}"
+    local cache_ref="${REGISTRY}-${service_name}:buildcache"
     
     echo -e "${GREEN}Building ${service_name} for platforms: ${PLATFORMS}...${NC}"
     
@@ -61,6 +62,8 @@ build_and_push() {
             --platform "$PLATFORMS" \
             -t "$image_name" \
             -f "$dockerfile_path" \
+            --cache-from "type=registry,ref=${cache_ref}" \
+            --cache-to "type=registry,ref=${cache_ref},mode=max" \
             "${build_args[@]}" \
             --push \
             "$build_context"
@@ -69,6 +72,8 @@ build_and_push() {
             --platform "$PLATFORMS" \
             -t "$image_name" \
             -f "$dockerfile_path" \
+            --cache-from "type=registry,ref=${cache_ref}" \
+            --cache-to "type=registry,ref=${cache_ref},mode=max" \
             --push \
             "$build_context"
     fi
@@ -81,7 +86,7 @@ echo -e "${BLUE}=== Building infrastructure services ===${NC}\n"
 
 build_and_push "caddy" "./infrastructure/caddy/Dockerfile" "./infrastructure/caddy"
 build_and_push "redis" "./infrastructure/redis/Dockerfile" "./infrastructure/redis"
-build_and_push "nanomq" "./infrastructure/nanomq/Dockerfile" "./infrastructure/nanomq"
+build_and_push "mosquitto" "./infrastructure/mosquitto/Dockerfile" "./infrastructure/mosquitto"
 build_and_push "prometheus" "./infrastructure/prometheus/Dockerfile" "./infrastructure/prometheus"
 build_and_push "grafana" "./infrastructure/grafana/Dockerfile" "./infrastructure/grafana"
 

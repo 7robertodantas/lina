@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -57,18 +56,32 @@ func main() {
 	defer repo.Close()
 	logger.Info(ctx, "Device repository initialized")
 
-	// Bind the NanoMQ HTTP auth listener before connecting to MQTT so the broker's first
-	// auth_req cannot race an unopened socket.
-	authLn, err := net.Listen("tcp", cfg.MQTTAuthAddr)
+	// Initialize dynamic security service
+	logger.Info(ctx, "Initializing dynamic security service")
+	dynSecService, err := NewMQTTDynSecService(ctx, cfg)
 	if err != nil {
-		logger.Fatal(ctx, "Failed to listen for MQTT auth HTTP", err)
+		logger.Fatal(ctx, "Failed to initialize dynamic security service", err)
 	}
-	authServer := NewMQTTAuthServer(repo, cfg)
-	go func() {
-		if err := authServer.Serve(authLn); err != nil && err != http.ErrServerClosed {
-			logger.Fatalf(ctx, "MQTT auth server error: %v", err)
-		}
-	}()
+	defer dynSecService.Disconnect(ctx)
+
+	// Provision device service user with ACLs to subscribe to device topics.
+	deviceServiceUsername := cfg.MQTTUsername
+	if deviceServiceUsername == "" {
+		deviceServiceUsername = "device-service"
+	}
+	deviceServicePassword := cfg.MQTTPassword
+	if deviceServicePassword == "" {
+		deviceServicePassword = "device-service-password"
+		logger.Warn(ctx, "MQTT_PASSWORD not set, using default password")
+	}
+	if err := dynSecService.ProvisionDeviceService(ctx, deviceServiceUsername, deviceServicePassword); err != nil {
+		logger.Warnf(ctx, "Failed to provision device service user: %v", err)
+	}
+
+	// Provision shared role used for batch device onboarding.
+	if err := dynSecService.ProvisionDevicesAnyRole(ctx); err != nil {
+		logger.Warnf(ctx, "Failed to provision devices any role: %v", err)
+	}
 
 	// Connect to MQTT broker
 	mqttClient, err := NewMQTTClient(ctx, cfg)
@@ -100,7 +113,7 @@ func main() {
 
 	// Initialize and start northbound REST API
 	logger.Info(ctx, "Initializing northbound REST API")
-	northbound := NewNorthboundInterface(repo, mqttClient, cfg)
+	northbound := NewNorthboundInterface(repo, dynSecService, mqttClient)
 
 	// On startup, republish config for all devices so configs are retained in MQTT
 	if err := northbound.RepublishAllDeviceConfigs(ctx); err != nil {
@@ -156,14 +169,11 @@ func main() {
 	logger.Info(ctx, "Shutting down device service")
 	serviceCancel()
 
-	// Gracefully shut down HTTP servers (northbound API, then NanoMQ auth callback).
+	// Gracefully shut down northbound API.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := northbound.Stop(shutdownCtx); err != nil {
 		logger.Errorf(shutdownCtx, "Error shutting down northbound server: %v", err)
-	}
-	if err := authServer.Stop(shutdownCtx); err != nil {
-		logger.Errorf(shutdownCtx, "Error shutting down MQTT auth server: %v", err)
 	}
 
 	logger.Info(ctx, "Device service stopped")

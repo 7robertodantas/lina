@@ -1,4 +1,4 @@
-FROM eclipse-mosquitto:2-openssl
+FROM eclipse-mosquitto:2.1-alpine
 
 # Create necessary directories
 RUN mkdir -p /mosquitto/config /mosquitto/data /mosquitto/certs

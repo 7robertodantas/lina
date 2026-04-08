@@ -9,14 +9,14 @@ func LoadConfig() Config {
 	return Config{
 		HTTPPort: internal.GetEnv("PORT", "8080"),
 
-		MQTTBroker:             internal.GetEnv("MQTT_BROKER", "nanomq"),
+		MQTTBroker:             internal.GetEnv("MQTT_BROKER", "mosquitto"),
 		MQTTUseTLS:             internal.BoolEnv("MQTT_USE_TLS", true),
 		MQTTPort:               internal.IntEnv("MQTT_PORT", 1883),
 		MQTTTLSPort:            internal.IntEnv("MQTT_TLS_PORT", 8883),
 		MQTTTLSProtocol:        internal.GetEnv("MQTT_TLS_PROTOCOL", "tls"),
 		MQTTClientID:           internal.GetEnv("MQTT_CLIENT_ID", "device-service"),
 		MQTTTLSSkipVerify:      internal.BoolEnv("MQTT_TLS_SKIP_VERIFY", false),
-		MQTTTLSServerName:      internal.GetEnv("MQTT_TLS_SERVER_NAME", "nanomq"),
+		MQTTTLSServerName:      internal.GetEnv("MQTT_TLS_SERVER_NAME", "mosquitto"),
 		MQTTTLSCACert:          internal.GetEnv("MQTT_TLS_CA_CERT", "/certs/ca.crt"),
 		MQTTTLSRequireEdgeCert: internal.BoolEnv("MQTT_TLS_REQUIRE_EDGE_CERT", false),
 		MQTTTLSEdgeCert:        internal.GetEnv("MQTT_TLS_EDGE_CERT", ""),
