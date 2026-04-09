@@ -11,6 +11,10 @@ type Config struct {
 	GRPCAddr     string
 	MaxPageSize  int
 
+	// Redis stream: consumer name (empty = auto consumption-{hostname}-{pid}). Parallelism = max concurrent handlers per batch.
+	StreamConsumerName string
+	ConsumeParallelism int
+
 	// OpenTelemetry / Jaeger
 	OTELExporterOTLPEndpoint string
 	OTELServiceName          string
@@ -23,6 +27,9 @@ func LoadConfig() Config {
 		ListenAddr:   internal.GetEnv("LISTEN_ADDR", ":8080"),
 		GRPCAddr:     internal.GetEnv("GRPC_ADDR", ":9090"),
 		MaxPageSize:  internal.IntEnv("MAX_PAGE_SIZE", 200),
+
+		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "consumption-service"),
+		ConsumeParallelism: internal.IntEnv("CONSUMPTION_STREAM_PARALLELISM", 8),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),

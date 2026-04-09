@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -50,13 +51,25 @@ func NewEastWestStreamInterface(ctx context.Context, cfg Config, repository *Con
 		return nil, err
 	}
 
+	cname := cfg.StreamConsumerName
+	if cname == "" {
+		cname = defaultStreamConsumerName()
+	}
 	return &EastWestStreamInterface{
 		StreamClient: libClient,
 		cfg:          cfg,
 		repository:   repository,
-		consumerName: "consumption-service",
+		consumerName: cname,
 		groupName:    "consumption-consumers",
 	}, nil
+}
+
+func defaultStreamConsumerName() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("consumption-%s-%d", host, os.Getpid())
 }
 
 // StartDeviceConsumer starts consuming from the event.device stream
@@ -72,8 +85,9 @@ func (ewsi *EastWestStreamInterface) StartDeviceConsumer(ctx context.Context, ha
 		// Continue anyway, group might already exist
 	}
 
+	par := clampParallelism(ewsi.cfg.ConsumeParallelism)
 	logger.WithStream(streamName, "consume").
-		Info(streamCtx, "Starting device event consumer")
+		Infof(streamCtx, "Starting device event consumer (name=%s, batch_parallelism=%d)", ewsi.consumerName, par)
 
 	// Start pending message retry mechanism in a separate goroutine
 	go ewsi.startPendingMessageRetry(ctx, streamName, handler)
@@ -113,21 +127,8 @@ func (ewsi *EastWestStreamInterface) consumeDeviceEvents(ctx context.Context, st
 				continue
 			}
 
-			// Process messages
 			for _, stream := range streams {
-				for _, msg := range stream.Messages {
-					// Create ack function
-					ackFn := func(ctx context.Context, msg redis.XMessage) error {
-						return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
-					}
-
-					if err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
-						return ewsi.handleDeviceMessage(ctx, handler, msg)
-					}, ackFn); err != nil {
-						logger.WithStream(streamName, "consume").
-							Errorf(streamCtx, "Error handling device event %s: %v", msg.ID, err)
-					}
-				}
+				ewsi.processMessagesParallel(streamCtx, streamName, stream.Messages, handler)
 			}
 		}
 	}
@@ -162,6 +163,80 @@ func (ewsi *EastWestStreamInterface) handleDeviceMessage(ctx context.Context, ha
 			Debugf(ctx, "Skipping event type: %v", deviceEvent.GetType())
 		return nil
 	}
+}
+
+func clampParallelism(p int) int {
+	if p < 1 {
+		return 1
+	}
+	if p > 64 {
+		return 64
+	}
+	return p
+}
+
+func runStreamMessagesParallel(p int, msgs []redis.XMessage, runOne func(redis.XMessage)) {
+	p = clampParallelism(p)
+	if len(msgs) == 0 {
+		return
+	}
+	if p == 1 || len(msgs) == 1 {
+		for _, msg := range msgs {
+			runOne(msg)
+		}
+		return
+	}
+	sem := make(chan struct{}, p)
+	var wg sync.WaitGroup
+	for _, msg := range msgs {
+		msg := msg
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			runOne(msg)
+		}()
+	}
+	wg.Wait()
+}
+
+// processMessagesParallel runs TraceEventProcessing for each message with bounded concurrency.
+func (ewsi *EastWestStreamInterface) processMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
+	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+		ackFn := func(ctx context.Context, msg redis.XMessage) error {
+			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+		}
+		if err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
+			return ewsi.handleDeviceMessage(ctx, handler, msg)
+		}, ackFn); err != nil {
+			logger.WithStream(streamName, "consume").
+				Errorf(streamCtx, "Error handling device event %s: %v", msg.ID, err)
+		}
+	})
+}
+
+func (ewsi *EastWestStreamInterface) processMessagesParallelRetry(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
+	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+		ackFn := func(ctx context.Context, msg redis.XMessage) error {
+			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+		}
+		err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
+			return ewsi.handleDeviceMessage(ctx, handler, msg)
+		}, ackFn)
+		if err != nil {
+			if isTransientPersistenceError(err) {
+				logger.WithStream(streamName, "consume").
+					Warnf(streamCtx, "Transient persistence error on retry for message %s: %v (will retry later)", msg.ID, err)
+			} else {
+				logger.WithStream(streamName, "consume").
+					Errorf(streamCtx, "Error handling retry event %s: %v", msg.ID, err)
+			}
+			return
+		}
+		logger.WithStream(streamName, "consume").
+			Infof(streamCtx, "Successfully retried pending message %s", msg.ID)
+	})
 }
 
 // startPendingMessageRetry continuously retries pending messages that failed to process
@@ -241,31 +316,7 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 				continue
 			}
 
-			// Process claimed messages
-			for _, msg := range claimed {
-				ackFn := func(ctx context.Context, msg redis.XMessage) error {
-					return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
-				}
-
-				handlerFn := func(ctx context.Context, msg redis.XMessage) error {
-					return ewsi.handleDeviceMessage(ctx, handler, msg)
-				}
-
-				err := internal.TraceEventProcessing(streamCtx, streamName, msg, handlerFn, ackFn)
-				if err != nil {
-					// Check if it's a database lock error
-					if isTransientPersistenceError(err) {
-						logger.WithStream(streamName, "consume").
-							Warnf(streamCtx, "Transient persistence error on retry for message %s: %v (will retry later)", msg.ID, err)
-					} else {
-						logger.WithStream(streamName, "consume").
-							Errorf(streamCtx, "Error handling retry event %s: %v", msg.ID, err)
-					}
-				} else {
-					logger.WithStream(streamName, "consume").
-						Infof(streamCtx, "Successfully retried pending message %s", msg.ID)
-				}
-			}
+			ewsi.processMessagesParallelRetry(streamCtx, streamName, claimed, handler)
 		}
 	}
 }

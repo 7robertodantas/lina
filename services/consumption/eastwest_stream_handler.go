@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"sync"
 	"time"
@@ -17,13 +18,21 @@ var (
 	consumptionPropagator = otel.GetTextMapPropagator()
 )
 
+const reportLockStripes = 256
+
 // EastWestStreamHandler handles processing of Redis stream messages from east-west services
 type EastWestStreamHandler struct {
 	repository *ConsumptionRepository
 	publisher  *EastWestStreamPublisher
-	// persistMu makes CreateConsumptionRecord's Get-then-Batch idempotency atomic: Pebble is thread-safe,
-	// but concurrent handlers could both observe a missing report_id and return inserted=true (duplicate publish).
-	persistMu sync.Mutex
+	// reportLocks serialize CreateConsumptionRecord per stripe so the same report_id cannot pass Get+Batch twice
+	// concurrently; different report_ids (usually) use different stripes and run in parallel.
+	reportLocks [reportLockStripes]sync.Mutex
+}
+
+func reportStripeIndex(reportID string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(reportID))
+	return h.Sum32() % reportLockStripes
 }
 
 // NewEastWestStreamHandler creates a new east-west stream handler
@@ -69,12 +78,10 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 	carrier := make(propagation.MapCarrier)
 	consumptionPropagator.Inject(ctx, carrier)
 
-	inserted, err := func() (bool, error) {
-		esh.persistMu.Lock()
-		defer esh.persistMu.Unlock()
-
-		return esh.repository.CreateConsumptionRecord(ctx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
-	}()
+	si := reportStripeIndex(reportID)
+	esh.reportLocks[si].Lock()
+	defer esh.reportLocks[si].Unlock()
+	inserted, err := esh.repository.CreateConsumptionRecord(ctx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
 	if err != nil {
 		return err
 	}
