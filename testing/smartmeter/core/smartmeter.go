@@ -21,6 +21,7 @@ type SmartMeter struct {
 	device                   devicepkg.DeviceInterface
 	powerUpdateTicker        *time.Ticker
 	usageTicker              *time.Ticker
+	started                  bool
 	currentReportingInterval int32 // Track current reporting interval to detect changes
 	savedApplianceStates     map[string]bool
 	logCallback              func(message, logType string)
@@ -195,6 +196,15 @@ func (m *SmartMeter) OnDeviceStatus(status string) {}
 // Start boots the smart meter: connect MQTT and start simulation
 // DeviceInterface will handle connection, subscriptions, heartbeat, and authorization
 func (m *SmartMeter) Start() {
+	m.mu.Lock()
+	if m.started {
+		m.mu.Unlock()
+		m.Log("Start requested while meter is already running; ignoring duplicate start", "warning")
+		return
+	}
+	m.started = true
+	m.mu.Unlock()
+
 	// Connect to MQTT - DeviceInterface will handle the rest
 	m.device.Connect(m.deviceID, m.deviceSecret)
 
@@ -434,6 +444,10 @@ func (m *SmartMeter) ToggleAppliance(applianceID string) {
 
 // Shutdown shuts down the meter completely
 func (m *SmartMeter) Shutdown() {
+	m.mu.Lock()
+	m.started = false
+	m.mu.Unlock()
+
 	// Set device status to OFFLINE first to prevent race conditions
 	// This ensures any concurrent operations (like updatePowerReadings) see OFFLINE status immediately
 	// Note: DeviceInterface should handle this, but for shutdown we do it directly

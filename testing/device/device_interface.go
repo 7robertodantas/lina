@@ -134,6 +134,8 @@ type deviceInterfaceImpl struct {
 	cfg              *Config
 	ctx              *deviceContext
 	deviceID         string
+	connectMu        sync.Mutex
+	connecting       bool
 	heartbeatTicker  *time.Ticker
 	heartbeatEnabled bool
 }
@@ -205,6 +207,20 @@ func (di *deviceInterfaceImpl) GetAuthorization() *Authorization {
 
 // Connect establishes MQTT connection
 func (di *deviceInterfaceImpl) Connect(deviceID, deviceSecret string) {
+	di.connectMu.Lock()
+	if di.connecting {
+		di.connectMu.Unlock()
+		di.callbacks.OnLog("MQTT connection already in progress; ignoring duplicate connect request", "warning")
+		return
+	}
+	di.connecting = true
+	di.connectMu.Unlock()
+	defer func() {
+		di.connectMu.Lock()
+		di.connecting = false
+		di.connectMu.Unlock()
+	}()
+
 	// Check if already connected
 	if di.IsConnected() {
 		di.callbacks.OnLog("Already connected to MQTT broker, updating status", "info")
