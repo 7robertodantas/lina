@@ -29,7 +29,7 @@ func LoadConfig() Config {
 		MaxPageSize:  internal.IntEnv("MAX_PAGE_SIZE", 200),
 
 		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "ledger-service"),
-		ConsumeParallelism: internal.IntEnv("LEDGER_STREAM_PARALLELISM", 8),
+		ConsumeParallelism: internal.IntEnv("LEDGER_STREAM_PARALLELISM", 4),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
