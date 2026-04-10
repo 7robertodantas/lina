@@ -202,6 +202,33 @@ check_file() {
     fi
 }
 
+# Function to copy files locally->remote with SFTP-first behavior
+scp_copy() {
+    if [ "$REMOTE_DEPLOY" != "true" ]; then
+        # Keep current script behavior simple; this helper is remote-only.
+        scp "$@"
+        return
+    fi
+
+    # Prefer default mode first (SFTP in modern OpenSSH).
+    if scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$@"; then
+        return 0
+    fi
+
+    # If default mode fails, fallback to legacy SCP only when remote has scp.
+    if check_cmd scp; then
+        echo -e "${YELLOW}Note: Default scp mode failed, retrying with legacy mode (-O)${NC}"
+        scp -O $SSH_OPTS $SSH_MULTIPLEX_OPTS "$@"
+        return $?
+    fi
+
+    echo -e "${RED}ERROR: File copy failed and remote host has no scp binary for legacy fallback${NC}"
+    echo "Install one of the following on $SSH_TARGET:"
+    echo "  - openssh-sftp-server (recommended)"
+    echo "  - openssh-client (provides scp for legacy mode)"
+    return 1
+}
+
 # Check if docker-compose.production.yml exists locally
 if [ ! -f "$COMPOSE_FILE" ]; then
     echo -e "${RED}ERROR: $COMPOSE_FILE not found${NC}"
@@ -252,6 +279,11 @@ else
 fi
 echo -e "${GREEN}✓ docker-compose found${NC}"
 
+# Prefer SFTP mode for remote copy operations; fallback is handled per transfer.
+if [ "$REMOTE_DEPLOY" = "true" ]; then
+    echo -e "${GREEN}✓ SCP transfer mode: prefer SFTP (default), fallback to legacy (-O) if needed${NC}"
+fi
+
 # Certificate setup
 echo ""
 echo -e "${BLUE}Step 2: Certificate Setup${NC}"
@@ -286,12 +318,12 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     
     # Copy docker-compose.production.yml
     echo "Copying docker-compose.production.yml..."
-    scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_FILE_BASENAME"
+    scp_copy "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_FILE_BASENAME"
     
     # Copy docker-compose.evaluation.edge.yml if it exists
     if [ -f "$COMPOSE_MEAS_FILE" ]; then
         echo "Copying docker-compose.evaluation.edge.yml..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_FILE_BASENAME"
+        scp_copy "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_FILE_BASENAME"
     else
         echo -e "${YELLOW}Note: docker-compose.evaluation.edge.yml not found locally, skipping${NC}"
     fi
@@ -299,7 +331,7 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     # Copy docker-compose.evaluation.edge.ssd.yml if it exists
     if [ -f "$COMPOSE_MEAS_SSD_FILE" ]; then
         echo "Copying docker-compose.evaluation.edge.ssd.yml..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$COMPOSE_MEAS_SSD_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_SSD_FILE_BASENAME"
+        scp_copy "$COMPOSE_MEAS_SSD_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_SSD_FILE_BASENAME"
     else
         echo -e "${YELLOW}Note: docker-compose.evaluation.edge.ssd.yml not found locally, skipping${NC}"
     fi
@@ -309,7 +341,7 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
         if [ -f "$script" ]; then
             script_basename=$(basename "$script")
             echo "Copying $script_basename..."
-            scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$script" "$SSH_TARGET:$REMOTE_DIR/deployment/scripts/$script_basename"
+            scp_copy "$script" "$SSH_TARGET:$REMOTE_DIR/deployment/scripts/$script_basename"
             run_cmd "chmod +x $REMOTE_DIR/deployment/scripts/$script_basename"
         else
             echo -e "${YELLOW}Note: $script not found locally, skipping${NC}"
@@ -321,7 +353,7 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
         echo "Checking for .env file on remote..."
         if ! run_cmd "test -f $REMOTE_DIR/deployment/.env"; then
             echo "Copying .env.example to remote (no .env found)..."
-            scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "deployment/.env.example" "$SSH_TARGET:$REMOTE_DIR/deployment/"
+            scp_copy "deployment/.env.example" "$SSH_TARGET:$REMOTE_DIR/deployment/"
             echo -e "${YELLOW}⚠ IMPORTANT: Rename .env.example to .env and update variables:${NC}"
             if [ -n "$SSH_OPTS" ]; then
                 echo -e "${YELLOW}  ssh $SSH_OPTS $SSH_TARGET${NC}"
@@ -342,10 +374,10 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     # Copy certificates or generation script
     if [ "$COPY_CERTS" = "true" ]; then
         echo "Copying certificates..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS -r "$CERTS_DIR"/* "$SSH_TARGET:$REMOTE_DIR/infrastructure/certs/"
+        scp_copy -r "$CERTS_DIR"/* "$SSH_TARGET:$REMOTE_DIR/infrastructure/certs/"
     else
         echo "Copying certificate generation script..."
-        scp $SSH_OPTS $SSH_MULTIPLEX_OPTS "$CERTS_DIR/generate-certs.sh" "$SSH_TARGET:$REMOTE_DIR/infrastructure/certs/"
+        scp_copy "$CERTS_DIR/generate-certs.sh" "$SSH_TARGET:$REMOTE_DIR/infrastructure/certs/"
         
         # Generate certificates on remote
         echo "Generating certificates on remote machine..."
