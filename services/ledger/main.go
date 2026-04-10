@@ -113,7 +113,7 @@ func main() {
 	}
 
 	// Initialize repository (creates DB connection and tables)
-	repo, err := NewLedgerRepository(cfg.DBPath, cfg.BusyTimeoutMS)
+	repo, err := NewLedgerRepository(cfg.DBPath)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to initialize ledger repository", err)
 	}

@@ -94,7 +94,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DB_PATH=/data/ledger.db
+      - DB_PATH=/data/ledger-pebble
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
       - OTEL_SERVICE_NAME=ledger-service

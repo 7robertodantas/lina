@@ -102,7 +102,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DB_PATH=/data/ledger.db
+      - DB_PATH=/data/ledger-pebble
     env_file:
       - .env
     volumes:

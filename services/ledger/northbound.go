@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -81,7 +80,7 @@ func (nb *NorthboundInterface) getDeviceBalance(c *gin.Context) {
 		return
 	}
 
-	tx, err := nb.repo.BeginTx(c, &sql.TxOptions{ReadOnly: true})
+	tx, err := nb.repo.BeginTx(c, &LedgerTxOptions{ReadOnly: true})
 	if err != nil {
 		c.JSON(500, gin.H{"error": "begin"})
 		return
@@ -251,7 +250,7 @@ func (nb *NorthboundInterface) postDeviceCredit(c *gin.Context) {
 	}
 
 	ctx := c
-	tx, err := nb.repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := nb.repo.BeginTx(ctx, &LedgerTxOptions{})
 	if err != nil {
 		c.JSON(500, gin.H{"error": "begin"})
 		return
@@ -322,7 +321,7 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 	}
 
 	ctx := c
-	tx, err := nb.repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := nb.repo.BeginTx(ctx, &LedgerTxOptions{})
 	if err != nil {
 		c.JSON(500, gin.H{"error": "begin"})
 		return

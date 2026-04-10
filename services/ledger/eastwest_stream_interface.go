@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"sync"
@@ -444,7 +443,7 @@ func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Cont
 
 	// Update expired authorizations and publish events
 	for _, auth := range expired {
-		tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+		tx, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 		if err != nil {
 			logger.Error(ctx, "Failed to begin transaction for expiration", err)
 			continue
@@ -453,7 +452,7 @@ func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Cont
 		deviceID, remainingMsat, err := repo.GetActiveAuthorizationByID(ctx, tx, auth.AuthorizationID)
 		if err != nil {
 			_ = tx.Rollback()
-			if errors.Is(err, sql.ErrNoRows) {
+			if errors.Is(err, ErrNotFound) {
 				logger.Debugf(ctx, "Authorization %s already processed, skipping", auth.AuthorizationID)
 				continue
 			}

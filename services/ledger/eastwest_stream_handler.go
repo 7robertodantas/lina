@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -73,7 +72,7 @@ func (esh *EastWestStreamHandler) HandleInvoiceSettled(ctx context.Context, sett
 		return fmt.Errorf("idempotency key %s already used for kind %s", invoiceID, kind)
 	}
 
-	tx, err := esh.repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := esh.repo.BeginTx(ctx, &LedgerTxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin tx for invoice %s: %w", invoiceID, err)
 	}
@@ -120,9 +119,7 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 	}
 
 	// Begin transaction for processing
-	tx, err := esh.repo.BeginTx(ctx, &sql.TxOptions{
-		Isolation: sql.LevelSerializable,
-	})
+	tx, err := esh.repo.BeginTx(ctx, &LedgerTxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
@@ -231,7 +228,7 @@ type processConsumptionResult struct {
 
 // processConsumptionWithTx debits from an authorization using the provided transaction
 // Returns processConsumptionResult with information needed for event publishing
-func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, tx *sql.Tx, recorded *consumptionpb.DeviceConsumptionRecordedEvent) (*processConsumptionResult, error) {
+func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, tx *LedgerTx, recorded *consumptionpb.DeviceConsumptionRecordedEvent) (*processConsumptionResult, error) {
 	deviceID := recorded.GetDeviceId()
 	if deviceID == "" {
 		return nil, fmt.Errorf("missing device_id in consumption event")
@@ -242,7 +239,7 @@ func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, 
 	now := time.Now().Format(time.RFC3339)
 	authorizationID, remainingMsat, _, _, _, _, err := esh.repo.GetActiveAuthorization(ctx, tx, deviceID, now)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			// No active authorization found - publish failed event
 			// This is an expected failure scenario (device may not have authorization yet)
 			// We've handled it appropriately by publishing the failed event, so we should ACK the message

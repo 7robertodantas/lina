@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -13,8 +12,8 @@ import (
 func newTestLedgerRepo(t *testing.T) *LedgerRepository {
 	t.Helper()
 
-	dbPath := filepath.Join(t.TempDir(), "ledger.db")
-	repo, err := NewLedgerRepository(dbPath, 1000)
+	dir := filepath.Join(t.TempDir(), "ledger-pebble")
+	repo, err := NewLedgerRepository(dir)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -28,7 +27,7 @@ func TestApplyCreditCreatesLedgerEntry(t *testing.T) {
 	repo := newTestLedgerRepo(t)
 	ctx := context.Background()
 
-	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 
 	req := CreditRequest{
@@ -46,7 +45,7 @@ func TestApplyCreditCreatesLedgerEntry(t *testing.T) {
 
 	require.NoError(t, tx.Commit())
 
-	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	checkTx, err := repo.BeginTx(ctx, &LedgerTxOptions{ReadOnly: true})
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
@@ -59,13 +58,13 @@ func TestApplyDebitPreventsNegativeBalance(t *testing.T) {
 	repo := newTestLedgerRepo(t)
 	ctx := context.Background()
 
-	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 	_, err = repo.ApplyCredit(ctx, tx, CreditRequest{DeviceID: "device-debit-1", AmountMsat: 2_000})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
-	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx2, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 
 	_, err = repo.ApplyDebit(ctx, tx2, DebitRequest{DeviceID: "device-debit-1", AmountMsat: 3_000})
@@ -78,20 +77,20 @@ func TestApplyDebitReducesBalance(t *testing.T) {
 	repo := newTestLedgerRepo(t)
 	ctx := context.Background()
 
-	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 	_, err = repo.ApplyCredit(ctx, tx, CreditRequest{DeviceID: "device-debit-2", AmountMsat: 5_000})
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
-	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx2, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 	entry, err := repo.ApplyDebit(ctx, tx2, DebitRequest{DeviceID: "device-debit-2", AmountMsat: 1_500})
 	require.NoError(t, err)
 	require.Equal(t, int64(3_500), entry.BalanceAfter)
 	require.NoError(t, tx2.Commit())
 
-	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	checkTx, err := repo.BeginTx(ctx, &LedgerTxOptions{ReadOnly: true})
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
@@ -104,7 +103,7 @@ func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
 	repo := newTestLedgerRepo(t)
 	ctx := context.Background()
 
-	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
@@ -123,7 +122,7 @@ func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
-	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx2, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 
 	gotDeviceID, remaining, err := repo.GetActiveAuthorizationByID(ctx, tx2, authID)
@@ -134,30 +133,28 @@ func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
 	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 500, 1_500, 100, "active"))
 	require.NoError(t, tx2.Commit())
 
-	tx3, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx3, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 	require.NoError(t, repo.MarkAuthorizationExpired(ctx, tx3, authID))
 	require.NoError(t, tx3.Commit())
 
-	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	checkTx, err := repo.BeginTx(ctx, &LedgerTxOptions{ReadOnly: true})
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
-	var status string
-	var remainingAfter, consumedAfter, overflowAfter int64
-	row := checkTx.QueryRowContext(ctx, `SELECT status, remaining_msat, consumed_msat, overflow_msat FROM authorizations WHERE authorization_id = ?`, authID)
-	require.NoError(t, row.Scan(&status, &remainingAfter, &consumedAfter, &overflowAfter))
-	require.Equal(t, "expired", status)
-	require.Equal(t, int64(0), remainingAfter)
-	require.Equal(t, int64(1_500), consumedAfter)
-	require.Equal(t, int64(100), overflowAfter)
+	rec, err := repo.loadAuthorization(ctx, checkTx, authID)
+	require.NoError(t, err)
+	require.Equal(t, "expired", rec.Status)
+	require.Equal(t, int64(0), rec.RemainingMsat)
+	require.Equal(t, int64(1_500), rec.ConsumedMsat)
+	require.Equal(t, int64(100), rec.OverflowMsat)
 }
 
 func TestUpdateAuthorizationTracksConsumed(t *testing.T) {
 	repo := newTestLedgerRepo(t)
 	ctx := context.Background()
 
-	tx, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 
 	now := time.Now().UTC()
@@ -176,19 +173,18 @@ func TestUpdateAuthorizationTracksConsumed(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit())
 
-	tx2, err := repo.BeginTx(ctx, &sql.TxOptions{})
+	tx2, err := repo.BeginTx(ctx, &LedgerTxOptions{})
 	require.NoError(t, err)
 	require.NoError(t, repo.UpdateAuthorization(ctx, tx2, authID, 1_000, 2_000, 250, "active"))
 	require.NoError(t, tx2.Commit())
 
-	checkTx, err := repo.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	checkTx, err := repo.BeginTx(ctx, &LedgerTxOptions{ReadOnly: true})
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
-	var remaining, consumed, overflow int64
-	row := checkTx.QueryRowContext(ctx, `SELECT remaining_msat, consumed_msat, overflow_msat FROM authorizations WHERE authorization_id = ?`, authID)
-	require.NoError(t, row.Scan(&remaining, &consumed, &overflow))
-	require.Equal(t, int64(1_000), remaining)
-	require.Equal(t, int64(2_000), consumed)
-	require.Equal(t, int64(250), overflow)
+	rec, err := repo.loadAuthorization(ctx, checkTx, authID)
+	require.NoError(t, err)
+	require.Equal(t, int64(1_000), rec.RemainingMsat)
+	require.Equal(t, int64(2_000), rec.ConsumedMsat)
+	require.Equal(t, int64(250), rec.OverflowMsat)
 }

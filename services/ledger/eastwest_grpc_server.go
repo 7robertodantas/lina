@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
@@ -41,7 +40,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 		return nil, status.Errorf(codes.InvalidArgument, "request_msat must be > 0")
 	}
 
-	tx, err := s.repo.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := s.repo.BeginTx(ctx, &LedgerTxOptions{})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to begin transaction: %v", err)
 	}
@@ -60,7 +59,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 
 	// Check if authorization with this request_id already exists (idempotency)
 	existingAuth, authStatus, err := s.repo.GetAuthorizationByRequestID(ctx, tx, req.RequestId)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, status.Errorf(codes.Internal, "failed to check authorization: %v", err)
 	}
 
@@ -86,7 +85,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	// Check if there's an active authorization for this device (even with different request_id)
 	// This handles the case where the device reconnects after service restart with a new request_id
 	activeAuth, activeAuthStatus, err := s.repo.GetActiveAuthorizationForDevice(ctx, tx, req.DeviceId)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, status.Errorf(codes.Internal, "failed to check active authorization: %v", err)
 	}
 

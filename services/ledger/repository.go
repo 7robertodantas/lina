@@ -2,124 +2,200 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
+	"github.com/cockroachdb/pebble"
 	"github.com/google/uuid"
-	"github.com/robertodantas/lina/internal"
 	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
-	"go.opentelemetry.io/otel/attribute"
-	_ "modernc.org/sqlite"
 )
 
-// LedgerRepository manages database operations for the ledger
+// ErrNotFound is returned when a looked-up row or key does not exist (replaces sql.ErrNoRows).
+var ErrNotFound = errors.New("ledger: not found")
+
+// Key prefixes — device_id, authorization_id, entry_id, request_id must not contain '/'.
+const (
+	keyPrefixBalance          = "balance/"
+	keyPrefixLedgerEntry      = "ledger/entry/"
+	keyPrefixLedgerByDevice   = "ledger/by_device/"
+	keyPrefixIdem             = "idem/"
+	keyPrefixAuthRecord       = "auth/record/"
+	keyPrefixAuthByRequest    = "auth/by_request/"
+	keyPrefixAuthByDevice     = "auth/by_device/"
+)
+
+// LedgerRepository manages Pebble storage for the ledger.
 type LedgerRepository struct {
-	db        *sql.DB
-	sqlTracer *internal.SQLTracer
+	db *pebble.DB
 }
 
-// NewLedgerRepository creates and initializes the SQLite database with schema
-func NewLedgerRepository(dbPath string, busyTimeoutMS int) (*LedgerRepository, error) {
-	// WAL + busy_timeout + performance optimizations for high load
-	// - WAL mode: allows concurrent readers and one writer
-	// - busy_timeout: how long to wait when database is locked (in ms)
-	// - synchronous(NORMAL): good balance between safety and performance with WAL
-	// - cache_size: increase cache to 8MB (negative = KB, so -8192 = 8MB, default is -2000 = 2MB)
-	// - temp_store: use memory for temporary tables/indexes (2 = memory)
-	// - mmap_size: use memory-mapped I/O for better performance (268435456 = 256MB)
-	// - foreign_keys: enable foreign key constraints
-	dsn := fmt.Sprintf(
-		"%s?_pragma=busy_timeout(%d)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=cache_size(-8192)&_pragma=temp_store(2)&_pragma=mmap_size(268435456)&_pragma=foreign_keys(1)",
-		dbPath, busyTimeoutMS,
-	)
-	db, err := sql.Open("sqlite", dsn)
+// LedgerTxOptions controls BeginTx behavior (read-only vs read-write batch).
+type LedgerTxOptions struct {
+	ReadOnly bool
+}
+
+// LedgerTx is a read-write Pebble batch or a read-only view over the DB.
+type LedgerTx struct {
+	db       *pebble.DB
+	batch    *pebble.Batch
+	readOnly bool
+}
+
+// Commit applies the batch (sync). No-op for read-only transactions.
+func (t *LedgerTx) Commit() error {
+	if t.readOnly || t.batch == nil {
+		return nil
+	}
+	err := t.batch.Commit(&pebble.WriteOptions{Sync: true})
+	_ = t.batch.Close()
+	t.batch = nil
+	return err
+}
+
+// Rollback discards the batch.
+func (t *LedgerTx) Rollback() error {
+	if t.batch != nil {
+		_ = t.batch.Close()
+		t.batch = nil
+	}
+	return nil
+}
+
+// NewLedgerRepository opens a Pebble store at storePath (directory).
+func NewLedgerRepository(storePath string) (*LedgerRepository, error) {
+	db, err := pebble.Open(storePath, &pebble.Options{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to SQLite: %w", err)
+		return nil, fmt.Errorf("open pebble store: %w", err)
 	}
+	return &LedgerRepository{db: db}, nil
+}
 
-	// Configure connection pool for SQLite
-	// SQLite works best with limited connections due to its locking model
-	// With WAL mode, we can have multiple readers but only one writer at a time
-	// Set max open connections to a reasonable number (10-20 is good for WAL mode)
-	db.SetMaxOpenConns(20)
-	// Keep some connections idle for reuse
-	db.SetMaxIdleConns(5)
-	// Connection lifetime - close idle connections after 5 minutes
-	db.SetConnMaxLifetime(5 * time.Minute)
-	// Idle timeout - close idle connections after 10 minutes
-	db.SetConnMaxIdleTime(10 * time.Minute)
-
-	// Create tables and indexes
-	stmts := []string{
-		// Accounts / balances
-		`CREATE TABLE IF NOT EXISTS balances(
-			device_id TEXT PRIMARY KEY,
-			balance_msat INTEGER NOT NULL DEFAULT 0,
-			updated_at INTEGER NOT NULL
-		);`,
-		// Ledger entries (append-only)
-		`CREATE TABLE IF NOT EXISTS ledger_entries(
-			id TEXT PRIMARY KEY,
-			device_id TEXT NOT NULL,
-			entry_type TEXT NOT NULL,        -- credit|debit
-			amount_msat INTEGER NOT NULL,    -- positive for credits & transfer_in; positive value also stored for debit, semantics defined by entry_type
-			balance_after INTEGER NOT NULL,  -- balance after applying this entry (in msat)
-			reason TEXT,
-			correlation_id TEXT,             -- optional foreign corr id from caller
-			created_at INTEGER NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_ledger_device_time ON ledger_entries(device_id, created_at DESC);`,
-
-		// Idempotency registry: one row per unique client request
-		`CREATE TABLE IF NOT EXISTS idempotency(
-			idempotency_key TEXT PRIMARY KEY,
-			kind TEXT NOT NULL,              -- credit|debit|consumption
-			request_hash TEXT NOT NULL,      -- lightweight dedupe guard (payload hash)
-			response_json TEXT NOT NULL,     -- cached successful response
-			created_at INTEGER NOT NULL
-		);`,
-
-		// Authorizations: holds for device spending
-		`CREATE TABLE IF NOT EXISTS authorizations(
-			authorization_id TEXT PRIMARY KEY,
-			device_id TEXT NOT NULL,
-			request_id TEXT NOT NULL,        -- unique request identifier for idempotency
-			granted_msat INTEGER NOT NULL,
-			remaining_msat INTEGER NOT NULL,
-			consumed_msat INTEGER NOT NULL DEFAULT 0,
-			overflow_msat INTEGER NOT NULL DEFAULT 0,
-			issued_at TEXT NOT NULL,          -- ISO-8601 timestamp
-			expires_at TEXT NOT NULL,         -- ISO-8601 timestamp
-			status TEXT NOT NULL,            -- active|completed|expired
-			created_at INTEGER NOT NULL
-		);`,
-		`CREATE INDEX IF NOT EXISTS idx_auth_device_status ON authorizations(device_id, status, expires_at);`,
-		`CREATE INDEX IF NOT EXISTS idx_auth_request_id ON authorizations(request_id);`,
+func (r *LedgerRepository) getRaw(tx *LedgerTx, key []byte) ([]byte, io.Closer, error) {
+	if tx != nil && tx.batch != nil {
+		return tx.batch.Get(key)
 	}
+	return r.db.Get(key)
+}
 
-	repo := &LedgerRepository{
-		db:        db,
-		sqlTracer: internal.NewSQLTracer("repository.ledger"),
+func (r *LedgerRepository) setRaw(tx *LedgerTx, key, val []byte) error {
+	if tx == nil || tx.batch == nil {
+		return errors.New("ledger: write requires a write transaction")
 	}
+	return tx.batch.Set(key, val, nil)
+}
 
-	ctx := context.Background()
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "CREATE TABLE/INDEX"),
+// BeginTx starts a read-only session or a write batch.
+func (r *LedgerRepository) BeginTx(ctx context.Context, opts *LedgerTxOptions) (*LedgerTx, error) {
+	_ = ctx
+	if opts != nil && opts.ReadOnly {
+		return &LedgerTx{db: r.db, readOnly: true}, nil
 	}
-	for _, s := range stmts {
-		if _, err := repo.sqlTracer.ExecWithSpan(ctx, "[repository] create schema", attrs, db, s); err != nil {
-			return nil, fmt.Errorf("failed to create schema: %w", err)
+	return &LedgerTx{db: r.db, batch: r.db.NewIndexedBatch()}, nil
+}
+
+// Close closes the Pebble store.
+func (r *LedgerRepository) Close() error {
+	return r.db.Close()
+}
+
+func now() int64 { return time.Now().Unix() }
+
+type storedBalance struct {
+	BalanceMsat int64 `json:"balance_msat"`
+	UpdatedAt   int64 `json:"updated_at"`
+}
+
+type storedIdem struct {
+	Kind         string `json:"kind"`
+	RequestHash  string `json:"request_hash"`
+	ResponseJSON string `json:"response_json"`
+	CreatedAt    int64  `json:"created_at"`
+}
+
+type storedAuthorization struct {
+	AuthorizationID string `json:"authorization_id"`
+	DeviceID        string `json:"device_id"`
+	RequestID       string `json:"request_id"`
+	GrantedMsat     int64  `json:"granted_msat"`
+	RemainingMsat   int64  `json:"remaining_msat"`
+	ConsumedMsat    int64  `json:"consumed_msat"`
+	OverflowMsat    int64  `json:"overflow_msat"`
+	IssuedAt        string `json:"issued_at"`
+	ExpiresAt       string `json:"expires_at"`
+	Status          string `json:"status"`
+	CreatedAt       int64  `json:"created_at"`
+}
+
+type storedLedgerEntry struct {
+	EntryID       string `json:"entry_id"`
+	DeviceID      string `json:"device_id"`
+	EntryType     string `json:"entry_type"`
+	AmountMsat    int64  `json:"amount_msat"`
+	BalanceAfter  int64  `json:"balance_after"`
+	Reason        string `json:"reason,omitempty"`
+	CorrelationID string `json:"correlation_id,omitempty"`
+	CreatedAt     int64  `json:"created_at"`
+}
+
+func keyBalance(deviceID string) []byte {
+	return []byte(keyPrefixBalance + deviceID)
+}
+
+func keyLedgerEntry(entryID string) []byte {
+	return []byte(keyPrefixLedgerEntry + entryID)
+}
+
+func keyLedgerByDevice(deviceID string, createdAt int64, entryID string) []byte {
+	inv := invCreatedUnix(createdAt)
+	return []byte(fmt.Sprintf("%s%s/%016x/%s", keyPrefixLedgerByDevice, deviceID, inv, entryID))
+}
+
+func invCreatedUnix(createdAt int64) uint64 {
+	return ^uint64(0) - uint64(createdAt)
+}
+
+func keyIdem(idemKey string) []byte {
+	return []byte(keyPrefixIdem + idemKey)
+}
+
+func keyAuthRecord(authID string) []byte {
+	return []byte(keyPrefixAuthRecord + authID)
+}
+
+func keyAuthByRequest(requestID string) []byte {
+	return []byte(keyPrefixAuthByRequest + requestID)
+}
+
+func keyAuthByDevice(deviceID string, createdAt int64, authID string) []byte {
+	inv := invCreatedUnix(createdAt)
+	return []byte(fmt.Sprintf("%s%s/%016x/%s", keyPrefixAuthByDevice, deviceID, inv, authID))
+}
+
+func prefixUpperBound(prefix []byte) []byte {
+	end := make([]byte, len(prefix))
+	copy(end, prefix)
+	for i := len(end) - 1; i >= 0; i-- {
+		end[i]++
+		if end[i] != 0 {
+			return end
 		}
 	}
-
-	return repo, nil
+	return nil
 }
 
-// now returns the current Unix timestamp
-func now() int64 { return time.Now().Unix() }
+func entryKeyBeforeCursor(createdAt int64, entryID string, cursorCreated int64, cursorID string) bool {
+	if createdAt < cursorCreated {
+		return true
+	}
+	if createdAt > cursorCreated {
+		return false
+	}
+	return entryID < cursorID
+}
 
 /*
    =========================================
@@ -127,53 +203,73 @@ func now() int64 { return time.Now().Unix() }
    =========================================
 */
 
-// EnsureBalanceRow ensures a balance row exists for a device
-func (r *LedgerRepository) EnsureBalanceRow(ctx context.Context, tx *sql.Tx, deviceID string) error {
-	query := `INSERT INTO balances(device_id, balance_msat, updated_at)
-		 VALUES(?,?,?)
-		 ON CONFLICT(device_id) DO NOTHING`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "INSERT"),
-		attribute.String("db.table", "balances"),
-		attribute.String("device.id", deviceID),
+// EnsureBalanceRow ensures a balance row exists for a device.
+func (r *LedgerRepository) EnsureBalanceRow(ctx context.Context, tx *LedgerTx, deviceID string) error {
+	_ = ctx
+	k := keyBalance(deviceID)
+	_, closer, err := r.getRaw(tx, k)
+	if err == nil {
+		closer.Close()
+		return nil
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] ensure balance row", attrs, tx, query, deviceID, 0, now())
-	return err
+	if !errors.Is(err, pebble.ErrNotFound) {
+		return err
+	}
+	b := storedBalance{BalanceMsat: 0, UpdatedAt: now()}
+	payload, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	return r.setRaw(tx, k, payload)
 }
 
-// GetBalance retrieves the balance for a device
-func (r *LedgerRepository) GetBalance(ctx context.Context, tx *sql.Tx, deviceID string) (int64, error) {
-	query := `SELECT balance_msat FROM balances WHERE device_id=?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "balances"),
-		attribute.String("device.id", deviceID),
-	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get balance", attrs, tx, query, deviceID)
-
-	var bal int64
-	err := row.Scan(&bal)
-	switch err {
-	case nil:
-		return bal, nil
-	case sql.ErrNoRows:
+// GetBalance retrieves the balance for a device.
+func (r *LedgerRepository) GetBalance(ctx context.Context, tx *LedgerTx, deviceID string) (int64, error) {
+	_ = ctx
+	k := keyBalance(deviceID)
+	val, closer, err := r.getRaw(tx, k)
+	if errors.Is(err, pebble.ErrNotFound) {
 		return 0, nil
-	default:
+	}
+	if err != nil {
 		return 0, err
 	}
+	defer closer.Close()
+	var b storedBalance
+	if err := json.Unmarshal(val, &b); err != nil {
+		return 0, err
+	}
+	return b.BalanceMsat, nil
 }
 
-// UpdateBalance adds or subtracts from a device's balance
-func (r *LedgerRepository) UpdateBalance(ctx context.Context, tx *sql.Tx, deviceID string, amountMsat int64) error {
-	query := `UPDATE balances SET balance_msat = balance_msat + ?, updated_at=? WHERE device_id=?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "UPDATE"),
-		attribute.String("db.table", "balances"),
-		attribute.String("device.id", deviceID),
-		attribute.Int64("amount_msat", amountMsat),
+// UpdateBalance adds or subtracts from a device's balance.
+func (r *LedgerRepository) UpdateBalance(ctx context.Context, tx *LedgerTx, deviceID string, amountMsat int64) error {
+	_ = ctx
+	k := keyBalance(deviceID)
+	val, closer, err := r.getRaw(tx, k)
+	if errors.Is(err, pebble.ErrNotFound) {
+		b := storedBalance{BalanceMsat: amountMsat, UpdatedAt: now()}
+		payload, e := json.Marshal(b)
+		if e != nil {
+			return e
+		}
+		return r.setRaw(tx, k, payload)
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] update balance", attrs, tx, query, amountMsat, now(), deviceID)
-	return err
+	if err != nil {
+		return err
+	}
+	defer closer.Close()
+	var b storedBalance
+	if err := json.Unmarshal(val, &b); err != nil {
+		return err
+	}
+	b.BalanceMsat += amountMsat
+	b.UpdatedAt = now()
+	payload, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	return r.setRaw(tx, k, payload)
 }
 
 /*
@@ -182,64 +278,77 @@ func (r *LedgerRepository) UpdateBalance(ctx context.Context, tx *sql.Tx, device
    =========================================
 */
 
-// CreateLedgerEntry creates a new ledger entry
-func (r *LedgerRepository) CreateLedgerEntry(ctx context.Context, tx *sql.Tx, entry EntryResponse) error {
-	query := `INSERT INTO ledger_entries(id, device_id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at)
-		VALUES(?,?,?,?,?,?,?,?)`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "INSERT"),
-		attribute.String("db.table", "ledger_entries"),
-		attribute.String("entry.id", entry.EntryID),
-		attribute.String("device.id", entry.DeviceID),
-		attribute.String("entry.type", entry.EntryType),
-		attribute.Int64("amount_msat", entry.AmountMsat),
+// CreateLedgerEntry creates a new ledger entry.
+func (r *LedgerRepository) CreateLedgerEntry(ctx context.Context, tx *LedgerTx, entry EntryResponse) error {
+	_ = ctx
+	st := storedLedgerEntry{
+		EntryID: entry.EntryID, DeviceID: entry.DeviceID, EntryType: entry.EntryType,
+		AmountMsat: entry.AmountMsat, BalanceAfter: entry.BalanceAfter, Reason: entry.Reason,
+		CorrelationID: entry.CorrelationID, CreatedAt: entry.CreatedAt,
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create ledger entry", attrs, tx, query,
-		entry.EntryID, entry.DeviceID, entry.EntryType, entry.AmountMsat, entry.BalanceAfter, entry.Reason, entry.CorrelationID, entry.CreatedAt,
-	)
-	return err
+	payload, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	if err := r.setRaw(tx, keyLedgerEntry(entry.EntryID), payload); err != nil {
+		return err
+	}
+	idx := keyLedgerByDevice(entry.DeviceID, entry.CreatedAt, entry.EntryID)
+	return r.setRaw(tx, idx, []byte{1})
 }
 
-// ListLedgerEntries retrieves ledger entries for a device with pagination
+// ListLedgerEntries retrieves ledger entries for a device with pagination (newest first).
 func (r *LedgerRepository) ListLedgerEntries(ctx context.Context, deviceID string, cursorCreated int64, cursorID string, limit int) ([]EntryResponse, error) {
-	query := `
-		SELECT id, entry_type, amount_msat, balance_after, reason, correlation_id, created_at
-		  FROM ledger_entries
-		 WHERE device_id = ?
-		   AND (created_at < ? OR (created_at = ? AND id < ?))
-		 ORDER BY created_at DESC, id DESC
-		 LIMIT ?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "ledger_entries"),
-		attribute.String("device.id", deviceID),
-		attribute.Int("limit", limit),
-	}
-	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list ledger entries", attrs, r.db, query,
-		deviceID, cursorCreated, cursorCreated, cursorID, limit,
-	)
+	_ = ctx
+	prefix := []byte(fmt.Sprintf("%s%s/", keyPrefixLedgerByDevice, deviceID))
+	var resp []EntryResponse
+	iter, err := r.db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixUpperBound(prefix),
+	})
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer iter.Close()
 
-	var resp []EntryResponse
-	for rows.Next() {
-		var e EntryResponse
-		var reason, corr sql.NullString
-		if err := rows.Scan(&e.EntryID, &e.EntryType, &e.AmountMsat, &e.BalanceAfter, &reason, &corr, &e.CreatedAt); err != nil {
+	for iter.First(); iter.Valid(); iter.Next() {
+		if len(resp) >= limit {
+			break
+		}
+		keyStr := string(iter.Key())
+		parts := strings.Split(keyStr, "/")
+		if len(parts) < 5 {
 			continue
 		}
-		e.DeviceID = deviceID
-		if reason.Valid {
-			e.Reason = reason.String
+		entryID := parts[len(parts)-1]
+		invHex := parts[len(parts)-2]
+		var inv uint64
+		if _, scanErr := fmt.Sscanf(invHex, "%x", &inv); scanErr != nil {
+			continue
 		}
-		if corr.Valid {
-			e.CorrelationID = corr.String
+		createdAt := int64(^uint64(0) - inv)
+		if !entryKeyBeforeCursor(createdAt, entryID, cursorCreated, cursorID) {
+			continue
 		}
-		resp = append(resp, e)
+		val, closer, err := r.db.Get(keyLedgerEntry(entryID))
+		if errors.Is(err, pebble.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var st storedLedgerEntry
+		if err := json.Unmarshal(val, &st); err != nil {
+			closer.Close()
+			continue
+		}
+		closer.Close()
+		resp = append(resp, EntryResponse{
+			EntryID: st.EntryID, DeviceID: st.DeviceID, EntryType: st.EntryType,
+			AmountMsat: st.AmountMsat, BalanceAfter: st.BalanceAfter, Reason: st.Reason,
+			CreatedAt: st.CreatedAt, CorrelationID: st.CorrelationID,
+		})
 	}
-
 	return resp, nil
 }
 
@@ -249,19 +358,17 @@ func (r *LedgerRepository) ListLedgerEntries(ctx context.Context, deviceID strin
    =========================================
 */
 
-// ApplyCredit applies a credit to a device's balance and creates a ledger entry
-func (r *LedgerRepository) ApplyCredit(ctx context.Context, tx *sql.Tx, in CreditRequest) (EntryResponse, error) {
+// ApplyCredit applies a credit to a device's balance and creates a ledger entry.
+func (r *LedgerRepository) ApplyCredit(ctx context.Context, tx *LedgerTx, in CreditRequest) (EntryResponse, error) {
 	if in.AmountMsat <= 0 {
 		return EntryResponse{}, errors.New("amount must be > 0")
 	}
 	if err := r.EnsureBalanceRow(ctx, tx, in.DeviceID); err != nil {
 		return EntryResponse{}, err
 	}
-	// Add funds
 	if err := r.UpdateBalance(ctx, tx, in.DeviceID, in.AmountMsat); err != nil {
 		return EntryResponse{}, err
 	}
-	// Read new balance
 	bal, err := r.GetBalance(ctx, tx, in.DeviceID)
 	if err != nil {
 		return EntryResponse{}, err
@@ -282,15 +389,14 @@ func (r *LedgerRepository) ApplyCredit(ctx context.Context, tx *sql.Tx, in Credi
 	return entry, nil
 }
 
-// ApplyDebit applies a debit to a device's balance and creates a ledger entry
-func (r *LedgerRepository) ApplyDebit(ctx context.Context, tx *sql.Tx, in DebitRequest) (EntryResponse, error) {
+// ApplyDebit applies a debit to a device's balance and creates a ledger entry.
+func (r *LedgerRepository) ApplyDebit(ctx context.Context, tx *LedgerTx, in DebitRequest) (EntryResponse, error) {
 	if in.AmountMsat <= 0 {
 		return EntryResponse{}, errors.New("amount must be > 0")
 	}
 	if err := r.EnsureBalanceRow(ctx, tx, in.DeviceID); err != nil {
 		return EntryResponse{}, err
 	}
-	// Funds check
 	if !in.AllowNegative {
 		bal, err := r.GetBalance(ctx, tx, in.DeviceID)
 		if err != nil {
@@ -300,11 +406,9 @@ func (r *LedgerRepository) ApplyDebit(ctx context.Context, tx *sql.Tx, in DebitR
 			return EntryResponse{}, fmt.Errorf("insufficient funds: have %d need %d", bal, in.AmountMsat)
 		}
 	}
-	// Subtract
 	if err := r.UpdateBalance(ctx, tx, in.DeviceID, -in.AmountMsat); err != nil {
 		return EntryResponse{}, err
 	}
-	// Read new balance
 	bal, err := r.GetBalance(ctx, tx, in.DeviceID)
 	if err != nil {
 		return EntryResponse{}, err
@@ -331,38 +435,36 @@ func (r *LedgerRepository) ApplyDebit(ctx context.Context, tx *sql.Tx, in DebitR
    =========================================
 */
 
-// GetCachedIdem retrieves a cached idempotency response
+// GetCachedIdem retrieves a cached idempotency response.
 func (r *LedgerRepository) GetCachedIdem(ctx context.Context, key string) (kind string, resp []byte, ok bool, err error) {
-	query := `SELECT kind, response_json FROM idempotency WHERE idempotency_key=?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "idempotency"),
-		attribute.String("idempotency.key", key),
-	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get cached idempotency", attrs, r.db, query, key)
-	var k string
-	var rStr string
-	if e := row.Scan(&k, &rStr); e == sql.ErrNoRows {
+	_ = ctx
+	val, closer, err := r.db.Get(keyIdem(key))
+	if errors.Is(err, pebble.ErrNotFound) {
 		return "", nil, false, nil
-	} else if e != nil {
-		return "", nil, false, e
 	}
-	return k, []byte(rStr), true, nil
+	if err != nil {
+		return "", nil, false, err
+	}
+	defer closer.Close()
+	var st storedIdem
+	if err := json.Unmarshal(val, &st); err != nil {
+		return "", nil, false, err
+	}
+	return st.Kind, []byte(st.ResponseJSON), true, nil
 }
 
-// SaveIdem saves an idempotency response
-func (r *LedgerRepository) SaveIdem(ctx context.Context, tx *sql.Tx, key, kind, reqHash string, response any) error {
+// SaveIdem saves an idempotency response.
+func (r *LedgerRepository) SaveIdem(ctx context.Context, tx *LedgerTx, key, kind, reqHash string, response any) error {
+	_ = ctx
 	js, _ := json.Marshal(response)
-	query := `INSERT INTO idempotency(idempotency_key, kind, request_hash, response_json, created_at)
-		VALUES(?,?,?,?,?)`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "INSERT"),
-		attribute.String("db.table", "idempotency"),
-		attribute.String("idempotency.key", key),
-		attribute.String("idempotency.kind", kind),
+	st := storedIdem{
+		Kind: kind, RequestHash: reqHash, ResponseJSON: string(js), CreatedAt: now(),
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] save idempotency", attrs, tx, query, key, kind, reqHash, string(js), now())
-	return err
+	payload, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	return r.setRaw(tx, keyIdem(key), payload)
 }
 
 /*
@@ -371,172 +473,171 @@ func (r *LedgerRepository) SaveIdem(ctx context.Context, tx *sql.Tx, key, kind, 
    =========================================
 */
 
-// CreateAuthorization creates a new authorization
-func (r *LedgerRepository) CreateAuthorization(ctx context.Context, tx *sql.Tx, authID, deviceID, requestID string, grantedMsat int64, issuedAt, expiresAt string) error {
-	query := `
-		INSERT INTO authorizations(
-			authorization_id, device_id, request_id, granted_msat, remaining_msat,
-			consumed_msat, overflow_msat, issued_at, expires_at, status, created_at
-		) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "INSERT"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("authorization.id", authID),
-		attribute.String("device.id", deviceID),
-		attribute.String("request.id", requestID),
-		attribute.Int64("granted_msat", grantedMsat),
+func (r *LedgerRepository) loadAuthorization(ctx context.Context, tx *LedgerTx, authorizationID string) (*storedAuthorization, error) {
+	_ = ctx
+	k := keyAuthRecord(authorizationID)
+	val, closer, err := r.getRaw(tx, k)
+	if errors.Is(err, pebble.ErrNotFound) {
+		return nil, ErrNotFound
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] create authorization", attrs, tx, query,
-		authID, deviceID, requestID, grantedMsat, grantedMsat,
-		0, 0, issuedAt, expiresAt, "active", time.Now().Unix(),
-	)
-	return err
+	if err != nil {
+		return nil, err
+	}
+	defer closer.Close()
+	var st storedAuthorization
+	if err := json.Unmarshal(val, &st); err != nil {
+		return nil, err
+	}
+	return &st, nil
 }
 
-// GetAuthorizationByRequestID retrieves an authorization by request_id
-func (r *LedgerRepository) GetAuthorizationByRequestID(ctx context.Context, tx *sql.Tx, requestID string) (*ledgermodel.Authorization, string, error) {
-	query := `
-		SELECT authorization_id, device_id, granted_msat, remaining_msat, issued_at, expires_at, status
-		FROM authorizations
-		WHERE request_id = ?
-		ORDER BY created_at DESC
-		LIMIT 1`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("request.id", requestID),
+func (r *LedgerRepository) putAuthorization(tx *LedgerTx, st *storedAuthorization) error {
+	payload, err := json.Marshal(st)
+	if err != nil {
+		return err
 	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get authorization by request id", attrs, tx, query, requestID)
+	return r.setRaw(tx, keyAuthRecord(st.AuthorizationID), payload)
+}
 
-	var authID, deviceID, issuedAt, expiresAt, authStatus string
-	var grantedMsat, remainingMsat int64
+// CreateAuthorization creates a new authorization.
+func (r *LedgerRepository) CreateAuthorization(ctx context.Context, tx *LedgerTx, authID, deviceID, requestID string, grantedMsat int64, issuedAt, expiresAt string) error {
+	_ = ctx
+	createdAt := time.Now().Unix()
+	st := &storedAuthorization{
+		AuthorizationID: authID,
+		DeviceID:        deviceID,
+		RequestID:       requestID,
+		GrantedMsat:     grantedMsat,
+		RemainingMsat:   grantedMsat,
+		ConsumedMsat:    0,
+		OverflowMsat:    0,
+		IssuedAt:        issuedAt,
+		ExpiresAt:       expiresAt,
+		Status:          "active",
+		CreatedAt:       createdAt,
+	}
+	if err := r.putAuthorization(tx, st); err != nil {
+		return err
+	}
+	if err := r.setRaw(tx, keyAuthByRequest(requestID), []byte(authID)); err != nil {
+		return err
+	}
+	idx := keyAuthByDevice(deviceID, createdAt, authID)
+	return r.setRaw(tx, idx, []byte{1})
+}
 
-	err := row.Scan(&authID, &deviceID, &grantedMsat, &remainingMsat, &issuedAt, &expiresAt, &authStatus)
+// GetAuthorizationByRequestID retrieves an authorization by request_id (latest).
+func (r *LedgerRepository) GetAuthorizationByRequestID(ctx context.Context, tx *LedgerTx, requestID string) (*ledgermodel.Authorization, string, error) {
+	val, closer, err := r.getRaw(tx, keyAuthByRequest(requestID))
+	if errors.Is(err, pebble.ErrNotFound) {
+		return nil, "", ErrNotFound
+	}
 	if err != nil {
 		return nil, "", err
 	}
-
-	auth := &ledgermodel.Authorization{
-		DeviceId:        deviceID,
-		AuthorizationId: authID,
-		GrantedMsat:     grantedMsat,
-		RemainingMsat:   remainingMsat,
-		IssuedAt:        issuedAt,
-		ExpiresAt:       expiresAt,
+	defer closer.Close()
+	authID := string(val)
+	st, err := r.loadAuthorization(ctx, tx, authID)
+	if err != nil {
+		return nil, "", err
 	}
-
-	return auth, authStatus, nil
+	auth := &ledgermodel.Authorization{
+		DeviceId: st.DeviceID, AuthorizationId: st.AuthorizationID,
+		GrantedMsat: st.GrantedMsat, RemainingMsat: st.RemainingMsat,
+		IssuedAt: st.IssuedAt, ExpiresAt: st.ExpiresAt,
+	}
+	return auth, st.Status, nil
 }
 
-// GetActiveAuthorization retrieves the most recent active authorization for a device
-func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *sql.Tx, deviceID string, expiresAfter string) (string, int64, int64, int64, string, string, error) {
-	query := `
-		SELECT authorization_id, remaining_msat, granted_msat, overflow_msat, expires_at, status
-		FROM authorizations
-		WHERE device_id = ? AND status = 'active' AND expires_at > ?
-		ORDER BY created_at DESC
-		LIMIT 1`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("device.id", deviceID),
-	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get active authorization", attrs, tx, query, deviceID, expiresAfter)
-
-	var authorizationID string
-	var remainingMsat int64
-	var grantedMsat int64
-	var overflowMsat int64
-	var expiresAt string
-	var status string
-
-	err := row.Scan(&authorizationID, &remainingMsat, &grantedMsat, &overflowMsat, &expiresAt, &status)
+// GetActiveAuthorization retrieves the most recent active authorization for a device.
+func (r *LedgerRepository) GetActiveAuthorization(ctx context.Context, tx *LedgerTx, deviceID string, expiresAfter string) (string, int64, int64, int64, string, string, error) {
+	st, err := r.findActiveAuthorization(ctx, tx, deviceID, expiresAfter)
 	if err != nil {
 		return "", 0, 0, 0, "", "", err
 	}
-
-	return authorizationID, remainingMsat, grantedMsat, overflowMsat, expiresAt, status, nil
+	return st.AuthorizationID, st.RemainingMsat, st.GrantedMsat, st.OverflowMsat, st.ExpiresAt, st.Status, nil
 }
 
-// GetActiveAuthorizationForDevice retrieves the most recent active authorization for a device
-// Returns the authorization and its status, or sql.ErrNoRows if none exists
-func (r *LedgerRepository) GetActiveAuthorizationForDevice(ctx context.Context, tx *sql.Tx, deviceID string) (*ledgermodel.Authorization, string, error) {
-	now := time.Now().Format(time.RFC3339)
-	query := `
-		SELECT authorization_id, device_id, granted_msat, remaining_msat, issued_at, expires_at, status
-		FROM authorizations
-		WHERE device_id = ? AND status = 'active' AND expires_at > ?
-		ORDER BY created_at DESC
-		LIMIT 1`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("device.id", deviceID),
+func (r *LedgerRepository) findActiveAuthorization(ctx context.Context, tx *LedgerTx, deviceID string, expiresAfter string) (*storedAuthorization, error) {
+	_ = ctx
+	prefix := []byte(fmt.Sprintf("%s%s/", keyPrefixAuthByDevice, deviceID))
+	iter, err := r.iterForTx(tx, prefix)
+	if err != nil {
+		return nil, err
 	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get active authorization for device", attrs, tx, query, deviceID, now)
+	defer iter.Close()
 
-	var authID, deviceIDResult, issuedAt, expiresAt, authStatus string
-	var grantedMsat, remainingMsat int64
+	for iter.First(); iter.Valid(); iter.Next() {
+		keyStr := string(iter.Key())
+		parts := strings.Split(keyStr, "/")
+		if len(parts) < 5 {
+			continue
+		}
+		authID := parts[len(parts)-1]
+		st, err := r.loadAuthorization(ctx, tx, authID)
+		if err != nil {
+			continue
+		}
+		if st.Status == "active" && st.ExpiresAt > expiresAfter {
+			return st, nil
+		}
+	}
+	return nil, ErrNotFound
+}
 
-	err := row.Scan(&authID, &deviceIDResult, &grantedMsat, &remainingMsat, &issuedAt, &expiresAt, &authStatus)
+func (r *LedgerRepository) iterForTx(tx *LedgerTx, prefix []byte) (*pebble.Iterator, error) {
+	if tx != nil && tx.batch != nil {
+		return tx.batch.NewIter(&pebble.IterOptions{
+			LowerBound: prefix,
+			UpperBound: prefixUpperBound(prefix),
+		})
+	}
+	return r.db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixUpperBound(prefix),
+	})
+}
+
+// GetActiveAuthorizationForDevice retrieves the most recent active authorization for a device.
+func (r *LedgerRepository) GetActiveAuthorizationForDevice(ctx context.Context, tx *LedgerTx, deviceID string) (*ledgermodel.Authorization, string, error) {
+	nowStr := time.Now().Format(time.RFC3339)
+	st, err := r.findActiveAuthorization(ctx, tx, deviceID, nowStr)
 	if err != nil {
 		return nil, "", err
 	}
-
 	auth := &ledgermodel.Authorization{
-		DeviceId:        deviceIDResult,
-		AuthorizationId: authID,
-		GrantedMsat:     grantedMsat,
-		RemainingMsat:   remainingMsat,
-		IssuedAt:        issuedAt,
-		ExpiresAt:       expiresAt,
+		DeviceId: st.DeviceID, AuthorizationId: st.AuthorizationID,
+		GrantedMsat: st.GrantedMsat, RemainingMsat: st.RemainingMsat,
+		IssuedAt: st.IssuedAt, ExpiresAt: st.ExpiresAt,
 	}
-
-	return auth, authStatus, nil
+	return auth, st.Status, nil
 }
 
-// UpdateAuthorization updates an authorization's remaining amount, consumed amount, overflow amount, and status
-func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, remainingMsat int64, consumedMsat int64, overflowMsat int64, status string) error {
-	query := `
-		UPDATE authorizations
-		SET remaining_msat = ?, consumed_msat = ?, overflow_msat = ?, status = ?
-		WHERE authorization_id = ?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "UPDATE"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("authorization.id", authorizationID),
-		attribute.String("authorization.status", status),
-		attribute.Int64("remaining_msat", remainingMsat),
+// UpdateAuthorization updates an authorization's amounts and status.
+func (r *LedgerRepository) UpdateAuthorization(ctx context.Context, tx *LedgerTx, authorizationID string, remainingMsat int64, consumedMsat int64, overflowMsat int64, status string) error {
+	st, err := r.loadAuthorization(ctx, tx, authorizationID)
+	if err != nil {
+		return err
 	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] update authorization", attrs, tx, query,
-		remainingMsat, consumedMsat, overflowMsat, status, authorizationID,
-	)
-	return err
+	st.RemainingMsat = remainingMsat
+	st.ConsumedMsat = consumedMsat
+	st.OverflowMsat = overflowMsat
+	st.Status = status
+	_ = ctx
+	return r.putAuthorization(tx, st)
 }
 
-// ConsumeAuthorization atomically consumes from an authorization
-// This reduces lock contention by doing the calculation and update in a single SQL statement
-// Returns the new remaining_msat, consumed_msat, overflow_msat, and status
-func (r *LedgerRepository) ConsumeAuthorization(ctx context.Context, tx *sql.Tx, authorizationID string, debitAmount int64) (newRemaining int64, newConsumed int64, newOverflow int64, newStatus string, err error) {
-	// Use a single UPDATE statement with CASE expressions to calculate new values atomically
-	// This reduces lock contention by minimizing the time the row is locked
-	// SQLite doesn't support MAX()/MIN() in UPDATE, so we use CASE expressions
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "UPDATE"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("authorization.id", authorizationID),
-		attribute.Int64("debit_amount", debitAmount),
-	}
-
-	// First, read current values to calculate new ones
-	query := `SELECT remaining_msat, consumed_msat, overflow_msat, granted_msat FROM authorizations WHERE authorization_id = ?`
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get authorization for consume", attrs, tx, query, authorizationID)
-	var currentRemaining, currentConsumed, currentOverflow, grantedMsat int64
-	if err := row.Scan(&currentRemaining, &currentConsumed, &currentOverflow, &grantedMsat); err != nil {
+// ConsumeAuthorization atomically consumes from an authorization.
+func (r *LedgerRepository) ConsumeAuthorization(ctx context.Context, tx *LedgerTx, authorizationID string, debitAmount int64) (newRemaining int64, newConsumed int64, newOverflow int64, newStatus string, err error) {
+	st, err := r.loadAuthorization(ctx, tx, authorizationID)
+	if err != nil {
 		return 0, 0, 0, "", err
 	}
+	currentRemaining := st.RemainingMsat
+	currentConsumed := st.ConsumedMsat
+	currentOverflow := st.OverflowMsat
+	grantedMsat := st.GrantedMsat
 
-	// Calculate new values
 	actualDebit := debitAmount
 	if currentRemaining < debitAmount {
 		actualDebit = currentRemaining
@@ -560,165 +661,132 @@ func (r *LedgerRepository) ConsumeAuthorization(ctx context.Context, tx *sql.Tx,
 		newStatus = "completed"
 	}
 
-	// Update with calculated values
-	_, err = r.sqlTracer.ExecWithSpan(ctx, "[repository] consume authorization", attrs, tx, `
-		UPDATE authorizations
-		SET remaining_msat = ?, consumed_msat = ?, overflow_msat = ?, status = ?
-		WHERE authorization_id = ?`,
-		newRemaining, newConsumed, newOverflow, newStatus, authorizationID,
-	)
-	if err != nil {
+	st.RemainingMsat = newRemaining
+	st.ConsumedMsat = newConsumed
+	st.OverflowMsat = newOverflow
+	st.Status = newStatus
+
+	_ = ctx
+	if err := r.putAuthorization(tx, st); err != nil {
 		return 0, 0, 0, "", err
 	}
-
 	return newRemaining, newConsumed, newOverflow, newStatus, nil
 }
 
-// ExpiredAuthorization represents an expired authorization
+// GetExpiredAuthorizations retrieves expired active authorizations (expires_at < expiresBefore).
+func (r *LedgerRepository) GetExpiredAuthorizations(ctx context.Context, expiresBefore string) ([]ExpiredAuthorization, error) {
+	_ = ctx
+	prefix := []byte(keyPrefixAuthRecord)
+	var expired []ExpiredAuthorization
+	iter, err := r.db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixUpperBound(prefix),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	for iter.First(); iter.Valid(); iter.Next() {
+		val := iter.Value()
+		var st storedAuthorization
+		if err := json.Unmarshal(val, &st); err != nil {
+			continue
+		}
+		if st.Status == "active" && st.ExpiresAt < expiresBefore {
+			expired = append(expired, ExpiredAuthorization{
+				AuthorizationID: st.AuthorizationID,
+				DeviceID:        st.DeviceID,
+				ExpiresAt:       st.ExpiresAt,
+			})
+		}
+	}
+	return expired, nil
+}
+
+// GetActiveAuthorizationByID retrieves an active authorization's device ID and remaining amount.
+func (r *LedgerRepository) GetActiveAuthorizationByID(ctx context.Context, tx *LedgerTx, authorizationID string) (deviceID string, remainingMsat int64, err error) {
+	st, err := r.loadAuthorization(ctx, tx, authorizationID)
+	if err != nil {
+		return "", 0, err
+	}
+	if st.Status != "active" {
+		return "", 0, ErrNotFound
+	}
+	return st.DeviceID, st.RemainingMsat, nil
+}
+
+// MarkAuthorizationExpired marks an authorization as expired.
+func (r *LedgerRepository) MarkAuthorizationExpired(ctx context.Context, tx *LedgerTx, authorizationID string) error {
+	st, err := r.loadAuthorization(ctx, tx, authorizationID)
+	if err != nil {
+		return err
+	}
+	st.Status = "expired"
+	st.RemainingMsat = 0
+	_ = ctx
+	return r.putAuthorization(tx, st)
+}
+
+// ListAuthorizations retrieves authorizations for a device with optional status filter.
+func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID string, statusFilter string) ([]AuthorizationResponse, error) {
+	_ = ctx
+	prefix := []byte(fmt.Sprintf("%s%s/", keyPrefixAuthByDevice, deviceID))
+	var resp []AuthorizationResponse
+	iter, err := r.db.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+		UpperBound: prefixUpperBound(prefix),
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
+	for iter.First(); iter.Valid(); iter.Next() {
+		keyStr := string(iter.Key())
+		parts := strings.Split(keyStr, "/")
+		if len(parts) < 5 {
+			continue
+		}
+		authID := parts[len(parts)-1]
+		val, closer, err := r.db.Get(keyAuthRecord(authID))
+		if err != nil {
+			continue
+		}
+		var st storedAuthorization
+		if err := json.Unmarshal(val, &st); err != nil {
+			closer.Close()
+			continue
+		}
+		closer.Close()
+		switch statusFilter {
+		case "active":
+			if st.Status != "active" {
+				continue
+			}
+		case "non-active":
+			if st.Status != "completed" && st.Status != "expired" {
+				continue
+			}
+		}
+		resp = append(resp, AuthorizationResponse{
+			AuthorizationID: st.AuthorizationID,
+			DeviceID:        st.DeviceID,
+			RequestID:       st.RequestID,
+			GrantedMsat:     st.GrantedMsat,
+			RemainingMsat:   st.RemainingMsat,
+			ConsumedMsat:    st.ConsumedMsat,
+			OverflowMsat:    st.OverflowMsat,
+			IssuedAt:        st.IssuedAt,
+			ExpiresAt:       st.ExpiresAt,
+			Status:          st.Status,
+			CreatedAt:       st.CreatedAt,
+		})
+	}
+	return resp, nil
+}
+
+// ExpiredAuthorization represents an expired authorization.
 type ExpiredAuthorization struct {
 	AuthorizationID string
 	DeviceID        string
 	ExpiresAt       string
-}
-
-// GetExpiredAuthorizations retrieves all expired active authorizations
-func (r *LedgerRepository) GetExpiredAuthorizations(ctx context.Context, expiresBefore string) ([]ExpiredAuthorization, error) {
-	query := `
-		SELECT authorization_id, device_id, expires_at
-		FROM authorizations
-		WHERE status = 'active' AND expires_at < ?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "authorizations"),
-	}
-	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] get expired authorizations", attrs, r.db, query, expiresBefore)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var expired []ExpiredAuthorization
-	for rows.Next() {
-		var auth ExpiredAuthorization
-		if err := rows.Scan(&auth.AuthorizationID, &auth.DeviceID, &auth.ExpiresAt); err != nil {
-			continue
-		}
-		expired = append(expired, auth)
-	}
-
-	return expired, nil
-}
-
-// GetActiveAuthorizationByID retrieves an active authorization's device ID and remaining amount
-func (r *LedgerRepository) GetActiveAuthorizationByID(ctx context.Context, tx *sql.Tx, authorizationID string) (deviceID string, remainingMsat int64, err error) {
-	query := `
-		SELECT device_id, remaining_msat
-		FROM authorizations
-		WHERE authorization_id = ? AND status = 'active'`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("authorization.id", authorizationID),
-	}
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get active authorization by id", attrs, tx, query, authorizationID)
-
-	if err := row.Scan(&deviceID, &remainingMsat); err != nil {
-		return "", 0, err
-	}
-
-	return deviceID, remainingMsat, nil
-}
-
-// MarkAuthorizationExpired marks an authorization as expired
-func (r *LedgerRepository) MarkAuthorizationExpired(ctx context.Context, tx *sql.Tx, authorizationID string) error {
-	query := `
-		UPDATE authorizations
-		SET status = 'expired',
-		    remaining_msat = 0
-		WHERE authorization_id = ?`
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "UPDATE"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("authorization.id", authorizationID),
-	}
-	_, err := r.sqlTracer.ExecWithSpan(ctx, "[repository] mark authorization expired", attrs, tx, query, authorizationID)
-	return err
-}
-
-// ListAuthorizations retrieves authorizations for a device with optional status filter
-func (r *LedgerRepository) ListAuthorizations(ctx context.Context, deviceID string, statusFilter string) ([]AuthorizationResponse, error) {
-	var query string
-	var args []interface{}
-
-	if statusFilter == "active" {
-		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat, overflow_msat,
-			       issued_at, expires_at, status, created_at
-			FROM authorizations
-			WHERE device_id = ? AND status = 'active'
-			ORDER BY created_at DESC`
-		args = []interface{}{deviceID}
-	} else if statusFilter == "non-active" {
-		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat, overflow_msat,
-			       issued_at, expires_at, status, created_at
-			FROM authorizations
-			WHERE device_id = ? AND status IN ('completed', 'expired')
-			ORDER BY created_at DESC`
-		args = []interface{}{deviceID}
-	} else {
-		// No filter - return all
-		query = `
-			SELECT authorization_id, device_id, request_id, granted_msat, remaining_msat, consumed_msat, overflow_msat,
-			       issued_at, expires_at, status, created_at
-			FROM authorizations
-			WHERE device_id = ?
-			ORDER BY created_at DESC`
-		args = []interface{}{deviceID}
-	}
-
-	attrs := []attribute.KeyValue{
-		attribute.String("db.operation", "SELECT"),
-		attribute.String("db.table", "authorizations"),
-		attribute.String("device.id", deviceID),
-		attribute.String("status.filter", statusFilter),
-	}
-	rows, err := r.sqlTracer.QueryWithSpan(ctx, "[repository] list authorizations", attrs, r.db, query, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var resp []AuthorizationResponse
-	for rows.Next() {
-		var auth AuthorizationResponse
-		if err := rows.Scan(
-			&auth.AuthorizationID,
-			&auth.DeviceID,
-			&auth.RequestID,
-			&auth.GrantedMsat,
-			&auth.RemainingMsat,
-			&auth.ConsumedMsat,
-			&auth.OverflowMsat,
-			&auth.IssuedAt,
-			&auth.ExpiresAt,
-			&auth.Status,
-			&auth.CreatedAt,
-		); err != nil {
-			continue
-		}
-		resp = append(resp, auth)
-	}
-
-	return resp, nil
-}
-
-// BeginTx starts a new transaction
-func (r *LedgerRepository) BeginTx(ctx context.Context, opts *sql.TxOptions) (*sql.Tx, error) {
-	return r.db.BeginTx(ctx, opts)
-}
-
-// Close closes the database connection
-func (r *LedgerRepository) Close() error {
-	return r.db.Close()
 }
