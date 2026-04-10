@@ -5,6 +5,24 @@ lina_mosquitto_cert_dir: /etc/lina/mosquitto
 # Controller path to ca.crt, server.crt, server.key. Empty = <repo>/infrastructure/certs
 lina_mosquitto_certs_src: ""
 
+# Mosquitto official apt repository (recommended for newer 2.x on Debian/Ubuntu).
+lina_mosquitto_repo_enable: true
+lina_mosquitto_repo_base_url: "https://repo.mosquitto.org/debian"
+lina_mosquitto_repo_suite: "{{ ansible_facts['distribution_release'] }}"
+# Map unsupported/new distro codenames to the closest Mosquitto repo list.
+# Example: trixie may not exist yet on repo.mosquitto.org, so use bookworm list.
+lina_mosquitto_repo_suite_fallbacks:
+  trixie: bookworm
+lina_mosquitto_repo_key_url: "{{ lina_mosquitto_repo_base_url }}/mosquitto-repo.gpg"
+lina_mosquitto_repo_keyring_path: "/etc/apt/trusted.gpg.d/mosquitto-repo.gpg"
+lina_mosquitto_repo_list_url: "{{ lina_mosquitto_repo_base_url }}/mosquitto-{{ lina_mosquitto_repo_effective_suite | default(lina_mosquitto_repo_suite) }}.list"
+lina_mosquitto_repo_list_path: "/etc/apt/sources.list.d/mosquitto-{{ lina_mosquitto_repo_effective_suite | default(lina_mosquitto_repo_suite) }}.list"
+
+# Package pin for Mosquitto broker major/minor series.
+# Role resolves the newest apt candidate matching this regex, then installs exact version.
+# Example '^2\.' allows any 2.x (default), '^2\.1(\.|$)' enforces 2.1.x only.
+lina_mosquitto_version_regex: '^2\.'
+
 # Dynamic Security plugin (matches infrastructure/mosquitto/config/mosquitto.conf)
 lina_mosquitto_dynsec_enable: true
 lina_mosquitto_dynsec_config_file: /var/lib/mosquitto/dynamic-security.json

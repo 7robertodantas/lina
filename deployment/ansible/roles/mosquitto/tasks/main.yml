@@ -36,10 +36,70 @@
   loop_control:
     label: "{{ item.item }}"
 
+- name: Install Mosquitto repository signing key
+  ansible.builtin.get_url:
+    url: "{{ lina_mosquitto_repo_key_url }}"
+    dest: "{{ lina_mosquitto_repo_keyring_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: lina_mosquitto_repo_enable | default(true) | bool
+
+- name: Resolve effective Mosquitto repo suite
+  ansible.builtin.set_fact:
+    lina_mosquitto_repo_effective_suite: >-
+      {{
+        lina_mosquitto_repo_suite_fallbacks[lina_mosquitto_repo_suite]
+        if (lina_mosquitto_repo_suite in lina_mosquitto_repo_suite_fallbacks)
+        else lina_mosquitto_repo_suite
+      }}
+  when: lina_mosquitto_repo_enable | default(true) | bool
+
+- name: Install Mosquitto apt source list for distro
+  ansible.builtin.get_url:
+    url: "{{ lina_mosquitto_repo_list_url }}"
+    dest: "{{ lina_mosquitto_repo_list_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: lina_mosquitto_repo_enable | default(true) | bool
+
+- name: Refresh apt cache after repository setup
+  ansible.builtin.apt:
+    update_cache: true
+  when: lina_mosquitto_repo_enable | default(true) | bool
+
+- name: Query apt candidates for Mosquitto
+  ansible.builtin.command: apt-cache madison mosquitto
+  register: lina_mosquitto_madison
+  changed_when: false
+
+- name: Select Mosquitto version candidate matching requested series
+  ansible.builtin.set_fact:
+    lina_mosquitto_candidate_versions: "{{ lina_mosquitto_madison.stdout | regex_findall('\\|\\s*([^|\\s]+)\\s*\\|') }}"
+    lina_mosquitto_selected_version: ""
+
+- name: Pick first matching Mosquitto candidate version
+  ansible.builtin.set_fact:
+    lina_mosquitto_selected_version: "{{ item }}"
+  loop: "{{ lina_mosquitto_candidate_versions }}"
+  when:
+    - lina_mosquitto_selected_version | length == 0
+    - (item | regex_search(lina_mosquitto_version_regex)) is not none
+
+- name: Fail if requested Mosquitto version is unavailable
+  ansible.builtin.assert:
+    that:
+      - lina_mosquitto_selected_version | length > 0
+    fail_msg: >-
+      No apt candidate for mosquitto matching regex {{ lina_mosquitto_version_regex }}.
+      Parsed versions: {{ lina_mosquitto_candidate_versions | default([]) }}.
+      Raw candidates: {{ lina_mosquitto_madison.stdout_lines | default([]) }}
+
 - name: Install Mosquitto
   ansible.builtin.apt:
     name:
-      - mosquitto
+      - "mosquitto={{ lina_mosquitto_selected_version }}"
       - mosquitto-clients
     state: present
 
