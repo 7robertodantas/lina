@@ -49,6 +49,30 @@ Builds and pushes Docker images to a registry.
 
 See `DOCKER_PUBLISH.md` for detailed documentation.
 
+### `edge-up-default.sh`
+Starts `docker-compose.evaluation.edge.yml` using Docker-managed named volumes.
+
+**Usage:**
+```bash
+./deployment/scripts/edge-up-default.sh
+./deployment/scripts/edge-up-default.sh --force-recreate
+```
+
+### `edge-up-ssd.sh`
+Starts edge evaluation compose with SSD bind mounts override (`docker-compose.evaluation.edge.ssd.yml`).
+
+**Usage:**
+```bash
+export EDGE_DATA_ROOT=/Volumes/MySSD/lnpay-edge-data
+./deployment/scripts/edge-up-ssd.sh
+```
+
+### Optional shell aliases (zsh/bash)
+```bash
+alias edge-up-default='$PWD/deployment/scripts/edge-up-default.sh'
+alias edge-up-ssd='EDGE_DATA_ROOT=/Volumes/MySSD/lnpay-edge-data $PWD/deployment/scripts/edge-up-ssd.sh'
+```
+
 ## Notes
 
 - Scripts automatically detect the project root directory

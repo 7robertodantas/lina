@@ -1,0 +1,26 @@
+services:
+  redis:
+    volumes:
+      - ${EDGE_DATA_ROOT}/redis:/data
+
+  mosquitto:
+    volumes:
+      - ${EDGE_DATA_ROOT}/mosquitto:/mosquitto/data
+      - ../infrastructure/certs:/mosquitto/certs:ro
+
+  device:
+    volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ${EDGE_DATA_ROOT}/device:/data
+
+  ledger:
+    volumes:
+      - ${EDGE_DATA_ROOT}/ledger:/data
+
+  consumption:
+    volumes:
+      - ${EDGE_DATA_ROOT}/consumption:/data
+
+  lightning:
+    volumes:
+      - ${EDGE_DATA_ROOT}/lightning:/data
