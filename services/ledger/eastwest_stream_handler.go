@@ -87,7 +87,10 @@ func (esh *EastWestStreamHandler) HandleInvoiceSettled(ctx context.Context, sett
 		return fmt.Errorf("failed to store idempotency for invoice %s: %w", invoiceID, err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	commitStart := time.Now()
+	err = tx.Commit()
+	RecordTxCommitLatency(ctx, "stream.invoice_settled", time.Since(commitStart).Seconds(), err == nil)
+	if err != nil {
 		return fmt.Errorf("failed to commit credit for invoice %s: %w", invoiceID, err)
 	}
 
@@ -139,7 +142,10 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 	}
 
 	// Commit transaction (processing)
-	if err := tx.Commit(); err != nil {
+	commitStart := time.Now()
+	err = tx.Commit()
+	RecordTxCommitLatency(ctx, "stream.consumption_recorded", time.Since(commitStart).Seconds(), err == nil)
+	if err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 

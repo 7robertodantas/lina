@@ -14,9 +14,13 @@ import (
 
 var (
 	// Metrics instruments
-	authorizationsTotal metric.Int64Counter
-	entriesTotal        metric.Int64Counter
-	debitLatencySeconds metric.Float64Histogram
+	authorizationsTotal     metric.Int64Counter
+	entriesTotal            metric.Int64Counter
+	debitLatencySeconds     metric.Float64Histogram
+	txCommitSeconds         metric.Float64Histogram
+	streamHandlerSeconds    metric.Float64Histogram
+	streamMessageAgeSeconds metric.Float64Histogram
+	streamAckSeconds        metric.Float64Histogram
 )
 
 // initMetrics initializes Prometheus metrics using OpenTelemetry
@@ -90,6 +94,63 @@ func initMetrics() error {
 		return err
 	}
 
+	// Create histogram for tx commit latency (seconds)
+	txCommitSeconds, err = meter.Float64Histogram(
+		"ledger_tx_commit_seconds",
+		metric.WithDescription("Ledger transaction commit duration in seconds"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(
+			0.0005, 0.001, 0.002, 0.005, 0.01,
+			0.02, 0.05, 0.1, 0.2, 0.5,
+			1.0, 2.0, 5.0, 10.0,
+		),
+	)
+	if err != nil {
+		return err
+	}
+
+	streamHandlerSeconds, err = meter.Float64Histogram(
+		"ledger_stream_handler_seconds",
+		metric.WithDescription("End-to-end stream message handling duration in seconds"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(
+			0.0005, 0.001, 0.002, 0.005, 0.01,
+			0.02, 0.05, 0.1, 0.2, 0.5,
+			1.0, 2.0, 5.0, 10.0, 30.0, 60.0,
+		),
+	)
+	if err != nil {
+		return err
+	}
+
+	streamMessageAgeSeconds, err = meter.Float64Histogram(
+		"ledger_stream_message_age_seconds",
+		metric.WithDescription("Age in seconds of a stream message when processing starts"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(
+			0.001, 0.01, 0.05, 0.1, 0.2,
+			0.5, 1.0, 2.0, 5.0, 10.0,
+			30.0, 60.0, 120.0, 300.0, 600.0,
+		),
+	)
+	if err != nil {
+		return err
+	}
+
+	streamAckSeconds, err = meter.Float64Histogram(
+		"ledger_stream_ack_seconds",
+		metric.WithDescription("ACK call duration in seconds for stream messages"),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(
+			0.0005, 0.001, 0.002, 0.005, 0.01,
+			0.02, 0.05, 0.1, 0.2, 0.5,
+			1.0, 2.0, 5.0,
+		),
+	)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -145,6 +206,70 @@ func RecordDebitLatency(ctx context.Context, latencySeconds float64) {
 	debitLatencySeconds.Record(ctx, latencySeconds,
 		metric.WithAttributes(
 			attribute.String("source", "usage"),
+		),
+	)
+}
+
+// RecordTxCommitLatency records transaction commit latency by operation and outcome.
+func RecordTxCommitLatency(ctx context.Context, operation string, latencySeconds float64, success bool) {
+	outcome := "error"
+	if success {
+		outcome = "ok"
+	}
+	txCommitSeconds.Record(ctx, latencySeconds,
+		metric.WithAttributes(
+			attribute.String("operation", operation),
+			attribute.String("outcome", outcome),
+		),
+	)
+}
+
+func streamModeLabel(pendingRetry bool) string {
+	if pendingRetry {
+		return "retry"
+	}
+	return "main"
+}
+
+// RecordStreamHandlerLatency records end-to-end stream handler latency (includes ACK path).
+func RecordStreamHandlerLatency(ctx context.Context, streamName, operation string, latencySeconds float64, success bool, pendingRetry bool) {
+	outcome := "error"
+	if success {
+		outcome = "ok"
+	}
+	streamHandlerSeconds.Record(ctx, latencySeconds,
+		metric.WithAttributes(
+			attribute.String("stream", streamName),
+			attribute.String("operation", operation),
+			attribute.String("mode", streamModeLabel(pendingRetry)),
+			attribute.String("outcome", outcome),
+		),
+	)
+}
+
+// RecordStreamMessageAge records queue age when a stream message starts processing.
+func RecordStreamMessageAge(ctx context.Context, streamName, operation string, ageSeconds float64, pendingRetry bool) {
+	streamMessageAgeSeconds.Record(ctx, ageSeconds,
+		metric.WithAttributes(
+			attribute.String("stream", streamName),
+			attribute.String("operation", operation),
+			attribute.String("mode", streamModeLabel(pendingRetry)),
+		),
+	)
+}
+
+// RecordStreamAckLatency records ACK call duration.
+func RecordStreamAckLatency(ctx context.Context, streamName, operation string, latencySeconds float64, success bool, pendingRetry bool) {
+	outcome := "error"
+	if success {
+		outcome = "ok"
+	}
+	streamAckSeconds.Record(ctx, latencySeconds,
+		metric.WithAttributes(
+			attribute.String("stream", streamName),
+			attribute.String("operation", operation),
+			attribute.String("mode", streamModeLabel(pendingRetry)),
+			attribute.String("outcome", outcome),
 		),
 	)
 }

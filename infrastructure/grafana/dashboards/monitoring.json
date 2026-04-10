@@ -116,7 +116,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -211,7 +211,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -306,7 +306,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -371,7 +371,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -466,7 +466,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -561,7 +561,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -656,7 +656,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -766,7 +766,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "datasource": {
@@ -795,71 +795,41 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "thresholds"
+            "mode": "palette-classic"
           },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 6,
-        "w": 5,
-        "x": 14,
-        "y": 20
-      },
-      "id": 8,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.3.1",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "max_over_time(k6_vus[30s])",
-          "legendFormat": "__auto",
-          "range": true,
-          "refId": "A"
-        }
-      ],
-      "title": "VU's",
-      "type": "stat"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "PBFA97CFB590B2093"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
           },
           "mappings": [],
           "thresholds": {
@@ -881,40 +851,36 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 5,
-        "x": 19,
+        "w": 10,
+        "x": 14,
         "y": 20
       },
-      "id": 7,
+      "id": 28,
       "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
         },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum(rate(ledger_debit_latency_seconds_sum[30s]))\n/\nsum(rate(ledger_debit_latency_seconds_count[30s]))",
+          "expr": "histogram_quantile(0.99, sum(rate(ledger_tx_commit_seconds_bucket{outcome=\"ok\"}[1m])) by (le, operation))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Average consumption-to-ledger latency (30s window)",
-      "type": "stat"
+      "title": "Ledger commits latency",
+      "type": "timeseries"
     },
     {
       "datasource": {
@@ -999,7 +965,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "datasource": {
@@ -1071,20 +1037,24 @@
               {
                 "color": "green",
                 "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
               }
             ]
           },
-          "unit": "events"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
-        "w": 5,
+        "h": 6,
+        "w": 10,
         "x": 14,
         "y": 26
       },
-      "id": 14,
+      "id": 29,
       "options": {
         "legend": {
           "calcs": [],
@@ -1098,17 +1068,17 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "sum by (stream, group) (redis_stream_group_lag)",
-          "legendFormat": "{{group}} [{{stream}}]",
+          "expr": "histogram_quantile(0.99, sum(rate(ledger_stream_handler_seconds_bucket{outcome=\"ok\"}[1m])) by (le, stream, operation, mode))",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Redis Stream Consumer Lag",
+      "title": "p99 handler latency by stream/op",
       "type": "timeseries"
     },
     {
@@ -1162,20 +1132,24 @@
               {
                 "color": "green",
                 "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
               }
             ]
           },
-          "unit": "events"
+          "unit": "s"
         },
         "overrides": []
       },
       "gridPos": {
-        "h": 9,
-        "w": 5,
-        "x": 19,
-        "y": 26
+        "h": 6,
+        "w": 10,
+        "x": 14,
+        "y": 32
       },
-      "id": 15,
+      "id": 30,
       "options": {
         "legend": {
           "calcs": [],
@@ -1189,17 +1163,17 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
-          "expr": "redis_stream_group_consumer_messages_pending",
-          "legendFormat": "{{stream}}",
+          "expr": "histogram_quantile(0.99, sum(rate(ledger_stream_message_age_seconds_bucket[1m])) by (le, stream, operation, mode))\n",
+          "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Redis Stream Pending (In Progress)",
+      "title": "p99 message age (queue delay signal):",
       "type": "timeseries"
     },
     {
@@ -1285,7 +1259,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "datasource": {
@@ -1350,7 +1324,6 @@
               "mode": "off"
             }
           },
-          "fieldMinMax": false,
           "mappings": [],
           "thresholds": {
             "mode": "absolute",
@@ -1365,7 +1338,7 @@
               }
             ]
           },
-          "unit": "eps"
+          "unit": "s"
         },
         "overrides": []
       },
@@ -1373,9 +1346,9 @@
         "h": 6,
         "w": 10,
         "x": 14,
-        "y": 35
+        "y": 38
       },
-      "id": 17,
+      "id": 31,
       "options": {
         "legend": {
           "calcs": [],
@@ -1389,25 +1362,17 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "PBFA97CFB590B2093"
-          },
           "editorMode": "code",
-          "exemplar": false,
-          "expr": "sum by (topic) (rate(device_mqtt_messages_received_total[30s]))",
-          "hide": false,
-          "instant": false,
-          "interval": "15",
+          "expr": "histogram_quantile(0.99, sum(rate(ledger_stream_ack_seconds_bucket{outcome=\"ok\"}[1m])) by (le, stream, operation, mode))",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "MQTT Events received per second",
+      "title": "p99 ACK latency",
       "type": "timeseries"
     },
     {
@@ -1490,7 +1455,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "datasource": {
@@ -1509,6 +1474,317 @@
         }
       ],
       "title": "End to end debit latency over time",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 14,
+        "y": 44
+      },
+      "id": 8,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.6",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "max_over_time(k6_vus[30s])",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "VU's",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 5,
+        "x": 19,
+        "y": 44
+      },
+      "id": 7,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.6",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum(rate(ledger_debit_latency_seconds_sum[30s]))\n/\nsum(rate(ledger_debit_latency_seconds_count[30s]))",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Average consumption-to-ledger latency (30s window)",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "events"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 5,
+        "x": 14,
+        "y": 50
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.6",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "sum by (stream, group) (redis_stream_group_lag)",
+          "legendFormat": "{{group}} [{{stream}}]",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Redis Stream Consumer Lag",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          },
+          "unit": "events"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 5,
+        "x": 19,
+        "y": 50
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.6",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "redis_stream_group_consumer_messages_pending",
+          "legendFormat": "{{stream}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Redis Stream Pending (In Progress)",
       "type": "timeseries"
     },
     {
@@ -1578,7 +1854,111 @@
         "h": 6,
         "w": 10,
         "x": 14,
-        "y": 41
+        "y": 59
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "12.3.6",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "PBFA97CFB590B2093"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "sum by (topic) (rate(device_mqtt_messages_received_total[30s]))",
+          "hide": false,
+          "instant": false,
+          "interval": "15",
+          "legendFormat": "__auto",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "MQTT Events received per second",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "eps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 10,
+        "x": 14,
+        "y": 65
       },
       "id": 18,
       "options": {
@@ -1594,7 +1974,7 @@
           "sort": "none"
         }
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "datasource": {
@@ -1621,7 +2001,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 71
       },
       "id": 10,
       "panels": [],
@@ -1660,7 +2040,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 72
       },
       "id": 27,
       "options": {
@@ -1680,7 +2060,7 @@
         "textMode": "auto",
         "wideLayout": true
       },
-      "pluginVersion": "12.3.1",
+      "pluginVersion": "12.3.6",
       "targets": [
         {
           "editorMode": "code",
@@ -1708,5 +2088,5 @@
   "timezone": "browser",
   "title": "LINA Monitoring",
   "uid": "adp8dtw",
-  "version": 1
+  "version": 2
 }

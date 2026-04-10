@@ -65,7 +65,10 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 
 	// If authorization with this request_id exists, return it
 	if existingAuth != nil {
-		if err := tx.Commit(); err != nil {
+		commitStart := time.Now()
+		err = tx.Commit()
+		RecordTxCommitLatency(ctx, "grpc.create_or_get_authorization", time.Since(commitStart).Seconds(), err == nil)
+		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
 		}
 		// Determine status: if still active, return ACTIVE, otherwise return GRANTED (for completed/expired)
@@ -91,7 +94,10 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 
 	// If an active authorization exists for this device, return it
 	if activeAuth != nil {
-		if err := tx.Commit(); err != nil {
+		commitStart := time.Now()
+		err = tx.Commit()
+		RecordTxCommitLatency(ctx, "grpc.create_or_get_authorization", time.Since(commitStart).Seconds(), err == nil)
+		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
 		}
 		// Determine status: if still active, return ACTIVE, otherwise return GRANTED (for completed/expired)
@@ -110,7 +116,10 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 
 	// Check if we have sufficient balance
 	if balanceMsat < req.RequestMsat {
-		if err := tx.Commit(); err != nil {
+		commitStart := time.Now()
+		err = tx.Commit()
+		RecordTxCommitLatency(ctx, "grpc.create_or_get_authorization", time.Since(commitStart).Seconds(), err == nil)
+		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
 		}
 		return &ledgermodel.CreateAuthorizationResponse{
@@ -158,7 +167,10 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	RecordEntry(ctx, "debit", "authorization")
 
 	// Commit transaction
-	if err := tx.Commit(); err != nil {
+	commitStart := time.Now()
+	err = tx.Commit()
+	RecordTxCommitLatency(ctx, "grpc.create_or_get_authorization", time.Since(commitStart).Seconds(), err == nil)
+	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to commit: %v", err)
 	}
 

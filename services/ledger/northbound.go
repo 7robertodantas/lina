@@ -93,7 +93,10 @@ func (nb *NorthboundInterface) getDeviceBalance(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	commitStart := time.Now()
+	err = tx.Commit()
+	RecordTxCommitLatency(c, "http.get_device_balance", time.Since(commitStart).Seconds(), err == nil)
+	if err != nil {
 		c.JSON(500, gin.H{"error": "commit"})
 		return
 	}
@@ -266,7 +269,10 @@ func (nb *NorthboundInterface) postDeviceCredit(c *gin.Context) {
 		c.JSON(409, gin.H{"error": "idempotency conflict"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	commitStart := time.Now()
+	err = tx.Commit()
+	RecordTxCommitLatency(c, "http.device_credit", time.Since(commitStart).Seconds(), err == nil)
+	if err != nil {
 		c.JSON(500, gin.H{"error": "commit"})
 		return
 	}
@@ -338,7 +344,10 @@ func (nb *NorthboundInterface) postDeviceDebit(c *gin.Context) {
 		c.JSON(409, gin.H{"error": "idempotency conflict"})
 		return
 	}
-	if err := tx.Commit(); err != nil {
+	commitStart := time.Now()
+	err = tx.Commit()
+	RecordTxCommitLatency(c, "http.device_debit", time.Since(commitStart).Seconds(), err == nil)
+	if err != nil {
 		c.JSON(500, gin.H{"error": "commit"})
 		return
 	}

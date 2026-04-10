@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,13 +107,42 @@ func runStreamMessagesParallel(p int, msgs []redis.XMessage, runOne func(redis.X
 	wg.Wait()
 }
 
+func messageAgeSecondsFromStreamID(messageID string, now time.Time) (float64, bool) {
+	parts := strings.SplitN(messageID, "-", 2)
+	if len(parts) == 0 || parts[0] == "" {
+		return 0, false
+	}
+	ms, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	age := now.Sub(time.UnixMilli(ms)).Seconds()
+	if age < 0 {
+		age = 0
+	}
+	return age, true
+}
+
 // processLightningMessagesParallel runs TraceEventProcessing for each message with bounded concurrency.
 func (ewsi *EastWestStreamInterface) processLightningMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage) {
+	ewsi.processLightningMessagesParallelMode(streamCtx, streamName, msgs, false)
+}
+
+func (ewsi *EastWestStreamInterface) processLightningMessagesParallelMode(streamCtx context.Context, streamName string, msgs []redis.XMessage, pendingRetry bool) {
 	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
-		ackFn := func(ctx context.Context, msg redis.XMessage) error {
-			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+		if age, ok := messageAgeSecondsFromStreamID(msg.ID, time.Now()); ok {
+			RecordStreamMessageAge(streamCtx, streamName, "handle_lightning", age, pendingRetry)
 		}
-		if err := internal.TraceEventProcessing(streamCtx, streamName, msg, ewsi.handleLightningMessage, ackFn); err != nil {
+		ackFn := func(ctx context.Context, msg redis.XMessage) error {
+			ackStart := time.Now()
+			err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+			RecordStreamAckLatency(streamCtx, streamName, "handle_lightning", time.Since(ackStart).Seconds(), err == nil, pendingRetry)
+			return err
+		}
+		handlerStart := time.Now()
+		err := internal.TraceEventProcessing(streamCtx, streamName, msg, ewsi.handleLightningMessage, ackFn)
+		RecordStreamHandlerLatency(streamCtx, streamName, "handle_lightning", time.Since(handlerStart).Seconds(), err == nil, pendingRetry)
+		if err != nil {
 			logger.WithStream(streamName, "consume").
 				Errorf(streamCtx, "Error handling lightning event %s: %v", msg.ID, err)
 		}
@@ -125,10 +156,18 @@ func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallel(streamCt
 
 func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallelMode(streamCtx context.Context, streamName string, msgs []redis.XMessage, pendingRetry bool) {
 	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
-		ackFn := func(ctx context.Context, msg redis.XMessage) error {
-			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+		if age, ok := messageAgeSecondsFromStreamID(msg.ID, time.Now()); ok {
+			RecordStreamMessageAge(streamCtx, streamName, "handle_consumption", age, pendingRetry)
 		}
+		ackFn := func(ctx context.Context, msg redis.XMessage) error {
+			ackStart := time.Now()
+			err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+			RecordStreamAckLatency(streamCtx, streamName, "handle_consumption", time.Since(ackStart).Seconds(), err == nil, pendingRetry)
+			return err
+		}
+		handlerStart := time.Now()
 		err := internal.TraceEventProcessing(streamCtx, streamName, msg, ewsi.handleConsumptionMessage, ackFn)
+		RecordStreamHandlerLatency(streamCtx, streamName, "handle_consumption", time.Since(handlerStart).Seconds(), err == nil, pendingRetry)
 		if err != nil {
 			var expectedErr *ExpectedFailureError
 			if errors.As(err, &expectedErr) {
@@ -457,7 +496,7 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 
 			switch streamName {
 			case "event.lightning":
-				ewsi.processLightningMessagesParallel(streamCtx, streamName, claimed)
+				ewsi.processLightningMessagesParallelMode(streamCtx, streamName, claimed, true)
 			case "event.consumption":
 				ewsi.processConsumptionMessagesParallelMode(streamCtx, streamName, claimed, true)
 			default:
@@ -545,7 +584,10 @@ func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Cont
 			continue
 		}
 
-		if err := tx.Commit(); err != nil {
+		commitStart := time.Now()
+		err = tx.Commit()
+		RecordTxCommitLatency(ctx, "stream.expiration_checker", time.Since(commitStart).Seconds(), err == nil)
+		if err != nil {
 			logger.WithDeviceID(deviceID).
 				Errorf(ctx, "Failed to commit expiration update for %s: %v", auth.AuthorizationID, err)
 			continue
