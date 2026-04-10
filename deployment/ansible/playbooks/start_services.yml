@@ -1,0 +1,50 @@
+---
+# Start systemd units on edge hosts without running a full deploy.
+#
+# Examples (from deployment/ansible/):
+#   ansible-playbook playbooks/start_services.yml
+#   ansible-playbook playbooks/start_services.yml -e lina_start_services='["device-service"]'
+#   ansible-playbook playbooks/start_services.yml -e lina_start_services='["mosquitto","device-service"]'
+#   ansible-playbook playbooks/start_services.yml -e '{"lina_start_extra_services":["redis-server","caddy","prometheus-node-exporter","process-exporter","redis-exporter","systemd-exporter"]}'
+#
+# Default: start mosquitto + all LINA Go services (ledger, lightning, consumption, device).
+# Override lina_start_services with a YAML list. Use lina_start_extra_services for redis/caddy/exporters/etc.
+
+- name: Start LINA edge services
+  hosts: edge
+  become: true
+  vars_files:
+    - ../roles/lina-services/defaults/main.yml
+  vars:
+    lina_start_services: "{{ ['mosquitto'] + (lina_services | map(attribute='name') | list) }}"
+    lina_start_extra_services: []
+
+  tasks:
+    - name: Start Mosquitto broker
+      ansible.builtin.systemd:
+        name: mosquitto
+        state: started
+      when: "'mosquitto' in lina_start_services"
+      tags:
+        - mosquitto
+        - mqtt
+        - broker
+
+    - name: Start LINA application services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ lina_services | map(attribute='name') | list }}"
+      when: item in lina_start_services
+      tags:
+        - lina-services
+        - apps
+
+    - name: Start additional units (redis, caddy, exporters, ...)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ lina_start_extra_services | default([]) }}"
+      when: (lina_start_extra_services | default([]) | length) > 0
+      tags:
+        - extra

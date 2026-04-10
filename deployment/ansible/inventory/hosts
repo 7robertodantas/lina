@@ -2,5 +2,9 @@
 # Binaries: by default Ansible cross-compiles on this Mac (see inventory/group_vars lina_build_*).
 # To copy pre-built binaries instead: set lina_build_binaries=false and lina_binaries_dir.
 
+# [edge]
+# edge-node ansible_host=192.168.2.2 ansible_user=ubuntu
+
 [edge]
-edge-node ansible_host=192.168.2.2 ansible_user=ubuntu
+edge-pi-1 ansible_host=192.168.0.170 ansible_user=rdantas
+edge-pi-2 ansible_host=192.168.0.180 ansible_user=dietpi
