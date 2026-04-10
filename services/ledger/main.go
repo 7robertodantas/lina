@@ -135,7 +135,7 @@ func main() {
 	handler := NewEastWestStreamHandler(repo, publisher)
 
 	// Create stream interface
-	streamInterface, err := NewEastWestStreamInterface(ctx, handler)
+	streamInterface, err := NewEastWestStreamInterface(ctx, cfg, handler)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create stream interface", err)
 	}

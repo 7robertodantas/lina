@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -32,6 +33,7 @@ type messageRetryInfo struct {
 // EastWestStreamInterface wraps the internal StreamClient with ledger-specific methods for east-west stream communication
 type EastWestStreamInterface struct {
 	*internal.StreamClient
+	cfg          Config
 	handler      *EastWestStreamHandler
 	consumerName string
 	groupName    string
@@ -40,49 +42,147 @@ type EastWestStreamInterface struct {
 }
 
 // NewEastWestStreamInterface creates a new Redis stream client using the internal package
-func NewEastWestStreamInterface(ctx context.Context, handler *EastWestStreamHandler) (*EastWestStreamInterface, error) {
+func NewEastWestStreamInterface(ctx context.Context, cfg Config, handler *EastWestStreamHandler) (*EastWestStreamInterface, error) {
 	libClient, err := internal.NewStreamClientFromEnv(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	cname := cfg.StreamConsumerName
+	if cname == "" {
+		cname = defaultLedgerStreamConsumerName()
+	}
 	return &EastWestStreamInterface{
 		StreamClient: libClient,
+		cfg:          cfg,
 		handler:      handler,
-		consumerName: "ledger-service",
+		consumerName: cname,
 		groupName:    "ledger-consumers",
 	}, nil
+}
+
+func defaultLedgerStreamConsumerName() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("ledger-%s-%d", host, os.Getpid())
+}
+
+func clampParallelism(p int) int {
+	if p < 1 {
+		return 1
+	}
+	if p > 64 {
+		return 64
+	}
+	return p
+}
+
+func runStreamMessagesParallel(p int, msgs []redis.XMessage, runOne func(redis.XMessage)) {
+	p = clampParallelism(p)
+	if len(msgs) == 0 {
+		return
+	}
+	if p == 1 || len(msgs) == 1 {
+		for _, msg := range msgs {
+			runOne(msg)
+		}
+		return
+	}
+	sem := make(chan struct{}, p)
+	var wg sync.WaitGroup
+	for _, msg := range msgs {
+		msg := msg
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			runOne(msg)
+		}()
+	}
+	wg.Wait()
+}
+
+// processLightningMessagesParallel runs TraceEventProcessing for each message with bounded concurrency.
+func (ewsi *EastWestStreamInterface) processLightningMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage) {
+	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+		ackFn := func(ctx context.Context, msg redis.XMessage) error {
+			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+		}
+		if err := internal.TraceEventProcessing(streamCtx, streamName, msg, ewsi.handleLightningMessage, ackFn); err != nil {
+			logger.WithStream(streamName, "consume").
+				Errorf(streamCtx, "Error handling lightning event %s: %v", msg.ID, err)
+		}
+	})
+}
+
+// processConsumptionMessagesParallel runs TraceEventProcessing for each message with bounded concurrency.
+func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage) {
+	ewsi.processConsumptionMessagesParallelMode(streamCtx, streamName, msgs, false)
+}
+
+func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallelMode(streamCtx context.Context, streamName string, msgs []redis.XMessage, pendingRetry bool) {
+	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+		ackFn := func(ctx context.Context, msg redis.XMessage) error {
+			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+		}
+		err := internal.TraceEventProcessing(streamCtx, streamName, msg, ewsi.handleConsumptionMessage, ackFn)
+		if err != nil {
+			var expectedErr *ExpectedFailureError
+			if errors.As(err, &expectedErr) {
+				if pendingRetry {
+					logger.WithStream(streamName, "consume").
+						Debugf(streamCtx, "Expected failure on retry, message will go back to pending: %v", expectedErr.Err)
+				} else {
+					logger.WithStream(streamName, "consume").
+						Debugf(streamCtx, "Expected failure, message will go to pending for retry: %v", expectedErr.Err)
+				}
+			} else {
+				if pendingRetry {
+					logger.WithStream(streamName, "consume").
+						Errorf(streamCtx, "Error handling retry event %s: %v", msg.ID, err)
+				} else {
+					logger.WithStream(streamName, "consume").
+						Errorf(streamCtx, "Error handling consumption event %s: %v", msg.ID, err)
+				}
+			}
+		}
+	})
 }
 
 // StartLightningConsumer starts consuming from the event.lightning stream
 func (ewsi *EastWestStreamInterface) StartLightningConsumer(ctx context.Context) error {
 	streamName := "event.lightning"
+	streamCtx := ewsi.Context()
 
 	// Create consumer group if it doesn't exist
-	err := ewsi.XGroupCreateMkStreamWithSpan(ctx, streamName, ewsi.groupName, "0")
+	err := ewsi.XGroupCreateMkStreamWithSpan(streamCtx, streamName, ewsi.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
-			Warnf(ctx, "Failed to create consumer group: %v", err)
+			Warnf(streamCtx, "Failed to create consumer group: %v", err)
 	}
 
+	par := clampParallelism(ewsi.cfg.ConsumeParallelism)
 	logger.WithStream(streamName, "consume").
-		Info(ctx, "Starting lightning consumer")
+		Infof(streamCtx, "Starting lightning consumer (name=%s, batch_parallelism=%d)", ewsi.consumerName, par)
 
 	// Start pending message retry mechanism in a separate goroutine
-	go ewsi.startPendingMessageRetry(ctx, streamName, ewsi.handleLightningMessage)
+	go ewsi.startPendingMessageRetry(ctx, streamName)
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.WithStream(streamName, "consume").
-				Info(ctx, "Stopping lightning consumer")
+				Info(streamCtx, "Stopping lightning consumer")
 			return ctx.Err()
 		default:
-			streams, err := ewsi.XReadGroupWithSpan(ctx, streamName, ewsi.groupName, ewsi.consumerName, &redis.XReadGroupArgs{
+			streams, err := ewsi.XReadGroupWithSpan(streamCtx, streamName, ewsi.groupName, ewsi.consumerName, &redis.XReadGroupArgs{
 				Group:    ewsi.groupName,
 				Consumer: ewsi.consumerName,
 				Streams:  []string{streamName, ">"},
-				Count:    10,
+				Count:    50,
 				Block:    5 * time.Second,
 			})
 
@@ -91,23 +191,13 @@ func (ewsi *EastWestStreamInterface) StartLightningConsumer(ctx context.Context)
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Error(ctx, "Error reading from stream", err)
+					Error(streamCtx, "Error reading from stream", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
 			for _, stream := range streams {
-				for _, msg := range stream.Messages {
-					// Create ack function
-					ackFn := func(ctx context.Context, msg redis.XMessage) error {
-						return ewsi.XAckWithSpan(ctx, streamName, ewsi.groupName, msg.ID, &msg)
-					}
-
-					if err := internal.TraceEventProcessing(ctx, streamName, msg, ewsi.handleLightningMessage, ackFn); err != nil {
-						logger.WithStream(streamName, "consume").
-							Errorf(ctx, "Error handling lightning event %s: %v", msg.ID, err)
-					}
-				}
+				ewsi.processLightningMessagesParallel(streamCtx, streamName, stream.Messages)
 			}
 		}
 	}
@@ -145,33 +235,34 @@ func (ewsi *EastWestStreamInterface) handleLightningMessage(ctx context.Context,
 // StartConsumptionConsumer starts consuming from the event.consumption stream
 func (ewsi *EastWestStreamInterface) StartConsumptionConsumer(ctx context.Context) error {
 	streamName := "event.consumption"
+	streamCtx := ewsi.Context()
 
 	// Create consumer group if it doesn't exist
-	err := ewsi.XGroupCreateMkStreamWithSpan(ctx, streamName, ewsi.groupName, "0")
+	err := ewsi.XGroupCreateMkStreamWithSpan(streamCtx, streamName, ewsi.groupName, "0")
 	if err != nil && err.Error() != "BUSYGROUP Consumer Group name already exists" {
 		logger.WithStream(streamName, "consume").
-			Warnf(ctx, "Failed to create consumer group: %v", err)
+			Warnf(streamCtx, "Failed to create consumer group: %v", err)
 	}
 
+	par := clampParallelism(ewsi.cfg.ConsumeParallelism)
 	logger.WithStream(streamName, "consume").
-		Info(ctx, "Starting consumption consumer")
+		Infof(streamCtx, "Starting consumption consumer (name=%s, batch_parallelism=%d)", ewsi.consumerName, par)
 
 	// Start pending message retry mechanism in a separate goroutine
-	go ewsi.startPendingMessageRetry(ctx, streamName, ewsi.handleConsumptionMessage)
+	go ewsi.startPendingMessageRetry(ctx, streamName)
 
 	for {
 		select {
 		case <-ctx.Done():
 			logger.WithStream(streamName, "consume").
-				Info(ctx, "Stopping consumption consumer")
+				Info(streamCtx, "Stopping consumption consumer")
 			return ctx.Err()
 		default:
-			// Read from stream - this creates a span and returns a context with that span
-			streams, err := ewsi.XReadGroupWithSpan(ctx, streamName, ewsi.groupName, ewsi.consumerName, &redis.XReadGroupArgs{
+			streams, err := ewsi.XReadGroupWithSpan(streamCtx, streamName, ewsi.groupName, ewsi.consumerName, &redis.XReadGroupArgs{
 				Group:    ewsi.groupName,
 				Consumer: ewsi.consumerName,
 				Streams:  []string{streamName, ">"},
-				Count:    10,
+				Count:    50,
 				Block:    5 * time.Second,
 			})
 
@@ -180,36 +271,13 @@ func (ewsi *EastWestStreamInterface) StartConsumptionConsumer(ctx context.Contex
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Error(ctx, "Error reading from stream", err)
+					Error(streamCtx, "Error reading from stream", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// Process messages with the context that has the read span
 			for _, stream := range streams {
-				for _, msg := range stream.Messages {
-					// Create ack function that will be called within the processing span
-					ackFn := func(ctx context.Context, msg redis.XMessage) error {
-						return ewsi.XAckWithSpan(ctx, streamName, ewsi.groupName, msg.ID, &msg)
-					}
-
-					// TraceEventProcessing now handles both processing and ack within same span
-					err := internal.TraceEventProcessing(ctx, streamName, msg, ewsi.handleConsumptionMessage, ackFn)
-					if err != nil {
-						// Check if this is an expected failure
-						var expectedErr *ExpectedFailureError
-						if errors.As(err, &expectedErr) {
-							// Expected failure - don't ACK, let it go to pending for retry with backoff
-							// The pending retry mechanism will handle backoff and max retries
-							logger.WithStream(streamName, "consume").
-								Debugf(ctx, "Expected failure, message will go to pending for retry: %v", expectedErr.Err)
-						} else {
-							// Unexpected failure - don't ACK, let it go to pending for retry
-							logger.WithStream(streamName, "consume").
-								Errorf(ctx, "Error handling consumption event %s: %v", msg.ID, err)
-						}
-					}
-				}
+				ewsi.processConsumptionMessagesParallel(streamCtx, streamName, stream.Messages)
 			}
 		}
 	}
@@ -313,11 +381,11 @@ func (ewsi *EastWestStreamInterface) markMessageProcessed(ctx context.Context, s
 // startPendingMessageRetry continuously retries pending messages that failed to process
 // This handles transient failures (e.g., temporary DB issues) that might resolve later
 // Uses XPENDING + XCLAIM to claim messages from the main consumer that have been pending too long
-// handlerFn is the function to call for processing each message
-func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Context, streamName string, handlerFn func(context.Context, redis.XMessage) error) {
+func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Context, streamName string) {
+	streamCtx := ewsi.Context()
 	retryConsumerName := ewsi.consumerName + "-retry"
 	logger.WithStream(streamName, "consume").
-		Info(ctx, "Starting pending message retry mechanism (continuous)")
+		Info(streamCtx, "Starting pending message retry mechanism (continuous)")
 
 	// Cleanup old retry tracking entries periodically
 	go ewsi.cleanupRetryTracker(ctx)
@@ -329,7 +397,7 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 		select {
 		case <-ctx.Done():
 			logger.WithStream(streamName, "consume").
-				Info(ctx, "Stopping pending message retry")
+				Info(streamCtx, "Stopping pending message retry")
 			return
 		default:
 			// Use XPENDING to find messages pending for the main consumer
@@ -352,7 +420,7 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 					continue
 				}
 				logger.WithStream(streamName, "consume").
-					Errorf(ctx, "Error checking pending messages: %v", err)
+					Errorf(streamCtx, "Error checking pending messages: %v", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
@@ -382,28 +450,19 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 
 			if err != nil {
 				logger.WithStream(streamName, "consume").
-					Errorf(ctx, "Error claiming messages: %v", err)
+					Errorf(streamCtx, "Error claiming messages: %v", err)
 				time.Sleep(1 * time.Second)
 				continue
 			}
 
-			// Process claimed messages
-			for _, msg := range claimed {
-				ackFn := func(ctx context.Context, msg redis.XMessage) error {
-					return ewsi.XAckWithSpan(ctx, streamName, ewsi.groupName, msg.ID, &msg)
-				}
-
-				err := internal.TraceEventProcessing(ctx, streamName, msg, handlerFn, ackFn)
-				if err != nil {
-					var expectedErr *ExpectedFailureError
-					if errors.As(err, &expectedErr) {
-						logger.WithStream(streamName, "consume").
-							Debugf(ctx, "Expected failure on retry, message will go back to pending: %v", expectedErr.Err)
-					} else {
-						logger.WithStream(streamName, "consume").
-							Errorf(ctx, "Error handling retry event %s: %v", msg.ID, err)
-					}
-				}
+			switch streamName {
+			case "event.lightning":
+				ewsi.processLightningMessagesParallel(streamCtx, streamName, claimed)
+			case "event.consumption":
+				ewsi.processConsumptionMessagesParallelMode(streamCtx, streamName, claimed, true)
+			default:
+				logger.WithStream(streamName, "consume").
+					Warnf(streamCtx, "Unknown stream for pending retry: %s", streamName)
 			}
 		}
 	}
