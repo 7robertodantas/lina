@@ -213,10 +213,8 @@ services:
       - "9256:9256"
     volumes:
       - /proc:/host/proc:ro
-      - ../infrastructure/process-exporter/process-exporter.yaml:/config/process-exporter.yaml:ro
     command:
       - --procfs=/host/proc
-      - --config.path=/config/process-exporter.yaml
       - --web.listen-address=:9256
 
   # Talks to the host systemd over D-Bus. Linux only; typically unusable on Docker Desktop (macOS).

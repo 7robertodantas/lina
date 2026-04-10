@@ -17,15 +17,17 @@ const (
 
 // EastWestStreamHandler handles processing of Redis stream messages from east-west services
 type EastWestStreamHandler struct {
-	repo      *LedgerRepository
-	publisher *EastWestStreamPublisher
+	repo                      *LedgerRepository
+	publisher                 *EastWestStreamPublisher
+	perMessageInfoLogsEnabled bool
 }
 
 // NewEastWestStreamHandler creates a new east-west stream handler
-func NewEastWestStreamHandler(repo *LedgerRepository, publisher *EastWestStreamPublisher) *EastWestStreamHandler {
+func NewEastWestStreamHandler(cfg Config, repo *LedgerRepository, publisher *EastWestStreamPublisher) *EastWestStreamHandler {
 	return &EastWestStreamHandler{
-		repo:      repo,
-		publisher: publisher,
+		repo:                      repo,
+		publisher:                 publisher,
+		perMessageInfoLogsEnabled: cfg.StreamPerMessageInfoLogs,
 	}
 }
 
@@ -62,11 +64,13 @@ func (esh *EastWestStreamHandler) HandleInvoiceSettled(ctx context.Context, sett
 		return fmt.Errorf("failed to check idempotency for invoice %s: %w", invoiceID, err)
 	} else if ok {
 		if kind == "credit" {
-			logger.WithDeviceID(deviceID).
-				WithStream("event.lightning", "consume").
-				InfoWithFields(ctx, "Invoice already credited, skipping", map[string]interface{}{
-					"invoice_id": invoiceID,
-				})
+			if esh.perMessageInfoLogsEnabled {
+				logger.WithDeviceID(deviceID).
+					WithStream("event.lightning", "consume").
+					InfoWithFields(ctx, "Invoice already credited, skipping", map[string]interface{}{
+						"invoice_id": invoiceID,
+					})
+			}
 			return nil
 		}
 		return fmt.Errorf("idempotency key %s already used for kind %s", invoiceID, kind)
@@ -94,13 +98,15 @@ func (esh *EastWestStreamHandler) HandleInvoiceSettled(ctx context.Context, sett
 		return fmt.Errorf("failed to commit credit for invoice %s: %w", invoiceID, err)
 	}
 
-	logger.WithDeviceID(deviceID).
-		WithStream("event.lightning", "consume").
-		InfoWithFields(ctx, "Credited device from invoice", map[string]interface{}{
-			"invoice_id":    invoiceID,
-			"amount_msat":   entry.AmountMsat,
-			"balance_after": entry.BalanceAfter,
-		})
+	if esh.perMessageInfoLogsEnabled {
+		logger.WithDeviceID(deviceID).
+			WithStream("event.lightning", "consume").
+			InfoWithFields(ctx, "Credited device from invoice", map[string]interface{}{
+				"invoice_id":    invoiceID,
+				"amount_msat":   entry.AmountMsat,
+				"balance_after": entry.BalanceAfter,
+			})
+	}
 
 	// Record metrics
 	RecordEntry(ctx, "credit", "invoice")
@@ -128,11 +134,13 @@ func (esh *EastWestStreamHandler) HandleDeviceConsumptionRecorded(ctx context.Co
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	logger.WithStream("event.consumption", "consume").
-		WithDeviceID(recorded.GetDeviceId()).
-		InfoWithFields(ctx, "Consumption received", map[string]interface{}{
-			"debit_msat": recorded.GetDebitMsat(),
-		})
+	if esh.perMessageInfoLogsEnabled {
+		logger.WithStream("event.consumption", "consume").
+			WithDeviceID(recorded.GetDeviceId()).
+			InfoWithFields(ctx, "Consumption received", map[string]interface{}{
+				"debit_msat": recorded.GetDebitMsat(),
+			})
+	}
 
 	// Process the consumption: debit from authorization (uses the same transaction)
 	// Returns results needed for publishing events after commit

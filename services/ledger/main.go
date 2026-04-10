@@ -132,7 +132,7 @@ func main() {
 	publisher := NewEastWestStreamPublisher(streamClient)
 
 	// Create handler
-	handler := NewEastWestStreamHandler(repo, publisher)
+	handler := NewEastWestStreamHandler(cfg, repo, publisher)
 
 	// Create stream interface
 	streamInterface, err := NewEastWestStreamInterface(ctx, cfg, handler)
