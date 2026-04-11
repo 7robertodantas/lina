@@ -1,0 +1,19 @@
+---
+# Recreate LINA service users and data directories under lina_lib_dir after the
+# tree was replaced (e.g. SSD mount at /var/lib/lina). Runs the same tasks as the
+# lina-services role uses for users/dirs only — no binary build/copy, systemd,
+# Redis, Mosquitto, Caddy, or monitoring.
+#
+# From deployment/ansible/:
+#   ansible-playbook playbooks/ssd_recreate_lina_dirs.yml
+#
+# From repo root (set config so roles_path resolves):
+#   ANSIBLE_CONFIG=deployment/ansible/ansible.cfg ansible-playbook deployment/ansible/playbooks/ssd_recreate_lina_dirs.yml -i deployment/ansible/inventory/hosts
+
+- name: Recreate LINA users and data directories (post-SSD / lina_lib_dir)
+  hosts: edge
+  tasks:
+    - name: Apply lina-services users and directories only
+      ansible.builtin.import_role:
+        name: lina-services
+        tasks_from: users_and_dirs
