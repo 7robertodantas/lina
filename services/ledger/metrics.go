@@ -191,6 +191,15 @@ func RecordAuthorizationExpired(ctx context.Context) {
 	)
 }
 
+// RecordAuthorizationDebitFailed records a consumption debit that could not be applied (e.g. no active authorization).
+func RecordAuthorizationDebitFailed(ctx context.Context) {
+	authorizationsTotal.Add(ctx, 1,
+		metric.WithAttributes(
+			attribute.String("operation", "debit_failed"),
+		),
+	)
+}
+
 // RecordEntry records a ledger entry with type and source
 func RecordEntry(ctx context.Context, entryType, source string) {
 	entriesTotal.Add(ctx, 1,

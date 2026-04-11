@@ -265,6 +265,7 @@ func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, 
 					WithStream("event.ledger", "produce").
 					Error(ctx, "Failed to publish AuthorizationDebitFailed event", err)
 			}
+			RecordAuthorizationDebitFailed(ctx)
 			// Return ExpectedFailureError so the consumer knows to ACK this message
 			return nil, &ExpectedFailureError{Err: fmt.Errorf("no active authorization found for device %s", deviceID)}
 		}

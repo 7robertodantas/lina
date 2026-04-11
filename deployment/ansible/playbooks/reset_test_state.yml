@@ -1,0 +1,203 @@
+---
+# Wipe edge test state: stop app services, flush Redis, remove service DB files on disk,
+# then optionally start everything again.
+#
+# Run from deployment/ansible/:
+#   ansible-playbook playbooks/reset_test_state.yml
+#
+# Leave services stopped after reset (e.g. to run tests manually):
+#   ansible-playbook playbooks/reset_test_state.yml -e lina_reset_start_services_after=false
+#
+# Skip Redis flush (only wipe DB dirs):
+#   ansible-playbook playbooks/reset_test_state.yml -e lina_reset_redis_flush=false
+#
+# Also stop Redis while flushing (not usually needed; FLUSHALL keeps redis-server up):
+#   ansible-playbook playbooks/reset_test_state.yml -e lina_reset_stop_redis=true
+#
+# Paths follow inventory group_vars (lina_*_db_path, lina_repository_type) and match
+# services/internal/sqlite_path.go and pebble_path.go. Device service always uses SQLite.
+#
+# Optional: clear Mosquitto persistence (retained MQTT messages, dynsec DB). Off by default;
+# enabling may require re-running Mosquitto/dynsec provisioning.
+#   ansible-playbook playbooks/reset_test_state.yml -e lina_reset_mosquitto_data=true
+
+- name: Reset LINA edge test state (Redis + on-disk DBs)
+  hosts: edge
+  become: true
+  vars_files:
+    - ../roles/lina-services/defaults/main.yml
+
+  vars:
+    # Stop in dependency order (consumers before providers).
+    lina_reset_stop_order:
+      - device-service
+      - consumption-service
+      - lightning-service
+      - ledger-service
+      - mosquitto
+    lina_reset_start_order:
+      - mosquitto
+      - ledger-service
+      - lightning-service
+      - consumption-service
+      - device-service
+    lina_reset_redis_flush: true
+    lina_reset_stop_redis: false
+    lina_reset_remove_sqlite_sidecars: true
+    lina_reset_mosquitto_data: false
+    lina_reset_start_services_after: true
+
+  tasks:
+    - name: Stop LINA services and Mosquitto (ordered)
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop: "{{ lina_reset_stop_order }}"
+      tags:
+        - reset
+        - stop
+
+    - name: Stop Redis (optional, before flush)
+      ansible.builtin.systemd:
+        name: redis-server
+        state: stopped
+      when: lina_reset_stop_redis | bool
+      tags:
+        - reset
+        - redis
+
+    - name: Start Redis for FLUSHALL (if it was stopped)
+      ansible.builtin.systemd:
+        name: redis-server
+        state: started
+      when: lina_reset_stop_redis | bool
+      tags:
+        - reset
+        - redis
+
+    - name: Flush Redis (FLUSHALL)
+      ansible.builtin.shell: |
+        set -e
+        if [ -n "${REDIS_PASSWORD:-}" ]; then
+          exec redis-cli -h "{{ lina_redis_host }}" -p "{{ lina_redis_port }}" -a "$REDIS_PASSWORD" FLUSHALL
+        else
+          exec redis-cli -h "{{ lina_redis_host }}" -p "{{ lina_redis_port }}" FLUSHALL
+        fi
+      environment:
+        REDIS_PASSWORD: "{{ lina_redis_password | default('') }}"
+      when: lina_reset_redis_flush | bool
+      changed_when: true
+      tags:
+        - reset
+        - redis
+
+    - name: Resolve ledger data path (sqlite vs pebble)
+      ansible.builtin.set_fact:
+        lina_reset_ledger_fs: >-
+          {% if (lina_repository_type | default('sqlite')) == 'sqlite' %}
+          {{ lina_ledger_db_path if lina_ledger_db_path.lower().endswith('.db') else lina_ledger_db_path + '.db' }}
+          {% else %}
+          {{ lina_ledger_db_path if (lina_ledger_db_path.lower().endswith('-pebble') or lina_ledger_db_path.lower().endswith('/pebble')) else lina_ledger_db_path + '-pebble' }}
+          {% endif %}
+
+    - name: Resolve consumption data path (sqlite vs pebble)
+      ansible.builtin.set_fact:
+        lina_reset_consumption_fs: >-
+          {% if (lina_repository_type | default('sqlite')) == 'sqlite' %}
+          {{ lina_consumption_db_path if lina_consumption_db_path.lower().endswith('.db') else lina_consumption_db_path + '.db' }}
+          {% else %}
+          {{ lina_consumption_db_path if (lina_consumption_db_path.lower().endswith('-pebble') or lina_consumption_db_path.lower().endswith('/pebble')) else lina_consumption_db_path + '-pebble' }}
+          {% endif %}
+
+    - name: Resolve device SQLite path
+      ansible.builtin.set_fact:
+        lina_reset_device_fs: >-
+          {{ lina_device_db_path if lina_device_db_path.lower().endswith('.db') else lina_device_db_path + '.db' }}
+
+    - name: Remove ledger and consumption SQLite files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ lina_reset_ledger_fs }}"
+        - "{{ lina_reset_consumption_fs }}"
+      when: (lina_repository_type | default('sqlite')) == 'sqlite'
+      tags:
+        - reset
+        - disk
+
+    - name: Remove ledger and consumption Pebble directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ lina_reset_ledger_fs }}"
+        - "{{ lina_reset_consumption_fs }}"
+      when: (lina_repository_type | default('sqlite')) != 'sqlite'
+      tags:
+        - reset
+        - disk
+
+    - name: Remove device SQLite file
+      ansible.builtin.file:
+        path: "{{ lina_reset_device_fs }}"
+        state: absent
+      tags:
+        - reset
+        - disk
+
+    - name: Remove SQLite WAL/SHM sidecars (ledger, consumption)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ lina_reset_ledger_fs }}-wal"
+        - "{{ lina_reset_ledger_fs }}-shm"
+        - "{{ lina_reset_consumption_fs }}-wal"
+        - "{{ lina_reset_consumption_fs }}-shm"
+      when:
+        - (lina_repository_type | default('sqlite')) == 'sqlite'
+        - lina_reset_remove_sqlite_sidecars | bool
+      tags:
+        - reset
+        - disk
+
+    - name: Remove SQLite WAL/SHM sidecars (device)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ lina_reset_device_fs }}-wal"
+        - "{{ lina_reset_device_fs }}-shm"
+      when: lina_reset_remove_sqlite_sidecars | bool
+      tags:
+        - reset
+        - disk
+
+    - name: Clear Mosquitto data directory (optional)
+      ansible.builtin.shell: |
+        set -e
+        rm -rf /var/lib/mosquitto/*
+      when: lina_reset_mosquitto_data | bool
+      changed_when: true
+      tags:
+        - reset
+        - mosquitto
+
+    - name: Ensure Redis is running after reset
+      ansible.builtin.systemd:
+        name: redis-server
+        state: started
+      tags:
+        - reset
+        - redis
+
+    - name: Start Mosquitto and LINA services after reset
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop: "{{ lina_reset_start_order }}"
+      when: lina_reset_start_services_after | bool
+      tags:
+        - reset
+        - start

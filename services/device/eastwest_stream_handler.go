@@ -38,7 +38,8 @@ func (esh *EastWestStreamHandler) HandleDeviceDebited(ctx context.Context, paylo
 
 // HandleAuthorizationCompleted processes authorization completed events
 func (esh *EastWestStreamHandler) HandleAuthorizationCompleted(ctx context.Context, payload *ledgermodel.AuthorizationCompletedEvent) error {
-	return esh.publisher.PublishControlCommandWithAuthID(ctx, payload.GetDeviceId(), mqttpb.ControlCommand_CONTROL_COMMAND_AUTHORIZATION, "COMPLETED", payload.GetAuthorizationId())
+	// "REPLENISH" distinguishes this path from authorization *status* strings and from debit-failure reasons.
+	return esh.publisher.PublishControlCommandWithAuthID(ctx, payload.GetDeviceId(), mqttpb.ControlCommand_CONTROL_COMMAND_AUTHORIZATION, "REPLENISH", payload.GetAuthorizationId())
 }
 
 // HandleAuthorizationExpired processes authorization expired events
@@ -48,14 +49,19 @@ func (esh *EastWestStreamHandler) HandleAuthorizationExpired(ctx context.Context
 
 // HandleAuthorizationDebitFailed processes authorization debit failed events
 func (esh *EastWestStreamHandler) HandleAuthorizationDebitFailed(ctx context.Context, payload *ledgermodel.AuthorizationDebitFailedEvent) error {
+	reason := payload.GetReason()
+	if reason == "" {
+		reason = "NO_ACTIVE_AUTHORIZATION"
+	}
 	logger.WithDeviceID(payload.GetDeviceId()).
 		WarnWithFields(ctx, "Authorization debit failed via eastwest gRPC", map[string]interface{}{
 			"authorization_id": payload.GetAuthorizationId(),
-			"reason":           payload.GetReason(),
+			"reason":           reason,
 			"requested_msat":   payload.GetRequestedMsat(),
 			"remaining_msat":   payload.GetRemainingMsat(),
 		})
-	return esh.publisher.PublishControlCommandWithAuthID(ctx, payload.GetDeviceId(), mqttpb.ControlCommand_CONTROL_COMMAND_AUTHORIZATION, "AUTHORIZE", payload.GetAuthorizationId())
+	// Same reason is sent on MQTT control and echoed in AuthorizeRequest so logs match ledger (e.g. NO_ACTIVE_AUTHORIZATION).
+	return esh.publisher.PublishControlCommandWithAuthID(ctx, payload.GetDeviceId(), mqttpb.ControlCommand_CONTROL_COMMAND_AUTHORIZATION, reason, payload.GetAuthorizationId())
 }
 
 // HandleInvoiceSettled processes invoice settled events

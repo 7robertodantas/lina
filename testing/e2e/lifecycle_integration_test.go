@@ -132,7 +132,7 @@ func TestLifecycleSequentialUsageReports(t *testing.T) {
 	}))
 }
 
-// TestLifecycleAuthorizationControlAfterExhaust verifies AUTHORIZATION control (COMPLETED) is observed after consuming a hold.
+// TestLifecycleAuthorizationControlAfterExhaust verifies AUTHORIZATION control (REPLENISH) is observed after consuming a hold.
 func TestLifecycleAuthorizationControlAfterExhaust(t *testing.T) {
 	env := LoadEnv(t)
 	env.WaitGatewayHealthy(t, 2*time.Minute)
@@ -169,7 +169,7 @@ func TestLifecycleAuthorizationControlAfterExhaust(t *testing.T) {
 
 	WaitUntil(t, 2*time.Minute, 400*time.Millisecond, "AUTHORIZATION control after completion", func() bool {
 		for _, r := range cb.AuthControlSnapshot() {
-			if strings.Contains(strings.ToUpper(r), "COMPLETED") {
+			if strings.Contains(strings.ToUpper(r), "REPLENISH") {
 				return true
 			}
 		}
