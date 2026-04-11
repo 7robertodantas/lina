@@ -137,7 +137,7 @@ func (s *EastWestServer) CreateOrGetAuthorization(ctx context.Context, req *ledg
 	authID := hexID
 	now := time.Now()
 	issuedAt := now.Format(time.RFC3339)
-	expiresAt := now.Add(10 * time.Minute).Format(time.RFC3339) // 10 minute expiry
+	expiresAt := now.Add(time.Hour).Format(time.RFC3339) // 1 hour expiry
 
 	// Insert authorization
 	if err := s.repo.CreateAuthorization(ctx, tx, authID, req.DeviceId, req.RequestId, req.RequestMsat, issuedAt, expiresAt); err != nil {
