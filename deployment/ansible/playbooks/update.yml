@@ -1,0 +1,63 @@
+---
+# Incremental deploy for an edge host that was already provisioned with playbooks/site.yml.
+# Rebuilds Go services, rolls out binaries + systemd, and reapplies Caddy + monitoring (templates
+# track infrastructure/caddy and infrastructure/process-exporter). Skips apt base packages and
+# redis-server so routine code/infra edits are not blocked by a full "install everything" pass.
+#
+# From deployment/ansible/:
+#   ansible-playbook playbooks/update.yml
+#   ansible-playbook playbooks/update.yml --skip-tags mosquitto   # code + Caddy + exporters only
+#   ansible-playbook playbooks/update.yml --tags services          # only rebuild/copy LINA binaries + units
+#   ansible-playbook playbooks/update.yml --tags infra             # Caddy + monitoring + Mosquitto
+#   ansible-playbook playbooks/update.yml --tags mosquitto         # broker + TLS certs from infrastructure/certs
+#
+# For a new host or to change Redis, run playbooks/site.yml instead.
+
+- name: Validate control-side settings
+  hosts: edge
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Pre-built mode requires lina_binaries_dir on the controller
+      ansible.builtin.assert:
+        that:
+          - lina_binaries_dir is defined
+          - (lina_binaries_dir | string | length) > 0
+        fail_msg: >-
+          Set lina_build_binaries=false only when providing lina_binaries_dir — an absolute path
+          on this machine with device, ledger, consumption, and lightning binaries.
+      when: not (lina_build_binaries | default(true) | bool)
+      run_once: true
+
+    - name: Build mode requires Go on the controller
+      ansible.builtin.command: which go
+      changed_when: false
+      when: lina_build_binaries | default(true) | bool
+      run_once: true
+      delegate_to: localhost
+      connection: local
+      become: false
+
+- name: Rebuild LINA services and refresh edge infra (Caddy, monitoring, optional Mosquitto)
+  hosts: edge
+  roles:
+    - role: lina-services
+      tags:
+        - services
+        - apps
+    - role: caddy
+      tags:
+        - caddy
+        - infra
+        - proxy
+    - role: monitoring
+      tags:
+        - monitoring
+        - infra
+        - exporters
+    - role: mosquitto
+      tags:
+        - mosquitto
+        - infra
+        - broker
+        - mqtt
