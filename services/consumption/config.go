@@ -36,7 +36,7 @@ func LoadConfig() Config {
 
 		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "consumption-service"),
 		ConsumeParallelism: internal.IntEnv("CONSUMPTION_STREAM_PARALLELISM", 4),
-		StreamReadCount:    internal.ClampStreamReadCount(internal.IntEnv("CONSUMPTION_STREAM_READ_COUNT", 50)),
+		StreamReadCount:    internal.ClampStreamReadCount(internal.IntEnv("CONSUMPTION_STREAM_READ_COUNT", 100)),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
