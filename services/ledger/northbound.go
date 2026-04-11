@@ -17,14 +17,14 @@ import (
 // NorthboundInterface handles REST API endpoints
 type NorthboundInterface struct {
 	router    *gin.Engine
-	repo      *LedgerRepository
+	repo      LedgerRepository
 	publisher *EastWestStreamPublisher
 	cfg       Config
 	server    *http.Server
 }
 
 // NewNorthboundInterface creates a new northbound interface
-func NewNorthboundInterface(repo *LedgerRepository, cfg Config, publisher *EastWestStreamPublisher) *NorthboundInterface {
+func NewNorthboundInterface(repo LedgerRepository, cfg Config, publisher *EastWestStreamPublisher) *NorthboundInterface {
 	router := gin.Default()
 
 	router.Use(otelgin.Middleware("ledger-service"))

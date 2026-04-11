@@ -22,7 +22,7 @@ const reportLockStripes = 256
 
 // EastWestStreamHandler handles processing of Redis stream messages from east-west services
 type EastWestStreamHandler struct {
-	repository *ConsumptionRepository
+	repository ConsumptionRepository
 	publisher  *EastWestStreamPublisher
 	// reportLocks serialize CreateConsumptionRecord per stripe so the same report_id cannot pass Get+Batch twice
 	// concurrently; different report_ids (usually) use different stripes and run in parallel.
@@ -36,7 +36,7 @@ func reportStripeIndex(reportID string) uint32 {
 }
 
 // NewEastWestStreamHandler creates a new east-west stream handler
-func NewEastWestStreamHandler(repository *ConsumptionRepository, publisher *EastWestStreamPublisher) *EastWestStreamHandler {
+func NewEastWestStreamHandler(repository ConsumptionRepository, publisher *EastWestStreamPublisher) *EastWestStreamHandler {
 	return &EastWestStreamHandler{
 		repository: repository,
 		publisher:  publisher,

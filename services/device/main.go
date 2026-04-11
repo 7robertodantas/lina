@@ -54,7 +54,7 @@ func main() {
 		logger.Fatal(ctx, "Failed to initialize device repository", err)
 	}
 	defer repo.Close()
-	logger.Info(ctx, "Device repository initialized")
+	logger.Infof(ctx, "Device repository sqlite resolved_path=%s", cfg.DBPath)
 
 	// Initialize dynamic security service
 	logger.Info(ctx, "Initializing dynamic security service")

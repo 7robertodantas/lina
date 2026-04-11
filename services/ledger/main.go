@@ -113,10 +113,11 @@ func main() {
 	}
 
 	// Initialize repository (creates DB connection and tables)
-	repo, err := NewLedgerRepository(cfg.DBPath)
+	repo, repoImpl, repoPath, err := OpenLedgerRepository(cfg)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to initialize ledger repository", err)
 	}
+	logger.Infof(ctx, "Ledger repository implementation=%s resolved_path=%s", repoImpl, repoPath)
 	defer repo.Close()
 
 	// Connect to Redis stream
@@ -200,7 +201,7 @@ func main() {
 
 	logger.InfoWithFields(ctx, "Ledger Service HTTP listening via northbound REST", map[string]interface{}{
 		"listen_addr": cfg.ListenAddr,
-		"db_path":     cfg.DBPath,
+		"db_path":     repoPath,
 	})
 
 	metricsAddr := internal.GetEnv("METRICS_ADDR", ":9464")

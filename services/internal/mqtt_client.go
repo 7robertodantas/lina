@@ -261,6 +261,7 @@ func buildMQTTClientOptions(spec *MQTTConnectionSpec, tlsParams *MQTTTLSParams, 
 	mqttOpts := mqtt.NewClientOptions()
 	mqttOpts.AddBroker(brokerURL)
 	mqttOpts.SetClientID(spec.ClientID)
+	mqttOpts.SetConnectTimeout(spec.connectTimeout())
 	mqttOpts.SetCleanSession(spec.cleanSession())
 	mqttOpts.SetAutoReconnect(spec.autoReconnect())
 	if spec.connectRetry() {

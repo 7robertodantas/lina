@@ -508,7 +508,7 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 }
 
 // StartExpirationChecker periodically checks for expired authorizations
-func (ewsi *EastWestStreamInterface) StartExpirationChecker(ctx context.Context, repo *LedgerRepository, publisher *EastWestStreamPublisher) error {
+func (ewsi *EastWestStreamInterface) StartExpirationChecker(ctx context.Context, repo LedgerRepository, publisher *EastWestStreamPublisher) error {
 	logger.Info(ctx, "Starting authorization expiration checker")
 
 	ticker := time.NewTicker(1 * time.Minute) // Check every minute
@@ -528,7 +528,7 @@ func (ewsi *EastWestStreamInterface) StartExpirationChecker(ctx context.Context,
 }
 
 // checkExpiredAuthorizations finds and marks expired authorizations
-func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Context, repo *LedgerRepository, publisher *EastWestStreamPublisher) error {
+func (ewsi *EastWestStreamInterface) checkExpiredAuthorizations(ctx context.Context, repo LedgerRepository, publisher *EastWestStreamPublisher) error {
 	now := time.Now().Format(time.RFC3339)
 
 	// Find expired active authorizations

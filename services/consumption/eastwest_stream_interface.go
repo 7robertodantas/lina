@@ -37,7 +37,7 @@ func isTransientPersistenceError(err error) bool {
 type EastWestStreamInterface struct {
 	*internal.StreamClient
 	cfg          Config
-	repository   *ConsumptionRepository
+	repository   ConsumptionRepository
 	consumerName string
 	groupName    string
 	// retryTracker tracks retry counts and timestamps for messages
@@ -45,7 +45,7 @@ type EastWestStreamInterface struct {
 }
 
 // NewEastWestStreamInterface creates a new Redis stream client using the internal package
-func NewEastWestStreamInterface(ctx context.Context, cfg Config, repository *ConsumptionRepository) (*EastWestStreamInterface, error) {
+func NewEastWestStreamInterface(ctx context.Context, cfg Config, repository ConsumptionRepository) (*EastWestStreamInterface, error) {
 	libClient, err := internal.NewStreamClientFromEnv(ctx)
 	if err != nil {
 		return nil, err

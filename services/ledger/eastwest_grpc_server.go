@@ -16,12 +16,12 @@ import (
 // EastWestServer implements the LedgerService gRPC server
 type EastWestServer struct {
 	ledgerpb.UnimplementedLedgerServiceServer
-	repo      *LedgerRepository
+	repo      LedgerRepository
 	publisher *EastWestStreamPublisher
 }
 
 // NewEastWestServer creates a new east-west gRPC server
-func NewEastWestServer(repo *LedgerRepository, publisher *EastWestStreamPublisher) *EastWestServer {
+func NewEastWestServer(repo LedgerRepository, publisher *EastWestStreamPublisher) *EastWestServer {
 	return &EastWestServer{
 		repo:      repo,
 		publisher: publisher,

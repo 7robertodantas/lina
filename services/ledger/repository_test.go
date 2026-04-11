@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestLedgerRepo(t *testing.T) *LedgerRepository {
+func newTestLedgerRepo(t *testing.T) LedgerRepository {
 	t.Helper()
 
 	dir := filepath.Join(t.TempDir(), "ledger-pebble")
-	repo, err := NewLedgerRepository(dir)
+	repo, err := openLedgerRepoPebble(dir)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
@@ -142,7 +142,7 @@ func TestMarkAuthorizationExpiredZeroesRemainingAndFetchesActive(t *testing.T) {
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
-	rec, err := repo.loadAuthorization(ctx, checkTx, authID)
+	rec, err := repo.(*ledgerRepoPebble).loadAuthorization(ctx, checkTx.(*pebbleLedgerTx), authID)
 	require.NoError(t, err)
 	require.Equal(t, "expired", rec.Status)
 	require.Equal(t, int64(0), rec.RemainingMsat)
@@ -182,7 +182,7 @@ func TestUpdateAuthorizationTracksConsumed(t *testing.T) {
 	require.NoError(t, err)
 	defer checkTx.Rollback()
 
-	rec, err := repo.loadAuthorization(ctx, checkTx, authID)
+	rec, err := repo.(*ledgerRepoPebble).loadAuthorization(ctx, checkTx.(*pebbleLedgerTx), authID)
 	require.NoError(t, err)
 	require.Equal(t, int64(1_000), rec.RemainingMsat)
 	require.Equal(t, int64(2_000), rec.ConsumedMsat)

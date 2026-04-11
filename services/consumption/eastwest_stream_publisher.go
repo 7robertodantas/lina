@@ -15,12 +15,12 @@ import (
 // EastWestStreamPublisher handles publishing messages to Redis streams for east-west communication
 type EastWestStreamPublisher struct {
 	streamInterface *EastWestStreamInterface
-	repository      *ConsumptionRepository
+	repository      ConsumptionRepository
 	outboxTrigger   chan string
 }
 
 // NewEastWestStreamPublisher creates a new east-west stream publisher
-func NewEastWestStreamPublisher(streamInterface *EastWestStreamInterface, repository *ConsumptionRepository, outboxTrigger chan string) *EastWestStreamPublisher {
+func NewEastWestStreamPublisher(streamInterface *EastWestStreamInterface, repository ConsumptionRepository, outboxTrigger chan string) *EastWestStreamPublisher {
 	return &EastWestStreamPublisher{
 		streamInterface: streamInterface,
 		repository:      repository,

@@ -45,10 +45,11 @@ func main() {
 		}()
 	}
 
-	repository, err := NewConsumptionRepository(cfg.DBPath)
+	repository, repoImpl, repoPath, err := OpenConsumptionRepository(cfg)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create consumption repository", err)
 	}
+	logger.Infof(ctx, "Consumption repository implementation=%s resolved_path=%s", repoImpl, repoPath)
 	defer repository.Close()
 
 	// Connect to Redis stream

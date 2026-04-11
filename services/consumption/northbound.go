@@ -13,13 +13,13 @@ import (
 // NorthboundInterface handles REST API endpoints
 type NorthboundInterface struct {
 	router *gin.Engine
-	repo   *ConsumptionRepository
+	repo   ConsumptionRepository
 	cfg    Config
 	server *http.Server
 }
 
 // NewNorthboundInterface creates a new northbound interface
-func NewNorthboundInterface(repo *ConsumptionRepository, cfg Config) *NorthboundInterface {
+func NewNorthboundInterface(repo ConsumptionRepository, cfg Config) *NorthboundInterface {
 	router := gin.Default()
 
 	router.Use(otelgin.Middleware("consumption-service"))

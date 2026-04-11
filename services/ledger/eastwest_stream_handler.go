@@ -17,13 +17,13 @@ const (
 
 // EastWestStreamHandler handles processing of Redis stream messages from east-west services
 type EastWestStreamHandler struct {
-	repo                      *LedgerRepository
+	repo                      LedgerRepository
 	publisher                 *EastWestStreamPublisher
 	perMessageInfoLogsEnabled bool
 }
 
 // NewEastWestStreamHandler creates a new east-west stream handler
-func NewEastWestStreamHandler(cfg Config, repo *LedgerRepository, publisher *EastWestStreamPublisher) *EastWestStreamHandler {
+func NewEastWestStreamHandler(cfg Config, repo LedgerRepository, publisher *EastWestStreamPublisher) *EastWestStreamHandler {
 	return &EastWestStreamHandler{
 		repo:                      repo,
 		publisher:                 publisher,
@@ -242,7 +242,7 @@ type processConsumptionResult struct {
 
 // processConsumptionWithTx debits from an authorization using the provided transaction
 // Returns processConsumptionResult with information needed for event publishing
-func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, tx *LedgerTx, recorded *consumptionpb.DeviceConsumptionRecordedEvent) (*processConsumptionResult, error) {
+func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, tx LedgerTx, recorded *consumptionpb.DeviceConsumptionRecordedEvent) (*processConsumptionResult, error) {
 	deviceID := recorded.GetDeviceId()
 	if deviceID == "" {
 		return nil, fmt.Errorf("missing device_id in consumption event")

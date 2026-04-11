@@ -50,8 +50,8 @@ type Config struct {
 
 func LoadConfig() Config {
 	return Config{
-		// Database
-		DBPath:        internal.GetEnv("DB_PATH", "devices.db"),
+		// Database (SQLite file path; .db is appended when missing — see internal.SQLiteDBPath)
+		DBPath:        internal.SQLiteDBPath(internal.GetEnv("DB_PATH", "devices")),
 		BusyTimeoutMS: internal.IntEnv("BUSY_TIMEOUT_MS", 5000),
 
 		// API

@@ -267,6 +267,10 @@ func (di *deviceInterfaceImpl) Connect(deviceID, deviceSecret string) {
 			Protocol:       protocol,
 			ConnectTimeout: 30 * time.Second,
 			KeepAlive:      60 * time.Second,
+			// Paho defaults ConnectRetry=true; if the broker is unreachable the connect
+			// token never completes and WaitTimeout surfaces a generic timeout. Simulators
+			// should fail fast with the real dial/TLS/MQTT error instead.
+			DisableConnectRetry: true,
 		},
 		Hooks: &internal.MQTTSessionHooks{
 			OnConnect: func(client mqtt.Client) {

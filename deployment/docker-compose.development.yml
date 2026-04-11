@@ -65,7 +65,8 @@ services:
       - "9466:9464" # Metrics
     environment:
       - MQTT_BROKER=mosquitto
-      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      # Override .env (e.g. nanomq) so TLS SNI matches the mosquitto service in this stack.
+      - MQTT_TLS_SERVER_NAME=mosquitto
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
       - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
       - REDIS_HOST=redis
@@ -74,7 +75,7 @@ services:
       - LEDGER_GRPC_PORT=${GRPC_PORT}
       - LIGHTNING_GRPC_HOST=lightning
       - LIGHTNING_GRPC_PORT=${GRPC_PORT}
-      - DB_PATH=/data/devices.db
+      - DB_PATH=/data/devices
     env_file:
       - .env
     volumes:
@@ -102,7 +103,7 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DB_PATH=/data/ledger-pebble
+      - DB_PATH=/data/ledger
     env_file:
       - .env
     volumes:
@@ -124,7 +125,7 @@ services:
     environment:
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=6379
-      - DB_PATH=/data/consumption-pebble
+      - DB_PATH=/data/consumption
     env_file:
       - .env
     volumes:
@@ -145,7 +146,7 @@ services:
       - LND_HOST=${LND_HOST}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DB_PATH=/data/lightning.db
+      - DB_PATH=/data/lightning
     env_file:
       - .env
     volumes:
@@ -164,7 +165,8 @@ services:
       - "3010:8080" # UI
     environment:
       - MQTT_BROKER=mosquitto
-      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      # Override .env (e.g. nanomq) so TLS SNI matches the mosquitto service in this stack.
+      - MQTT_TLS_SERVER_NAME=mosquitto
       - DEVICE_ID=smart-meter-001
       - DEVICE_SECRET=smart-meter-001_password
     env_file:
@@ -187,7 +189,8 @@ services:
       - "3002:8080" # UI
     environment:
       - MQTT_BROKER=mosquitto
-      - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
+      # Override .env (e.g. nanomq) so TLS SNI matches the mosquitto service in this stack.
+      - MQTT_TLS_SERVER_NAME=mosquitto
     env_file:
       - .env
     volumes:

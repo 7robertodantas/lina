@@ -4,6 +4,14 @@ lina_install_root: /opt/lina
 lina_config_dir: /etc/lina
 lina_lib_dir: /var/lib/lina
 
+# Service DB_PATH values (see each service’s config / internal.SQLiteDBPath / PebbleStorePath).
+# Ledger & consumption: REPOSITORY_TYPE plus DB_PATH (pebble: store dir; sqlite: path base, .db appended).
+# Device: SQLite only; path base without .db unless you already include .db.
+lina_repository_type: sqlite
+lina_ledger_db_path: "{{ lina_lib_dir }}/ledger/ledger"
+lina_consumption_db_path: "{{ lina_lib_dir }}/consumption/consumption"
+lina_device_db_path: "{{ lina_lib_dir }}/device/devices"
+
 # Binaries: build on the controller by default (requires Go on the machine running Ansible).
 lina_build_binaries: true
 lina_build_goos: linux
