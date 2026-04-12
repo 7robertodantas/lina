@@ -75,7 +75,7 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 			for _, msg := range stream.Messages {
 				lastID = msg.ID
 
-				// Wrap message handling with tracing (no ack needed for XRead)
+				// Wrap message handling with tracing; XDEL after success keeps event.ledger bounded (single consumer).
 				if err := internal.TraceEventProcessing(ctx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 					raw, ok := msg.Values["event"].(string)
 					if !ok {
@@ -85,6 +85,11 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 				}, nil); err != nil {
 					logger.WithStream(streamName, "consume").
 						Errorf(ctx, "Failed to handle ledger message %s: %v", msg.ID, err)
+				} else {
+					if err := ewsi.XDelWithSpan(ctx, streamName, msg.ID); err != nil {
+						logger.WithStream(streamName, "consume").
+							Warnf(ctx, "XDEL after successful ledger event processing failed for %s: %v", msg.ID, err)
+					}
 				}
 			}
 		}
