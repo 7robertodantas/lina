@@ -85,7 +85,7 @@ func (ewsi *EastWestStreamInterface) StartDeviceConsumer(ctx context.Context, ha
 		// Continue anyway, group might already exist
 	}
 
-	par := clampParallelism(ewsi.cfg.ConsumeParallelism)
+	par := internal.ClampConsumeParallelism(ewsi.cfg.ConsumeParallelism)
 	logger.WithStream(streamName, "consume").
 		Infof(streamCtx, "Starting device event consumer (name=%s, batch_parallelism=%d, xreadgroup_count=%d)", ewsi.consumerName, par, ewsi.cfg.StreamReadCount)
 
@@ -165,45 +165,9 @@ func (ewsi *EastWestStreamInterface) handleDeviceMessage(ctx context.Context, ha
 	}
 }
 
-func clampParallelism(p int) int {
-	if p < 1 {
-		return 1
-	}
-	if p > 64 {
-		return 64
-	}
-	return p
-}
-
-func runStreamMessagesParallel(p int, msgs []redis.XMessage, runOne func(redis.XMessage)) {
-	p = clampParallelism(p)
-	if len(msgs) == 0 {
-		return
-	}
-	if p == 1 || len(msgs) == 1 {
-		for _, msg := range msgs {
-			runOne(msg)
-		}
-		return
-	}
-	sem := make(chan struct{}, p)
-	var wg sync.WaitGroup
-	for _, msg := range msgs {
-		msg := msg
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			runOne(msg)
-		}()
-	}
-	wg.Wait()
-}
-
 // processMessagesParallel runs TraceEventProcessing for each message with bounded concurrency.
 func (ewsi *EastWestStreamInterface) processMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
-	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+	internal.RunStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
 		ackFn := func(ctx context.Context, msg redis.XMessage) error {
 			if err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg); err != nil {
 				return err
@@ -224,7 +188,7 @@ func (ewsi *EastWestStreamInterface) processMessagesParallel(streamCtx context.C
 }
 
 func (ewsi *EastWestStreamInterface) processMessagesParallelRetry(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
-	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+	internal.RunStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
 		ackFn := func(ctx context.Context, msg redis.XMessage) error {
 			if err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg); err != nil {
 				return err

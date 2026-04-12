@@ -55,8 +55,10 @@ func (si *LNDStreamInterface) Start(ctx context.Context) error {
 					continue
 				}
 
-				// Process invoice with tracing and route to appropriate handler
-				si.processInvoiceWithTracing(ctx, invoice)
+				inv := invoice
+				go func() {
+					si.processInvoiceWithTracing(ctx, inv)
+				}()
 			}
 		}
 	}()

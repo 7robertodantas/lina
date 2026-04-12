@@ -46,6 +46,11 @@ type Config struct {
 	// OpenTelemetry / Jaeger
 	OTELExporterOTLPEndpoint string
 	OTELServiceName          string
+
+	// Redis streams: REDIS_STREAM_CONSUMER_NAME; STREAM_PARALLELISM / STREAM_READ_COUNT (or map from DEVICE_STREAM_* in compose/ansible).
+	StreamConsumerName string
+	ConsumeParallelism int
+	StreamReadCount    int
 }
 
 func LoadConfig() Config {
@@ -91,5 +96,9 @@ func LoadConfig() Config {
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELServiceName:          internal.GetEnv("OTEL_SERVICE_NAME", "device-service"),
+
+		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "device-service"),
+		ConsumeParallelism: internal.StreamParallelismFromEnv("DEVICE_STREAM_PARALLELISM", 2),
+		StreamReadCount:      internal.StreamReadCountFromEnv("DEVICE_STREAM_READ_COUNT", 100),
 	}
 }

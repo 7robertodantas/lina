@@ -68,6 +68,8 @@ services:
       - MQTT_TLS_SERVER_NAME=${MQTT_TLS_SERVER_NAME:-mosquitto}
       - MQTT_USERNAME=${DEVICE_SERVICE_MQTT_USERNAME}
       - MQTT_PASSWORD=${DEVICE_SERVICE_MQTT_PASSWORD}
+      - STREAM_READ_COUNT=${DEVICE_STREAM_READ_COUNT:-100}
+      - STREAM_PARALLELISM=${DEVICE_STREAM_PARALLELISM:-2}
       - REDIS_HOST=redis
       # In-cluster Redis port (must be 6379); .env REDIS_PORT is only for host publish mapping on redis service
       - REDIS_PORT=6379
@@ -105,6 +107,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - STREAM_READ_COUNT=${LEDGER_STREAM_READ_COUNT:-100}
+      - STREAM_PARALLELISM=${LEDGER_STREAM_PARALLELISM:-2}
       - DB_PATH=/data/ledger-pebble
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -129,6 +133,8 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - STREAM_READ_COUNT=${CONSUMPTION_STREAM_READ_COUNT:-100}
+      - STREAM_PARALLELISM=${CONSUMPTION_STREAM_PARALLELISM:-4}
       - DB_PATH=/data/consumption-pebble
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=

@@ -92,7 +92,7 @@ func main() {
 	defer mqttClient.Disconnect()
 
 	// Connect to Redis
-	streamInterface, err := NewEastWestStreamInterface(ctx)
+	streamInterface, err := NewEastWestStreamInterface(ctx, cfg)
 	if err != nil {
 		logger.Fatal(ctx, "Failed to create Redis stream client", err)
 	}

@@ -8,6 +8,7 @@ import (
 	"github.com/robertodantas/lina/internal"
 )
 
+// Redis stream client uses REDIS_HOST / REDIS_PORT / etc. (internal.NewStreamClientFromEnv). This service only publishes to streams, not XREADGROUP.
 type Config struct {
 	LNDHost          string
 	LNDTLSCertHex    string

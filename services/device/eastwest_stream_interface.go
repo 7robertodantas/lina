@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,21 +15,47 @@ import (
 	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 )
 
+// Consumer group for event.lightning + event.lightning.ephemeral (same pattern as ledger-consumers / consumption-consumers; not env-tunable).
+const deviceStreamGroup = "device-consumers"
+
 // EastWestStreamInterface wraps the internal StreamClient with device-specific methods for east-west stream communication
 type EastWestStreamInterface struct {
 	*internal.StreamClient
+	streamConsumerName string
+	consumeParallelism int
+	streamReadCount    int
 }
 
 // NewEastWestStreamInterface creates a new Redis stream client using the internal package
-func NewEastWestStreamInterface(ctx context.Context) (*EastWestStreamInterface, error) {
+func NewEastWestStreamInterface(ctx context.Context, cfg Config) (*EastWestStreamInterface, error) {
 	libClient, err := internal.NewStreamClientFromEnv(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	cname := cfg.StreamConsumerName
+	if cname == "" {
+		cname = defaultDeviceStreamConsumerName()
+	}
+
 	return &EastWestStreamInterface{
-		StreamClient: libClient,
+		StreamClient:       libClient,
+		streamConsumerName: cname,
+		consumeParallelism: cfg.ConsumeParallelism,
+		streamReadCount:    cfg.StreamReadCount,
 	}, nil
+}
+
+func defaultDeviceStreamConsumerName() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "unknown"
+	}
+	return fmt.Sprintf("device-%s-%d", host, os.Getpid())
+}
+
+func busyGroup(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "BUSYGROUP")
 }
 
 // StartLedgerBalanceSubscriber listens for ledger balance events and forwards updates via MQTT
@@ -55,7 +83,7 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 
 		streams, err := ewsi.XReadWithSpan(ctx, streamName, &redis.XReadArgs{
 			Streams: []string{streamName, lastID},
-			Count:   20,
+			Count:   int64(ewsi.streamReadCount),
 			Block:   5 * time.Second,
 		})
 		if err != nil {
@@ -72,9 +100,13 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 		}
 
 		for _, stream := range streams {
-			for _, msg := range stream.Messages {
-				lastID = msg.ID
+			msgs := stream.Messages
+			if len(msgs) == 0 {
+				continue
+			}
+			lastID = msgs[len(msgs)-1].ID
 
+			internal.RunStreamMessagesParallel(ewsi.consumeParallelism, msgs, func(msg redis.XMessage) {
 				// Wrap message handling with tracing; XDEL after success keeps event.ledger bounded (single consumer).
 				if err := internal.TraceEventProcessing(ctx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 					raw, ok := msg.Values["event"].(string)
@@ -91,24 +123,34 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 							Warnf(ctx, "XDEL after successful ledger event processing failed for %s: %v", msg.ID, err)
 					}
 				}
-			}
+			})
 		}
 	}
 }
 
 // StartLightningInvoiceSubscriber listens for lightning invoice events and forwards updates via MQTT
 func (ewsi *EastWestStreamInterface) StartLightningInvoiceSubscriber(ctx context.Context, publisher *SouthboundPublisher) {
-	// Create handler for processing lightning events
 	handler := NewEastWestStreamHandler(publisher)
+	streamCtx := ewsi.Context()
+	for _, name := range []string{internal.StreamLightning, internal.StreamLightningEphemeral} {
+		err := ewsi.XGroupCreateMkStreamWithSpan(streamCtx, name, deviceStreamGroup, "0")
+		if err != nil && !busyGroup(err) {
+			logger.WithStream(internal.StreamLightning, "consume").
+				Errorf(ctx, "Failed to create device lightning consumer group on %s: %v", name, err)
+			return
+		}
+	}
+	go ewsi.startDeviceLightningPendingRetry(ctx, internal.StreamLightning, handler)
+	go ewsi.startDeviceLightningPendingRetry(ctx, internal.StreamLightningEphemeral, handler)
 	go ewsi.consumeLightningInvoiceEvents(ctx, handler)
 }
 
 func (ewsi *EastWestStreamInterface) consumeLightningInvoiceEvents(ctx context.Context, handler *EastWestStreamHandler) {
-	lastSettled := "$"
-	lastEphemeral := "$"
+	streamCtx := ewsi.Context()
 
 	logger.WithStream(internal.StreamLightning, "consume").
-		Info(ctx, "Starting lightning invoice subscriber (event.lightning + event.lightning.ephemeral)")
+		Infof(ctx, "Starting lightning invoice subscriber (XREADGROUP group=%s consumer=%s parallelism=%d count=%d)",
+			deviceStreamGroup, ewsi.streamConsumerName, ewsi.consumeParallelism, ewsi.streamReadCount)
 
 	for {
 		select {
@@ -119,16 +161,15 @@ func (ewsi *EastWestStreamInterface) consumeLightningInvoiceEvents(ctx context.C
 		default:
 		}
 
-		// XREAD STREAMS key [key ...] id [id ...] — go-redis Streams must be
-		// [key1, key2, id1, id2], not [key1, id1, key2, id2].
-		streams, err := ewsi.XReadWithSpan(ctx, "", &redis.XReadArgs{
+		streams, err := ewsi.XReadGroupWithSpan(streamCtx, internal.StreamLightning, deviceStreamGroup, ewsi.streamConsumerName, &redis.XReadGroupArgs{
+			Group:    deviceStreamGroup,
+			Consumer: ewsi.streamConsumerName,
 			Streams: []string{
 				internal.StreamLightning,
 				internal.StreamLightningEphemeral,
-				lastSettled,
-				lastEphemeral,
+				">", ">",
 			},
-			Count: 20,
+			Count: int64(ewsi.streamReadCount),
 			Block: 5 * time.Second,
 		})
 		if err != nil {
@@ -146,30 +187,106 @@ func (ewsi *EastWestStreamInterface) consumeLightningInvoiceEvents(ctx context.C
 
 		for _, stream := range streams {
 			streamName := stream.Stream
-			for _, msg := range stream.Messages {
-				switch streamName {
-				case internal.StreamLightning:
-					lastSettled = msg.ID
-				case internal.StreamLightningEphemeral:
-					lastEphemeral = msg.ID
-				}
+			msgs := stream.Messages
+			if len(msgs) == 0 {
+				continue
+			}
+			internal.RunStreamMessagesParallel(ewsi.consumeParallelism, msgs, func(msg redis.XMessage) {
+				ewsi.processDeviceLightningMessage(streamCtx, streamName, msg, handler)
+			})
+		}
+	}
+}
 
-				if err := internal.TraceEventProcessing(ctx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
-					raw, ok := msg.Values["event"].(string)
-					if !ok {
-						return fmt.Errorf("lightning message missing event field")
-					}
-					return ewsi.handleLightningMessage(ctx, handler, raw)
-				}, nil); err != nil {
-					logger.WithStream(streamName, "consume").
-						Errorf(ctx, "Failed to handle lightning message %s: %v", msg.ID, err)
-				} else if streamName == internal.StreamLightningEphemeral {
-					// Single consumer for ephemeral (created/expired); ledger only reads event.lightning — do not XDEL settled stream.
-					if err := ewsi.XDelWithSpan(ctx, streamName, msg.ID); err != nil {
-						logger.WithStream(streamName, "consume").
-							Warnf(ctx, "XDEL after successful ephemeral lightning event failed for %s: %v", msg.ID, err)
-					}
+func (ewsi *EastWestStreamInterface) processDeviceLightningMessage(streamCtx context.Context, streamName string, msg redis.XMessage, handler *EastWestStreamHandler) {
+	ackFn := func(ctx context.Context, msg redis.XMessage) error {
+		if err := ewsi.XAckWithSpan(streamCtx, streamName, deviceStreamGroup, msg.ID, &msg); err != nil {
+			return err
+		}
+		if streamName == internal.StreamLightningEphemeral {
+			if err := ewsi.XDelWithSpan(streamCtx, streamName, msg.ID); err != nil {
+				logger.WithStream(streamName, "consume").
+					Warnf(streamCtx, "XDEL after successful ephemeral lightning event failed for %s: %v", msg.ID, err)
+			}
+		}
+		return nil
+	}
+	err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
+		raw, ok := msg.Values["event"].(string)
+		if !ok {
+			return fmt.Errorf("lightning message missing event field")
+		}
+		return ewsi.handleLightningMessage(ctx, handler, raw)
+	}, ackFn)
+	if err != nil {
+		logger.WithStream(streamName, "consume").
+			Errorf(streamCtx, "Failed to handle lightning message %s: %v", msg.ID, err)
+	}
+}
+
+// startDeviceLightningPendingRetry claims idle pending messages for this stream (same pattern as ledger).
+func (ewsi *EastWestStreamInterface) startDeviceLightningPendingRetry(ctx context.Context, streamName string, handler *EastWestStreamHandler) {
+	streamCtx := ewsi.Context()
+	retryConsumerName := ewsi.streamConsumerName + "-retry"
+	logger.WithStream(streamName, "consume").
+		Infof(streamCtx, "Starting device lightning pending retry (stream=%s)", streamName)
+
+	client := ewsi.Client()
+	minIdleTime := 5 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.WithStream(streamName, "consume").
+				Info(streamCtx, "Stopping device lightning pending retry")
+			return
+		default:
+			pending, err := client.XPendingExt(ctx, &redis.XPendingExtArgs{
+				Stream:   streamName,
+				Group:    deviceStreamGroup,
+				Start:    "-",
+				End:      "+",
+				Count:    10,
+				Consumer: ewsi.streamConsumerName,
+			}).Result()
+			if err != nil {
+				if err == redis.Nil {
+					time.Sleep(1 * time.Second)
+					continue
 				}
+				logger.WithStream(streamName, "consume").
+					Errorf(streamCtx, "Error checking pending device lightning messages: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			var messageIDs []string
+			for _, p := range pending {
+				if p.Idle >= minIdleTime {
+					messageIDs = append(messageIDs, p.ID)
+				}
+			}
+			if len(messageIDs) == 0 {
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			claimed, err := client.XClaim(ctx, &redis.XClaimArgs{
+				Stream:   streamName,
+				Group:    deviceStreamGroup,
+				Consumer: retryConsumerName,
+				MinIdle:  minIdleTime,
+				Messages: messageIDs,
+			}).Result()
+			if err != nil {
+				logger.WithStream(streamName, "consume").
+					Errorf(streamCtx, "Error claiming pending device lightning messages: %v", err)
+				time.Sleep(1 * time.Second)
+				continue
+			}
+
+			for _, msg := range claimed {
+				ewsi.processDeviceLightningMessage(streamCtx, streamName, msg, handler)
 			}
 		}
 	}

@@ -71,42 +71,6 @@ func defaultLedgerStreamConsumerName() string {
 	return fmt.Sprintf("ledger-%s-%d", host, os.Getpid())
 }
 
-func clampParallelism(p int) int {
-	if p < 1 {
-		return 1
-	}
-	if p > 64 {
-		return 64
-	}
-	return p
-}
-
-func runStreamMessagesParallel(p int, msgs []redis.XMessage, runOne func(redis.XMessage)) {
-	p = clampParallelism(p)
-	if len(msgs) == 0 {
-		return
-	}
-	if p == 1 || len(msgs) == 1 {
-		for _, msg := range msgs {
-			runOne(msg)
-		}
-		return
-	}
-	sem := make(chan struct{}, p)
-	var wg sync.WaitGroup
-	for _, msg := range msgs {
-		msg := msg
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			runOne(msg)
-		}()
-	}
-	wg.Wait()
-}
-
 func messageAgeSecondsFromStreamID(messageID string, now time.Time) (float64, bool) {
 	parts := strings.SplitN(messageID, "-", 2)
 	if len(parts) == 0 || parts[0] == "" {
@@ -129,7 +93,7 @@ func (ewsi *EastWestStreamInterface) processLightningMessagesParallel(streamCtx 
 }
 
 func (ewsi *EastWestStreamInterface) processLightningMessagesParallelMode(streamCtx context.Context, streamName string, msgs []redis.XMessage, pendingRetry bool) {
-	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+	internal.RunStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
 		if age, ok := messageAgeSecondsFromStreamID(msg.ID, time.Now()); ok {
 			RecordStreamMessageAge(streamCtx, streamName, "handle_lightning", age, pendingRetry)
 		}
@@ -155,7 +119,7 @@ func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallel(streamCt
 }
 
 func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallelMode(streamCtx context.Context, streamName string, msgs []redis.XMessage, pendingRetry bool) {
-	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
+	internal.RunStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
 		if age, ok := messageAgeSecondsFromStreamID(msg.ID, time.Now()); ok {
 			RecordStreamMessageAge(streamCtx, streamName, "handle_consumption", age, pendingRetry)
 		}
@@ -210,7 +174,7 @@ func (ewsi *EastWestStreamInterface) StartLightningConsumer(ctx context.Context)
 			Warnf(streamCtx, "Failed to create consumer group: %v", err)
 	}
 
-	par := clampParallelism(ewsi.cfg.ConsumeParallelism)
+	par := internal.ClampConsumeParallelism(ewsi.cfg.ConsumeParallelism)
 	logger.WithStream(streamName, "consume").
 		Infof(streamCtx, "Starting lightning consumer (name=%s, batch_parallelism=%d, xreadgroup_count=%d)", ewsi.consumerName, par, ewsi.cfg.StreamReadCount)
 
@@ -290,7 +254,7 @@ func (ewsi *EastWestStreamInterface) StartConsumptionConsumer(ctx context.Contex
 			Warnf(streamCtx, "Failed to create consumer group: %v", err)
 	}
 
-	par := clampParallelism(ewsi.cfg.ConsumeParallelism)
+	par := internal.ClampConsumeParallelism(ewsi.cfg.ConsumeParallelism)
 	logger.WithStream(streamName, "consume").
 		Infof(streamCtx, "Starting consumption consumer (name=%s, batch_parallelism=%d, xreadgroup_count=%d)", ewsi.consumerName, par, ewsi.cfg.StreamReadCount)
 

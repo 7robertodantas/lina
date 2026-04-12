@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/robertodantas/lina/internal"
 )
 
@@ -13,15 +15,21 @@ type Config struct {
 	GRPCAddr       string
 	MaxPageSize    int
 
-	// Redis stream: consumer name (empty = auto ledger-{hostname}-{pid}). Parallelism = max concurrent handlers per batch.
+	// Redis streams: REDIS_STREAM_CONSUMER_NAME; STREAM_PARALLELISM / STREAM_READ_COUNT (or map from LEDGER_STREAM_* in compose/ansible).
 	StreamConsumerName string
 	ConsumeParallelism int
-	// StreamReadCount is XREADGROUP COUNT (max messages per read); clamped by internal.ClampStreamReadCount.
-	StreamReadCount int
+	StreamReadCount    int
 
 	// OpenTelemetry / Jaeger
 	OTELExporterOTLPEndpoint string
 	OTELServiceName          string
+
+	// event.lightning retention: XTRIM … ACKED (Redis 8.2+). MAXLEN only trims when length > threshold — keep this modest (see stream_janitor.go).
+	LightningJanitorEnabled     bool
+	LightningJanitorInterval    time.Duration
+	LightningJanitorMaxLen      int64
+	LightningJanitorApprox      bool
+	LightningJanitorApproxLimit int64
 }
 
 func LoadConfig() Config {
@@ -35,11 +43,17 @@ func LoadConfig() Config {
 		MaxPageSize:    internal.IntEnv("MAX_PAGE_SIZE", 200),
 
 		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "ledger-service"),
-		ConsumeParallelism: internal.IntEnv("LEDGER_STREAM_PARALLELISM", 2),
-		StreamReadCount:    internal.ClampStreamReadCount(internal.IntEnv("LEDGER_STREAM_READ_COUNT", 100)),
+		ConsumeParallelism: internal.StreamParallelismFromEnv("LEDGER_STREAM_PARALLELISM", 2),
+		StreamReadCount:      internal.StreamReadCountFromEnv("LEDGER_STREAM_READ_COUNT", 100),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELServiceName:          internal.GetEnv("OTEL_SERVICE_NAME", "ledger-service"),
+
+		LightningJanitorEnabled:     internal.BoolEnv("LEDGER_LIGHTNING_JANITOR_ENABLED", true),
+		LightningJanitorInterval:    time.Duration(internal.IntEnv("LEDGER_LIGHTNING_JANITOR_INTERVAL_SEC", 30)) * time.Second,
+		LightningJanitorMaxLen:      int64(internal.IntEnv("LEDGER_LIGHTNING_JANITOR_MAXLEN", 2000)),
+		LightningJanitorApprox:      internal.BoolEnv("LEDGER_LIGHTNING_JANITOR_APPROX", true),
+		LightningJanitorApproxLimit: int64(internal.IntEnv("LEDGER_LIGHTNING_JANITOR_APPROX_LIMIT", 10_000)),
 	}
 }

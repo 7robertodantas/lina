@@ -52,6 +52,14 @@ lina_redis_port: "6379"
 # Optional password; leave empty for none
 lina_redis_password: ""
 
+# Redis stream consumer tuning (written as STREAM_READ_COUNT / STREAM_PARALLELISM in service env files)
+lina_device_stream_read_count: 100
+lina_device_stream_parallelism: 2
+lina_ledger_stream_read_count: 100
+lina_ledger_stream_parallelism: 2
+lina_consumption_stream_read_count: 100
+lina_consumption_stream_parallelism: 4
+
 # Shared service auth
 lina_service_token: "change-me-in-production"
 

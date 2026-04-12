@@ -163,6 +163,8 @@ func main() {
 		}
 	}()
 
+	go streamInterface.RunLightningStreamJanitor(serviceCtx)
+
 	// Start expiration checker in a goroutine
 	go func() {
 		if err := streamInterface.StartExpirationChecker(serviceCtx, repo, publisher); err != nil && err != context.Canceled {
