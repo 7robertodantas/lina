@@ -138,7 +138,7 @@ func (c *LNDClient) CreateInvoice(ctx context.Context, amountMsat int64, memo st
 		return nil, fmt.Errorf("amount must be positive")
 	}
 
-	logger.InfoWithFields(ctx, "Creating invoice via cloud LND node", map[string]interface{}{
+	logger.DebugWithFields(ctx, "Creating invoice via cloud LND node", map[string]interface{}{
 		"amount_msat": amountMsat,
 		"expiry":      expirySeconds,
 		"memo_len":    len(memo),
