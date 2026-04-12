@@ -3,16 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
-	internalpkg "github.com/robertodantas/lina/internal"
 	ledgerpb "github.com/robertodantas/lina/proto/gen/interfaces/ledger"
 	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 )
 
 // LedgerClient wraps the gRPC client for the ledger service
@@ -29,23 +23,11 @@ func NewLedgerClient(ctx context.Context, cfg Config) (*LedgerClient, error) {
 	addr := fmt.Sprintf("%s:%d", host, port)
 	logger.Infof(ctx, "Connecting to ledger gRPC service at %s via eastwest gRPC", addr)
 
-	// Ledger/lightning servers use KeepaliveEnforcementPolicy MinTime 30s (default server MinTime is 5m).
-	keepaliveParams := keepalive.ClientParameters{
-		Time:                30 * time.Second,
-		Timeout:             10 * time.Second,
-		PermitWithoutStream: true,
+	dialOpts, err := eastWestGRPCDialOptions(cfg, host)
+	if err != nil {
+		return nil, err
 	}
-
-	// Create gRPC connection (using insecure for now, can be upgraded to TLS later)
-	conn, err := grpc.NewClient(
-		addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler(
-			otelgrpc.WithPropagators(otel.GetTextMapPropagator()),
-		)),
-		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("device-service")),
-	)
+	conn, err := grpc.NewClient(addr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	lightningpb "github.com/robertodantas/lina/proto/gen/interfaces/lightning"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -114,13 +115,23 @@ func main() {
 			logger.Fatalf(ctx, "Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
 		}
 
-		grpcServer := grpc.NewServer(
+		serverOpts := []grpc.ServerOption{
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
 			grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 				MinTime:             30 * time.Second,
 				PermitWithoutStream: true,
 			}),
-		)
+		}
+		if cfg.GRPCUseTLS {
+			tlsConf, err := internal.EastWestGRPCServerTLS(cfg.GRPCTLSCACert, cfg.GRPCServerCert, cfg.GRPCServerKey)
+			if err != nil {
+				logger.Fatalf(ctx, "eastwest gRPC TLS: %v", err)
+			}
+			serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsConf)))
+			logger.Info(ctx, "eastwest gRPC server using TLS (mTLS with edge client certs)")
+		}
+
+		grpcServer := grpc.NewServer(serverOpts...)
 		eastWestServer := NewEastWestGRPCServer(lndClient, streamPublisher)
 		lightningpb.RegisterLightningServiceServer(grpcServer, eastWestServer)
 

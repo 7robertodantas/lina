@@ -15,6 +15,7 @@ import (
 	ledgerpb "github.com/robertodantas/lina/proto/gen/interfaces/ledger"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -180,14 +181,24 @@ func main() {
 			logger.Fatalf(ctx, "Failed to listen on %s via eastwest gRPC: %v", cfg.GRPCAddr, err)
 		}
 
-		grpcServer := grpc.NewServer(
+		serverOpts := []grpc.ServerOption{
 			grpc.StatsHandler(otelgrpc.NewServerHandler()),
 			// Default gRPC MinTime is 5m; device east-west clients ping every 30s (PermitWithoutStream).
 			grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
 				MinTime:             30 * time.Second,
 				PermitWithoutStream: true,
 			}),
-		)
+		}
+		if cfg.GRPCUseTLS {
+			tlsConf, err := internal.EastWestGRPCServerTLS(cfg.GRPCTLSCACert, cfg.GRPCServerCert, cfg.GRPCServerKey)
+			if err != nil {
+				logger.Fatalf(ctx, "eastwest gRPC TLS: %v", err)
+			}
+			serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsConf)))
+			logger.Info(ctx, "eastwest gRPC server using TLS (mTLS with edge client certs)")
+		}
+
+		grpcServer := grpc.NewServer(serverOpts...)
 		eastWestServer := NewEastWestServer(repo, publisher)
 		ledgerpb.RegisterLedgerServiceServer(grpcServer, eastWestServer)
 

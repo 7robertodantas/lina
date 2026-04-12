@@ -1,0 +1,44 @@
+---
+# Edge client cert/key for device-service → ledger/lightning gRPC mTLS (same CA as Mosquitto).
+# Ledger/lightning reuse Mosquitto server.crt/server.key; the key is group-readable (mosquitto).
+- name: Add ledger and lightning users to mosquitto group (read server.key for gRPC TLS)
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: mosquitto
+    append: true
+  loop:
+    - lina-ledger
+    - lina-lightning
+  when: lina_grpc_tls_enabled | default(true) | bool
+
+- name: Resolve TLS certificate source on controller (gRPC edge material)
+  ansible.builtin.set_fact:
+    lina_grpc_tls_effective_src: >-
+      {{ lina_mosquitto_certs_src
+         if (lina_mosquitto_certs_src | default('') | length) > 0
+         else (playbook_dir | dirname | dirname | dirname ~ '/infrastructure/certs') }}
+  when: lina_grpc_tls_enabled | default(true) | bool
+  run_once: true
+  delegate_to: localhost
+  become: false
+
+- name: Ensure gRPC TLS directory for device-service
+  ansible.builtin.file:
+    path: "{{ lina_config_dir }}/grpc"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: lina_grpc_tls_enabled | default(true) | bool
+
+- name: Copy edge TLS material for device-service gRPC
+  ansible.builtin.copy:
+    src: "{{ lina_grpc_tls_effective_src }}/{{ item.name }}"
+    dest: "{{ lina_config_dir }}/grpc/{{ item.name }}"
+    owner: lina-device
+    group: lina-device
+    mode: "{{ item.mode }}"
+  loop:
+    - { name: edge.crt, mode: '0644' }
+    - { name: edge.key, mode: '0600' }
+  when: lina_grpc_tls_enabled | default(true) | bool

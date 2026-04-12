@@ -18,6 +18,7 @@ SERVER_VALIDITY_DAYS="${SERVER_VALIDITY_DAYS:-365}" # Default: 1 year
 #   EXTRA_TLS_IP_SANS="192.168.0.170" ./generate-certs.sh
 #   EXTRA_TLS_IP_SANS="192.168.0.170,192.168.0.171" FORCE_REGEN_SERVER=1 ./generate-certs.sh
 # FORCE_REGEN_SERVER=1 removes existing server.crt/server.key so SANs are rebuilt (CA unchanged).
+# FORCE_REGEN_EDGE=1 removes existing edge.crt/edge.key (CA unchanged).
 
 
 # Colors for output
@@ -98,6 +99,10 @@ DNS.2 = mosquitto
 DNS.3 = *.mosquitto
 DNS.4 = nanomq
 DNS.5 = *.nanomq
+DNS.6 = ledger
+DNS.7 = lightning
+DNS.8 = device
+DNS.9 = consumption
 IP.1 = 127.0.0.1
 IP.2 = ::1
 EOF
@@ -128,6 +133,53 @@ EOF
     echo -e "${GREEN}✓${NC} Server certificate generated with SANs (valid for ${SERVER_VALIDITY_DAYS} days)"
 }
 
+# Edge (client) certificate for mTLS — used by services calling internal gRPC (e.g. device → ledger/lightning).
+generate_edge() {
+    if [ "${FORCE_REGEN_EDGE:-}" = "1" ] || [ "${FORCE_REGEN_EDGE:-}" = "true" ]; then
+        rm -f "$CERT_DIR/edge.crt" "$CERT_DIR/edge.key"
+    fi
+    if check_cert "$CERT_DIR/edge.crt"; then
+        return 0
+    fi
+
+    echo "Generating edge (client) certificate for internal gRPC mTLS..."
+    EDGE_CONF="$CERT_DIR/edge.conf"
+    {
+        cat <<'EOF'
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = lina-edge
+O = LINA
+C = US
+
+[v3_req]
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+EOF
+    } > "$EDGE_CONF"
+
+    openssl genrsa -out "$CERT_DIR/edge.key" 2048
+    openssl req -new -key "$CERT_DIR/edge.key" \
+        -out "$CERT_DIR/edge.csr" \
+        -config "$EDGE_CONF"
+    openssl x509 -req -in "$CERT_DIR/edge.csr" \
+        -CA "$CERT_DIR/ca.crt" \
+        -CAkey "$CERT_DIR/ca.key" \
+        -CAcreateserial \
+        -out "$CERT_DIR/edge.crt" \
+        -days "$SERVER_VALIDITY_DAYS" \
+        -extensions v3_req \
+        -extfile "$EDGE_CONF"
+
+    rm -f "$EDGE_CONF"
+
+    echo -e "${GREEN}✓${NC} Edge certificate generated (valid for ${SERVER_VALIDITY_DAYS} days)"
+}
+
 # Check if OpenSSL is available
 if ! command -v openssl &> /dev/null; then
     echo "Error: openssl is not installed. Please install it first."
@@ -140,6 +192,7 @@ echo ""
 
 generate_ca
 generate_server
+generate_edge
 
 # Clean up CSR, serial, and config files
 echo ""
@@ -153,11 +206,14 @@ echo ""
 echo "Generated certificates:"
 echo "  - ca.crt, ca.key (Certificate Authority, valid for ${CA_VALIDITY_DAYS} days)"
 echo "  - server.crt, server.key (Server certificate, valid for ${SERVER_VALIDITY_DAYS} days)"
+echo "  - edge.crt, edge.key (Client / edge identity for internal gRPC mTLS, valid for ${SERVER_VALIDITY_DAYS} days)"
 echo ""
 echo "Certificate location: $CERT_DIR"
 echo ""
-echo "Note: Only ca.crt should be shared with client services."
-echo "      Private keys (ca.key, server.key) should be kept secure."
+echo "Note: Only ca.crt should be shared broadly for verification."
+echo "      Private keys (ca.key, server.key, edge.key) must be kept secure."
+echo "      Internal gRPC servers use server.crt/key + verify clients with edge.crt;"
+echo "      gRPC clients (e.g. device-service) present edge.crt/key."
 echo ""
 echo "LAN / IP clients (e.g. MQTT Explorer to 192.168.x.x): add IPs via EXTRA_TLS_IP_SANS"
 echo "and regenerate the server cert (FORCE_REGEN_SERVER=1 or rm server.crt server.key)."

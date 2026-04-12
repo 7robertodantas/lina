@@ -17,6 +17,8 @@
     - ca.crt
     - server.crt
     - server.key
+    - edge.crt
+    - edge.key
   register: lina_mqtt_tls_cert_stat
   when: lina_mosquitto_tls_enable | default(false) | bool
   run_once: true

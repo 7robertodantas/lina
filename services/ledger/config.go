@@ -13,6 +13,10 @@ type Config struct {
 	ServiceToken   string
 	ListenAddr     string
 	GRPCAddr       string
+	GRPCUseTLS     bool
+	GRPCTLSCACert  string
+	GRPCServerCert string
+	GRPCServerKey  string
 	MaxPageSize    int
 
 	// Redis streams: REDIS_STREAM_CONSUMER_NAME; STREAM_PARALLELISM / STREAM_READ_COUNT (or map from LEDGER_STREAM_* in compose/ansible).
@@ -40,6 +44,10 @@ func LoadConfig() Config {
 		ServiceToken:   internal.GetEnv("SERVICE_TOKEN", "dev-token"),
 		ListenAddr:     internal.GetEnv("LISTEN_ADDR", ":8080"),
 		GRPCAddr:       internal.GetEnv("GRPC_ADDR", ":9090"),
+		GRPCUseTLS:     internal.BoolEnv("GRPC_USE_TLS", false),
+		GRPCTLSCACert:  internal.GetEnv("GRPC_TLS_CA_CERT", "/certs/ca.crt"),
+		GRPCServerCert: internal.GetEnv("GRPC_TLS_SERVER_CERT", "/certs/server.crt"),
+		GRPCServerKey:  internal.GetEnv("GRPC_TLS_SERVER_KEY", "/certs/server.key"),
 		MaxPageSize:    internal.IntEnv("MAX_PAGE_SIZE", 200),
 
 		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "ledger-service"),

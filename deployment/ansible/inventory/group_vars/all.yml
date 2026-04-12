@@ -39,6 +39,11 @@ lina_mosquitto_keyfile: /etc/lina/mosquitto/server.key
 # Controller: directory with ca.crt, server.crt, server.key (empty = <repo>/infrastructure/certs)
 lina_mosquitto_certs_src: ""
 
+# Internal gRPC mTLS (device → ledger/lightning): edge.crt/edge.key from same cert dir as Mosquitto
+lina_grpc_tls_enabled: true
+# TLS verify name for shared server.crt (SAN includes localhost). Set to ledger after regenerating server cert with internal DNS SANs.
+lina_grpc_tls_server_name: localhost
+
 # Device MQTT client: use TLS to broker
 lina_mqtt_use_tls: true
 # Dev certs often do not match hostname; set false when using real DNS + matching cert

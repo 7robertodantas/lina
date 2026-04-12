@@ -17,6 +17,10 @@ type Config struct {
 	Network          string
 	ListenAddr       string
 	GRPCAddr         string
+	GRPCUseTLS     bool
+	GRPCTLSCACert  string
+	GRPCServerCert string
+	GRPCServerKey  string
 	ServiceToken     string
 	RedisAddr        string
 	RedisPassword    string
@@ -37,8 +41,12 @@ func LoadConfig() *Config {
 		LNDTLSServerName: internal.GetEnv("LND_TLS_SERVER_NAME", "localhost"),
 		LNDMacaroonHex:   internal.GetEnv("LND_MACAROON_HEX", ""),
 		Network:          internal.GetEnv("NETWORK", "testnet"),
-		GRPCAddr:         internal.GetEnv("GRPC_ADDR", ":9090"),
-		ListenAddr:       internal.GetEnv("LISTEN_ADDR", ":8080"),
+		GRPCAddr:       internal.GetEnv("GRPC_ADDR", ":9090"),
+		GRPCUseTLS:     internal.BoolEnv("GRPC_USE_TLS", false),
+		GRPCTLSCACert:  internal.GetEnv("GRPC_TLS_CA_CERT", "/certs/ca.crt"),
+		GRPCServerCert: internal.GetEnv("GRPC_TLS_SERVER_CERT", "/certs/server.crt"),
+		GRPCServerKey:  internal.GetEnv("GRPC_TLS_SERVER_KEY", "/certs/server.key"),
+		ListenAddr:     internal.GetEnv("LISTEN_ADDR", ":8080"),
 		ServiceToken:     internal.GetEnv("SERVICE_TOKEN", "dev-token"),
 		RedisAddr:        internal.GetEnv("REDIS_ADDR", "localhost:6379"),
 		RedisPassword:    internal.GetEnv("REDIS_PASSWORD", ""),

@@ -40,6 +40,16 @@ type Config struct {
 	LightningGRPCHost string
 	LightningGRPCPort int
 
+	// East-west gRPC TLS (mTLS: edge client cert, CA verifies server)
+	GRPCUseTLS      bool
+	GRPCTLSCACert   string
+	GRPCTLSEdgeCert string
+	GRPCTLSEdgeKey  string
+	// TLS verification name for the server cert (SNI). Empty uses the gRPC host (e.g. ledger).
+	// If that host is not in server.crt SANs, set this to a DNS name that is (e.g. localhost from generate-certs.sh).
+	GRPCTLSServerName string
+	GRPCTLSSkipVerify bool
+
 	// Lightning request timeout (seconds)
 	LightningRPCTimeoutSeconds int
 
@@ -90,6 +100,13 @@ func LoadConfig() Config {
 		LightningGRPCHost: internal.GetEnv("LIGHTNING_GRPC_HOST", "lightning"),
 		LightningGRPCPort: internal.IntEnv("LIGHTNING_GRPC_PORT", 9090),
 
+		GRPCUseTLS:        internal.BoolEnv("GRPC_USE_TLS", false),
+		GRPCTLSCACert:     internal.GetEnv("GRPC_TLS_CA_CERT", "/certs/ca.crt"),
+		GRPCTLSEdgeCert:   internal.GetEnv("GRPC_TLS_EDGE_CERT", "/certs/edge.crt"),
+		GRPCTLSEdgeKey:    internal.GetEnv("GRPC_TLS_EDGE_KEY", "/certs/edge.key"),
+		GRPCTLSServerName: internal.GetEnv("GRPC_TLS_SERVER_NAME", "localhost"),
+		GRPCTLSSkipVerify: internal.BoolEnv("GRPC_TLS_SKIP_VERIFY", false),
+
 		// Lightning RPC timeout
 		LightningRPCTimeoutSeconds: internal.IntEnv("LIGHTNING_RPC_TIMEOUT_SECONDS", 30),
 
@@ -99,6 +116,6 @@ func LoadConfig() Config {
 
 		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "device-service"),
 		ConsumeParallelism: internal.StreamParallelismFromEnv("DEVICE_STREAM_PARALLELISM", 2),
-		StreamReadCount:      internal.StreamReadCountFromEnv("DEVICE_STREAM_READ_COUNT", 100),
+		StreamReadCount:    internal.StreamReadCountFromEnv("DEVICE_STREAM_READ_COUNT", 100),
 	}
 }

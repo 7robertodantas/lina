@@ -3,16 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
-	"time"
 
-	internalpkg "github.com/robertodantas/lina/internal"
 	lightningpb "github.com/robertodantas/lina/proto/gen/interfaces/lightning"
 	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 )
 
 // LightningClient wraps the gRPC client for the lightning service
@@ -29,21 +23,11 @@ func NewLightningClient(ctx context.Context, cfg Config) (*LightningClient, erro
 	addr := fmt.Sprintf("%s:%d", host, port)
 	logger.Infof(ctx, "Connecting to lightning gRPC service at %s via eastwest gRPC", addr)
 
-	keepaliveParams := keepalive.ClientParameters{
-		Time:                30 * time.Second,
-		Timeout:             10 * time.Second,
-		PermitWithoutStream: true,
+	dialOpts, err := eastWestGRPCDialOptions(cfg, host)
+	if err != nil {
+		return nil, err
 	}
-
-	conn, err := grpc.NewClient(
-		addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithKeepaliveParams(keepaliveParams),
-		grpc.WithStatsHandler(otelgrpc.NewClientHandler(
-			otelgrpc.WithPropagators(otel.GetTextMapPropagator()),
-		)),
-		grpc.WithUnaryInterceptor(internalpkg.LoggingUnaryClientInterceptor("device-service")),
-	)
+	conn, err := grpc.NewClient(addr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create lightning gRPC client: %w", err)
 	}

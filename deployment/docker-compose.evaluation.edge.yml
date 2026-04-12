@@ -77,6 +77,12 @@ services:
       - LEDGER_GRPC_PORT=${GRPC_PORT}
       - LIGHTNING_GRPC_HOST=lightning
       - LIGHTNING_GRPC_PORT=${GRPC_PORT}
+      - GRPC_USE_TLS=true
+      - GRPC_TLS_CA_CERT=/certs/ca.crt
+      - GRPC_TLS_EDGE_CERT=/certs/edge.crt
+      - GRPC_TLS_EDGE_KEY=/certs/edge.key
+      # Verify against a name on server.crt (localhost); override to ledger if the cert lists it.
+      - GRPC_TLS_SERVER_NAME=localhost
       - DB_PATH=/data/devices
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
@@ -87,6 +93,8 @@ services:
       - .env
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/edge.crt:/certs/edge.crt:ro
+      - ../infrastructure/certs/edge.key:/certs/edge.key:ro
       - device-data:/data
     depends_on:
       mosquitto:
@@ -110,6 +118,10 @@ services:
       - STREAM_READ_COUNT=${LEDGER_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${LEDGER_STREAM_PARALLELISM:-4}
       - DB_PATH=/data/ledger
+      - GRPC_USE_TLS=true
+      - GRPC_TLS_CA_CERT=/certs/ca.crt
+      - GRPC_TLS_SERVER_CERT=/certs/server.crt
+      - GRPC_TLS_SERVER_KEY=/certs/server.key
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
       - OTEL_SERVICE_NAME=ledger-service
@@ -118,6 +130,9 @@ services:
     env_file:
       - .env
     volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/server.crt:/certs/server.crt:ro
+      - ../infrastructure/certs/server.key:/certs/server.key:ro
       - ledger-data:/data
     depends_on:
       redis:
@@ -158,6 +173,10 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - DB_PATH=/data/lightning
+      - GRPC_USE_TLS=true
+      - GRPC_TLS_CA_CERT=/certs/ca.crt
+      - GRPC_TLS_SERVER_CERT=/certs/server.crt
+      - GRPC_TLS_SERVER_KEY=/certs/server.key
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
       - OTEL_SERVICE_NAME=lightning-service
@@ -166,6 +185,9 @@ services:
     env_file:
       - .env
     volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/server.crt:/certs/server.crt:ro
+      - ../infrastructure/certs/server.key:/certs/server.key:ro
       - lightning-data:/data
     depends_on:
       redis:

@@ -11,10 +11,15 @@ services:
   device:
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/edge.crt:/certs/edge.crt:ro
+      - ../infrastructure/certs/edge.key:/certs/edge.key:ro
       - ${EDGE_DATA_ROOT}/device:/data
 
   ledger:
     volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/server.crt:/certs/server.crt:ro
+      - ../infrastructure/certs/server.key:/certs/server.key:ro
       - ${EDGE_DATA_ROOT}/ledger:/data
 
   consumption:
@@ -23,4 +28,7 @@ services:
 
   lightning:
     volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/server.crt:/certs/server.crt:ro
+      - ../infrastructure/certs/server.key:/certs/server.key:ro
       - ${EDGE_DATA_ROOT}/lightning:/data

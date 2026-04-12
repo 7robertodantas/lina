@@ -82,6 +82,8 @@ services:
       - .env
     volumes:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/edge.crt:/certs/edge.crt:ro
+      - ../infrastructure/certs/edge.key:/certs/edge.key:ro
       - device-data:/data
     depends_on:
       mosquitto:
@@ -111,6 +113,9 @@ services:
     env_file:
       - .env
     volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/server.crt:/certs/server.crt:ro
+      - ../infrastructure/certs/server.key:/certs/server.key:ro
       - ledger-data:/data
     depends_on:
       redis:
@@ -156,6 +161,9 @@ services:
     env_file:
       - .env
     volumes:
+      - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
+      - ../infrastructure/certs/server.crt:/certs/server.crt:ro
+      - ../infrastructure/certs/server.key:/certs/server.key:ro
       - lightning-data:/data
     depends_on:
       redis:
