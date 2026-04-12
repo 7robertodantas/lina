@@ -163,6 +163,12 @@ func (ewsi *EastWestStreamInterface) consumeLightningInvoiceEvents(ctx context.C
 				}, nil); err != nil {
 					logger.WithStream(streamName, "consume").
 						Errorf(ctx, "Failed to handle lightning message %s: %v", msg.ID, err)
+				} else if streamName == internal.StreamLightningEphemeral {
+					// Single consumer for ephemeral (created/expired); ledger only reads event.lightning — do not XDEL settled stream.
+					if err := ewsi.XDelWithSpan(ctx, streamName, msg.ID); err != nil {
+						logger.WithStream(streamName, "consume").
+							Warnf(ctx, "XDEL after successful ephemeral lightning event failed for %s: %v", msg.ID, err)
+					}
 				}
 			}
 		}
