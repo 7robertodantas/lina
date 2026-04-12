@@ -1,7 +1,76 @@
 import { Counter, Rate } from 'k6/metrics';
 import http from 'k6/http';
-import { randomString } from 'https://jslib.k6.io/k6-utils/1.2.0/index.js';
-import { sleep, check } from 'k6';
+import { randomString, getCurrentStageIndex } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
+import { sleep } from 'k6';
+
+// --- Logging (LOG_LEVEL: debug|info|warn|error; default info) — matches backend services ---
+const LEVEL_SEVERITY = { debug: 0, info: 1, warn: 2, warning: 2, error: 3 };
+
+function normalizeLogLevel(raw) {
+  const x = (raw || 'info').toLowerCase().trim();
+  if (x === 'warning') return 'warn';
+  if (x === 'debug' || x === 'info' || x === 'warn' || x === 'error') return x;
+  return 'info';
+}
+
+const ACTIVE_LOG_LEVEL = normalizeLogLevel(__ENV.LOG_LEVEL);
+const ACTIVE_SEVERITY = LEVEL_SEVERITY[ACTIVE_LOG_LEVEL] ?? LEVEL_SEVERITY.info;
+
+function logAtLeast(severityName) {
+  const s = LEVEL_SEVERITY[severityName] ?? LEVEL_SEVERITY.info;
+  return s >= ACTIVE_SEVERITY;
+}
+
+function effectiveLevelsDescription() {
+  if (ACTIVE_LOG_LEVEL === 'debug') return 'showing debug, info, warn, error';
+  if (ACTIVE_LOG_LEVEL === 'info') return 'showing info, warn, error';
+  if (ACTIVE_LOG_LEVEL === 'warn') return 'showing warn, error';
+  if (ACTIVE_LOG_LEVEL === 'error') return 'showing error only';
+  return 'showing info, warn, error';
+}
+
+/** Always printed once so runs always record the active filter (not subject to LOG_LEVEL). */
+function printLogLevelBanner() {
+  console.log(`${logTimePrefix()} [loadtest] LOG_LEVEL=${ACTIVE_LOG_LEVEL} (${effectiveLevelsDescription()})`);
+}
+
+const log = {
+  debug: (...args) => {
+    if (!logAtLeast('debug')) return;
+    console.log(logTimePrefix(), '[loadtest][DEBUG]', ...args);
+  },
+  info: (...args) => {
+    if (!logAtLeast('info')) return;
+    console.log(logTimePrefix(), '[loadtest][INFO]', ...args);
+  },
+  warn: (...args) => {
+    if (!logAtLeast('warn')) return;
+    console.warn(logTimePrefix(), '[loadtest][WARN]', ...args);
+  },
+  error: (...args) => {
+    if (!logAtLeast('error')) return;
+    console.error(logTimePrefix(), '[loadtest][ERROR]', ...args);
+  },
+};
+
+/** VU 1 only: log ramping-vus stage transitions (always on stdout; not filtered by LOG_LEVEL). */
+let lastLoggedStageIndex = -1;
+
+function maybeLogRampStageTarget() {
+  if (__VU !== 1) return;
+  try {
+    const idx = getCurrentStageIndex();
+    if (idx === lastLoggedStageIndex) return;
+    lastLoggedStageIndex = idx;
+    const st = loadTestStages[idx];
+    if (!st) return;
+    console.log(
+      `${logTimePrefix()} [loadtest] ramp stage ${idx + 1}/${loadTestStages.length}: target ${st.target} VUs, duration ${st.duration}`
+    );
+  } catch (_e) {
+    // Older k6 or non-stages executors: ignore
+  }
+}
 
 // --- Metrics ---
 // Domain-specific metrics for device load testing
@@ -22,7 +91,7 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // s
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
-const LEVEL_VUS = 25;
+const LEVEL_VUS = 50;
 const WARMUP = '60s';
 const MEASURE = '120s';
 const IDLE = '60s';
@@ -30,19 +99,27 @@ const TEARDOWN = '60s'
 
 // Define load test stages
 const loadTestStages = [
-  { duration: IDLE, target: 0 },
-  { duration: WARMUP, target: LEVEL_VUS },
-  { duration: MEASURE, target: LEVEL_VUS },   // warmup
-  { duration: WARMUP, target: LEVEL_VUS * 2 },
-  { duration: MEASURE, target: LEVEL_VUS * 2 },
-  { duration: WARMUP, target: LEVEL_VUS * 3 },
-  { duration: MEASURE, target: LEVEL_VUS * 3 },
-  { duration: WARMUP, target: LEVEL_VUS * 4 },
-  { duration: MEASURE, target: LEVEL_VUS * 4 },
-  { duration: WARMUP, target: LEVEL_VUS * 5 },
-  { duration: MEASURE, target: LEVEL_VUS * 5 },
-  { duration: WARMUP, target: LEVEL_VUS * 6 },
-  { duration: MEASURE, target: LEVEL_VUS * 6 },
+  { duration: WARMUP, target: 100 },
+  { duration: MEASURE, target: 100 },   // warmup
+  { duration: WARMUP, target: 200 },
+  { duration: MEASURE, target: 200 },   // warmup
+  { duration: WARMUP, target: 250 },
+  { duration: MEASURE, target: 250 },   // warmup
+  
+  
+  // { duration: IDLE, target: 0 },
+  // { duration: WARMUP, target: LEVEL_VUS },
+  // { duration: MEASURE, target: LEVEL_VUS },   // warmup
+  // { duration: WARMUP, target: LEVEL_VUS * 2 },
+  // { duration: MEASURE, target: LEVEL_VUS * 2 },
+  // { duration: WARMUP, target: LEVEL_VUS * 3 },
+  // { duration: MEASURE, target: LEVEL_VUS * 3 },
+  // { duration: WARMUP, target: LEVEL_VUS * 4 },
+  // { duration: MEASURE, target: LEVEL_VUS * 4 },
+  // { duration: WARMUP, target: LEVEL_VUS * 5 },
+  // { duration: MEASURE, target: LEVEL_VUS * 5 },
+  // { duration: WARMUP, target: LEVEL_VUS * 6 },
+  // { duration: MEASURE, target: LEVEL_VUS * 6 },
   { duration: TEARDOWN, target: 0 },
 ];
 
@@ -83,11 +160,20 @@ function getISOTimestamp() {
   return new Date().toISOString();
 }
 
+/** ISO-8601 prefix for loadtest log lines. */
+function logTimePrefix() {
+  return `[${getISOTimestamp()}]`;
+}
+
 
 // --- Setup ---
 export function setup() {
+  printLogLevelBanner();
   const vuSource = __ENV.VUS ? 'VUS environment variable' : `maximum from stages (${maxVUsFromStages})`;
-  console.log(`Starting load test setup: pre-registering ${VUsCount} devices in batch (${vuSource})...`);
+  log.info(`Starting load test setup: pre-registering ${VUsCount} devices in batch (${vuSource})...`);
+  log.info(
+    `Ramp profile: ${loadTestStages.map((s) => `${s.duration}@${s.target}VU`).join(' → ')}`
+  );
 
   // Generate device IDs
   const deviceIDs = [];
@@ -96,7 +182,9 @@ export function setup() {
     deviceIDs.push(deviceID);
   }
 
-  console.log(`Generated ${deviceIDs.length} device IDs (range: k6_device_000001 to k6_device_${String(VUsCount).padStart(6, '0')})`);
+  log.debug(
+    `Generated ${deviceIDs.length} device IDs (range: k6_device_000001 to k6_device_${String(VUsCount).padStart(6, '0')})`
+  );
 
   // Register all devices using batch endpoint
   const batchPayload = JSON.stringify({
@@ -114,7 +202,7 @@ export function setup() {
     timestamp: getISOTimestamp(),
   });
 
-  console.log(`Registering ${VUsCount} devices via batch endpoint...`);
+  log.info(`Registering ${VUsCount} devices via batch endpoint...`);
   const batchRes = http.post(
     `${API_BASE_URL}${API_DEVICES_BATCH_ENDPOINT}`,
     batchPayload,
@@ -125,14 +213,14 @@ export function setup() {
   if (batchRes.status === 204) {
     // Device service republishes retained MQTT config for this batch on 204 (so /devices/<id>/config exists
     // again after broker restart, etc.). MQTT Explorer: subscribe to /devices/k6_device_000001/config, not plain "config".
-    console.log(`Batch already exists (204 No Content) - all ${VUsCount} devices are already registered`);
+    log.info(`Batch already exists (204 No Content) - all ${VUsCount} devices are already registered`);
     registered = VUsCount;
   } else if (batchRes.status === 201) {
     const response = JSON.parse(batchRes.body);
-    console.log(`Batch registration successful: ${response.devices_created} devices created (range: ${response.id_range})`);
+    log.info(`Batch registration successful: ${response.devices_created} devices created (range: ${response.id_range})`);
     registered = response.devices_created;
   } else {
-    console.error(`Failed to register device batch: ${batchRes.status} - ${batchRes.body}`);
+    log.error(`Failed to register device batch: ${batchRes.status} - ${batchRes.body}`);
     return {
       deviceIDs: [],
       registered: 0,
@@ -145,7 +233,7 @@ export function setup() {
   const CONNECT_BATCH_SLEEP = parseInt(__ENV.CONNECT_BATCH_SLEEP || '5'); // Seconds to sleep between batches
   const CONNECT_TIMEOUT = __ENV.CONNECT_TIMEOUT || '120s'; // Timeout for each connect request
 
-  console.log(`Connecting ${registered} devices in batches of ${CONNECT_BATCH_SIZE} (sleep ${CONNECT_BATCH_SLEEP}s between batches)...`);
+  log.info(`Connecting ${registered} devices in batches of ${CONNECT_BATCH_SIZE} (sleep ${CONNECT_BATCH_SLEEP}s between batches)...`);
   
   let connected = 0;
   let failed = 0;
@@ -155,7 +243,7 @@ export function setup() {
     const batchNum = Math.floor(i / CONNECT_BATCH_SIZE) + 1;
     const totalBatches = Math.ceil(deviceIDs.length / CONNECT_BATCH_SIZE);
     
-    console.log(`Connecting batch ${batchNum}/${totalBatches} (${batch.length} devices)...`);
+    log.debug(`Connecting batch ${batchNum}/${totalBatches} (${batch.length} devices)...`);
     
     // Connect devices sequentially within the batch (k6 http.post is synchronous)
     let batchConnected = 0;
@@ -182,24 +270,25 @@ export function setup() {
       } else {
         batchFailed++;
         deviceConnectionFailed.add(1);
-        console.error(`Failed to connect device ${deviceID}: ${connectRes.status} - ${connectRes.body}`);
+        log.error(`Failed to connect device ${deviceID}: ${connectRes.status} - ${connectRes.body}`);
       }
     }
     
     connected += batchConnected;
     failed += batchFailed;
     
-    console.log(`Batch ${batchNum}/${totalBatches} complete: ${batchConnected} connected, ${batchFailed} failed (total: ${connected}/${registered})`);
+    log.debug(`Batch ${batchNum}/${totalBatches} complete: ${batchConnected} connected, ${batchFailed} failed (total: ${connected}/${registered})`);
     
     // Sleep between batches (except after the last batch)
     if (i + CONNECT_BATCH_SIZE < deviceIDs.length) {
-      console.log(`Sleeping ${CONNECT_BATCH_SLEEP}s before next batch...`);
+      log.debug(`Sleeping ${CONNECT_BATCH_SLEEP}s before next batch...`);
       sleep(CONNECT_BATCH_SLEEP);
     }
   }
 
-  const setupEndTime = new Date().toISOString();
-  console.log(`[${setupEndTime}] Setup complete: ${registered}/${VUsCount} devices registered, ${connected}/${registered} devices connected, ${failed} failed`);
+  log.info(
+    `Setup complete: ${registered}/${VUsCount} devices registered, ${connected}/${registered} devices connected, ${failed} failed`
+  );
   
   return {
     deviceIDs,
@@ -211,6 +300,8 @@ export function setup() {
 
 // --- Load Usage Scenario ---
 export function load_usage() {
+  maybeLogRampStageTarget();
+
   const vuID = __VU;
   const deviceID = generateDeviceID(vuID);
 
@@ -243,7 +334,7 @@ export function load_usage() {
     usageReported.add(1);
     usageReportRate.add(1);
     // Ensure device_paused metric is always visible (initialize to 0 if not paused)
-    console.log(`[VU ${vuID}] Usage report sent (${JSON.parse(usagePayload).reportId}): ${measure.toFixed(4)} kWh`);
+    log.debug(`[VU ${vuID}] Usage report sent (${JSON.parse(usagePayload).reportId}): ${measure.toFixed(4)} kWh`);
     devicePaused.add(0);
   } else if (usageRes.status === 423) {
     // 423 = Locked/Reporting disabled (STOP/PAUSE command received)
@@ -253,7 +344,7 @@ export function load_usage() {
     usageReportFailed.add(1);
     // Ensure device_paused metric is always visible (initialize to 0 if not paused)
     devicePaused.add(0);
-    console.error(`[VU ${vuID}] Usage report failed: ${usageRes.status} - ${usageRes.body}`);
+    log.error(`[VU ${vuID}] Usage report failed: ${usageRes.status} - ${usageRes.body}`);
   }
 
   sleep(1); // Sleep for 1 second for each usage report
@@ -273,13 +364,13 @@ export default function () {
 
 // --- Teardown ---
 export function teardown(data) {
-  console.log("Disconnecting all devices...");
+  log.info('Disconnecting all devices...');
 
   let deviceIDs = data?.deviceIDs || [];
   
   // Fallback: generate device IDs if not in data
   if (deviceIDs.length === 0) {
-    console.log("No device IDs in data, generating device IDs...");
+    log.warn('No device IDs in data, generating device IDs...');
     for (let id = 1; id <= VUsCount; id++) {
       const deviceID = `k6_device_${String(id).padStart(6, '0')}`;
       deviceIDs.push(deviceID);
@@ -311,22 +402,22 @@ export function teardown(data) {
 
       // Log progress
       const progress = Math.min(i + chunkSize, deviceIDs.length);
-      console.log(`Disconnected batch: ${result.disconnected}/${chunk.length} (total: ${totalDisconnected}/${progress})`);
+      log.debug(`Disconnected batch: ${result.disconnected}/${chunk.length} (total: ${totalDisconnected}/${progress})`);
 
       // Log any failures
       if (result.failed > 0) {
         const failedDevices = result.results.filter(r => !r.success);
         failedDevices.forEach(f => {
-          console.error(`Failed to disconnect ${f.deviceId}: ${f.error || 'unknown error'}`);
+          log.error(`Failed to disconnect ${f.deviceId}: ${f.error || 'unknown error'}`);
         });
       }
     } else {
       // Entire batch failed
       totalFailed += chunk.length;
-      console.error(`Batch disconnect failed: ${batchRes.status} - ${batchRes.body}`);
+      log.error(`Batch disconnect failed: ${batchRes.status} - ${batchRes.body}`);
     }
   }
 
-  console.log(`Teardown complete: ${totalDisconnected} disconnected, ${totalFailed} failed`);
-  console.log("Load test finished.");
+  log.info(`Teardown complete: ${totalDisconnected} disconnected, ${totalFailed} failed`);
+  log.info('Load test finished.');
 }
