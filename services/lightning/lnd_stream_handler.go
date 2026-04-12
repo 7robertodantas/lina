@@ -53,7 +53,7 @@ func (h *LNDStreamHandler) HandleInvoiceSettled(ctx context.Context, invoice *ln
 	timestamp := time.Unix(invoice.SettleDate, 0).UTC().Format(time.RFC3339)
 
 	logger.WithDeviceID(deviceMeta.DeviceID).
-		InfoWithFields(ctx, "Invoice settled via cloud LND node", map[string]interface{}{
+		DebugWithFields(ctx, "Invoice settled via cloud LND node", map[string]interface{}{
 			"invoice_id":           invoiceID,
 			"amount_received_msat": amountReceivedMsat,
 		})

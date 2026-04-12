@@ -39,7 +39,7 @@ func (s *EastWestGRPCServer) CreateInvoice(ctx context.Context, req *lightningmo
 	}
 
 	logger.WithDeviceID(req.DeviceId).
-		InfoWithFields(ctx, "CreateInvoice request received via eastwest gRPC", map[string]interface{}{
+		DebugWithFields(ctx, "CreateInvoice request received via eastwest gRPC", map[string]interface{}{
 			"amount_msat": req.AmountMsat,
 			"reason":      req.Reason,
 		})
@@ -80,7 +80,7 @@ func (s *EastWestGRPCServer) CreateInvoice(ctx context.Context, req *lightningmo
 	}
 
 	logger.WithDeviceID(req.DeviceId).
-		InfoWithFields(ctx, "Invoice created successfully via eastwest gRPC", map[string]interface{}{
+		DebugWithFields(ctx, "Invoice created successfully via eastwest gRPC", map[string]interface{}{
 			"invoice_id":  invoiceID,
 			"amount_msat": req.AmountMsat,
 			"expires_at":  expiresAt,

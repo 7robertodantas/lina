@@ -106,7 +106,7 @@ func (sp *EastWestStreamPublisher) publishEvent(ctx context.Context, event *ligh
 	if deviceID != "" {
 		logEntry = logEntry.WithDeviceID(deviceID)
 	}
-	logEntry.InfoWithFields(ctx, "Published event to Redis stream", map[string]interface{}{
+	logEntry.DebugWithFields(ctx, "Published event to Redis stream", map[string]interface{}{
 		"stream_id":  streamID,
 		"event_type": event.GetType().String(),
 	})

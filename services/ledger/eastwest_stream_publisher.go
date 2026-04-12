@@ -197,7 +197,7 @@ func (esp *EastWestStreamPublisher) publishLedgerEvent(ctx context.Context, ledg
 	if deviceID != "" {
 		logEntry = logEntry.WithDeviceID(deviceID)
 	}
-	logEntry.InfoWithFields(ctx, "Published LedgerEvent", map[string]interface{}{
+	logEntry.DebugWithFields(ctx, "Published LedgerEvent", map[string]interface{}{
 		"event_type": ledgerEvent.GetType().String(),
 		"stream_id":  streamID,
 	})
