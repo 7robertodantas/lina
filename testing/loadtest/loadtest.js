@@ -91,6 +91,14 @@ const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // s
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
+/** Seconds to sleep at start of teardown before httpdevice batch disconnect (lets event.consumption / ledger catch up). Set TEARDOWN_DRAIN_SECONDS=0 to skip. */
+const TEARDOWN_DRAIN_SECONDS = (() => {
+  const v = __ENV.TEARDOWN_DRAIN_SECONDS;
+  if (v === undefined || v === '') return 45;
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? 45 : Math.max(0, n);
+})();
+
 const LEVEL_VUS = 50;
 const WARMUP = '60s';
 const MEASURE = '120s';
@@ -364,6 +372,13 @@ export default function () {
 
 // --- Teardown ---
 export function teardown(data) {
+  log.info(
+    `Teardown: waiting ${TEARDOWN_DRAIN_SECONDS}s for pipeline drain before disconnecting devices (override with TEARDOWN_DRAIN_SECONDS)`
+  );
+  if (TEARDOWN_DRAIN_SECONDS > 0) {
+    sleep(TEARDOWN_DRAIN_SECONDS);
+  }
+
   log.info('Disconnecting all devices...');
 
   let deviceIDs = data?.deviceIDs || [];
