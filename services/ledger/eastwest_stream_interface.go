@@ -163,7 +163,14 @@ func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallelMode(stre
 			ackStart := time.Now()
 			err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
 			RecordStreamAckLatency(streamCtx, streamName, "handle_consumption", time.Since(ackStart).Seconds(), err == nil, pendingRetry)
-			return err
+			if err != nil {
+				return err
+			}
+			if err := ewsi.XDelWithSpan(streamCtx, streamName, msg.ID); err != nil {
+				logger.WithStream(streamName, "consume").
+					Warnf(streamCtx, "XDEL after ACK failed for %s: %v", msg.ID, err)
+			}
+			return nil
 		}
 		handlerStart := time.Now()
 		err := internal.TraceEventProcessing(streamCtx, streamName, msg, ewsi.handleConsumptionMessage, ackFn)

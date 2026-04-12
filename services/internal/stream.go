@@ -237,6 +237,27 @@ func (sc *StreamClient) XAckWithSpan(ctx context.Context, streamName, groupName,
 	return nil
 }
 
+// XDelWithSpan removes a stream entry by ID (e.g. after XACK) with a short OpenTelemetry span.
+func (sc *StreamClient) XDelWithSpan(ctx context.Context, streamName, messageID string) error {
+	ctx, span := streamTracer.Start(ctx, fmt.Sprintf("[stream] %s xdel", streamName),
+		trace.WithAttributes(
+			attribute.String("redis.stream.name", streamName),
+			attribute.String("redis.stream.message.id", messageID),
+			attribute.String("redis.operation", "XDEL"),
+		),
+	)
+	defer span.End()
+
+	result := sc.Client().XDel(ctx, streamName, messageID)
+	if result.Err() != nil {
+		span.RecordError(result.Err())
+		span.SetStatus(codes.Error, result.Err().Error())
+		return result.Err()
+	}
+	span.SetStatus(codes.Ok, "success")
+	return nil
+}
+
 // XReadWithSpan performs XRead (renamed but kept for compatibility - doesn't create span)
 // Note: Event processing spans are created separately via TraceEventProcessing
 func (sc *StreamClient) XReadWithSpan(ctx context.Context, streamName string, args *redis.XReadArgs) ([]redis.XStream, error) {

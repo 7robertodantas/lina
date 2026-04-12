@@ -205,7 +205,14 @@ func runStreamMessagesParallel(p int, msgs []redis.XMessage, runOne func(redis.X
 func (ewsi *EastWestStreamInterface) processMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
 	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
 		ackFn := func(ctx context.Context, msg redis.XMessage) error {
-			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+			if err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg); err != nil {
+				return err
+			}
+			if err := ewsi.XDelWithSpan(streamCtx, streamName, msg.ID); err != nil {
+				logger.WithStream(streamName, "consume").
+					Warnf(streamCtx, "XDEL after ACK failed for %s: %v", msg.ID, err)
+			}
+			return nil
 		}
 		if err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 			return ewsi.handleDeviceMessage(ctx, handler, msg)
@@ -219,7 +226,14 @@ func (ewsi *EastWestStreamInterface) processMessagesParallel(streamCtx context.C
 func (ewsi *EastWestStreamInterface) processMessagesParallelRetry(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
 	runStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
 		ackFn := func(ctx context.Context, msg redis.XMessage) error {
-			return ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg)
+			if err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg); err != nil {
+				return err
+			}
+			if err := ewsi.XDelWithSpan(streamCtx, streamName, msg.ID); err != nil {
+				logger.WithStream(streamName, "consume").
+					Warnf(streamCtx, "XDEL after ACK failed for %s: %v", msg.ID, err)
+			}
+			return nil
 		}
 		err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 			return ewsi.handleDeviceMessage(ctx, handler, msg)
