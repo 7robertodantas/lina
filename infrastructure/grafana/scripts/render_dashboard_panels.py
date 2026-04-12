@@ -11,9 +11,12 @@ Example:
     --base-url http://localhost:3000 \\
     --user admin --password admin
 
-  # or inline:
+  # or inline (absolute ISO):
   ./render_dashboard_panels.py ... \\
     --range '{"from":"2026-04-12T18:11:45.000Z","to":"2026-04-12T18:54:49.000Z"}'
+
+  # relative Grafana time (same as dashboard URL):
+  ./render_dashboard_panels.py ... --range '{"from":"now-1h","to":"now"}'
 """
 
 from __future__ import annotations
@@ -75,8 +78,8 @@ def _build_render_url(
     uid: str,
     org_id: int,
     panel_id: int,
-    from_ms: int,
-    to_ms: int,
+    from_param: str,
+    to_param: str,
     width: int,
     height: int,
     tz: str,
@@ -87,8 +90,8 @@ def _build_render_url(
     path = f"/render/d-solo/{urllib.parse.quote(uid, safe='')}"
     q: list[tuple[str, str]] = [
         ("orgId", str(org_id)),
-        ("from", str(from_ms)),
-        ("to", str(to_ms)),
+        ("from", from_param),
+        ("to", to_param),
         ("panelId", str(panel_id)),
         ("width", str(width)),
         ("height", str(height)),
@@ -102,12 +105,33 @@ def _build_render_url(
     return f"{base}{path}?{query}"
 
 
-def _parse_range_object(data: dict[str, Any]) -> tuple[int, int]:
+def _time_query_value(raw: Any) -> str:
+    """Build Grafana `from` / `to` query value: epoch ms, ISO instant, or relative (e.g. now-1h)."""
+    if isinstance(raw, bool):
+        raise SystemExit("from/to must be a string, number, or ISO date — not a boolean")
+    if isinstance(raw, (int, float)):
+        return str(int(raw))
+    s = str(raw).strip()
+    if not s:
+        raise SystemExit("from/to must not be empty")
+    if s.isdigit():
+        return s
+    try:
+        return str(_ms(_parse_iso_utc(s)))
+    except ValueError:
+        # Grafana relative time: now, now-1h, now-7d, now/d, etc.
+        return s
+
+
+def _parse_range_object(data: dict[str, Any]) -> tuple[str, str, bool]:
     raw_from = data.get("from")
     raw_to = data.get("to")
     if raw_from is None or raw_to is None:
-        raise SystemExit('range JSON must include "from" and "to" (ISO-8601 strings)')
-    return _ms(_parse_iso_utc(str(raw_from))), _ms(_parse_iso_utc(str(raw_to)))
+        raise SystemExit('range JSON must include "from" and "to"')
+    a = _time_query_value(raw_from)
+    b = _time_query_value(raw_to)
+    numeric_order = a.isdigit() and b.isdigit()
+    return a, b, numeric_order
 
 
 def _basic_auth_header(user: str, password: str) -> str:
@@ -115,7 +139,7 @@ def _basic_auth_header(user: str, password: str) -> str:
     return "Basic " + base64.b64encode(raw).decode("ascii")
 
 
-def _parse_range_json_text(text: str) -> tuple[int, int]:
+def _parse_range_json_text(text: str) -> tuple[str, str, bool]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
@@ -138,12 +162,12 @@ def main() -> None:
         "--range-json",
         type=Path,
         metavar="PATH",
-        help='JSON file: {"from":"...ISO...","to":"...ISO..."}',
+        help='JSON: {"from","to"} as ISO instants, epoch ms, or Grafana relative (e.g. now-1h / now).',
     )
     range_src.add_argument(
         "--range",
         metavar="JSON",
-        help='Same object as --range-json but inline, e.g. \'{"from":"2026-04-12T18:11:45.000Z","to":"2026-04-12T18:54:49.000Z"}\'',
+        help='Inline range JSON (same rules as --range-json), e.g. \'{"from":"now-1h","to":"now"}\'',
     )
     ap.add_argument("--out-dir", type=Path, required=True, help="Directory for PNG files.")
     ap.add_argument("--base-url", default="http://localhost:3000", help="Grafana root URL.")
@@ -190,8 +214,8 @@ def main() -> None:
         if args.range_json is not None
         else args.range
     )
-    from_ms, to_ms = _parse_range_json_text(range_text)
-    if from_ms >= to_ms:
+    from_param, to_param, numeric_order = _parse_range_json_text(range_text)
+    if numeric_order and int(from_param) >= int(to_param):
         raise SystemExit("Invalid range: from must be before to.")
 
     extra_q: list[tuple[str, str]] = []
@@ -220,8 +244,8 @@ def main() -> None:
             uid,
             args.org_id,
             panel_id,
-            from_ms,
-            to_ms,
+            from_param,
+            to_param,
             args.width,
             args.height,
             args.tz,

@@ -10,7 +10,9 @@
 
 ## Time range
 
-Provide the same JSON object either as a **file** (`--range-json`) or an **inline string** (`--range`). You must pass exactly one of these. ISO-8601 `from` and `to` (UTC `Z` is supported):
+Provide the same JSON object either as a **file** (`--range-json`) or an **inline string** (`--range`). You must pass exactly one of these.
+
+**Absolute:** ISO-8601 instants (UTC `Z` is supported) or numeric epoch **milliseconds** in JSON. Those are sent to Grafana as millisecond strings (same as the UI when you pick fixed times).
 
 ```json
 {
@@ -19,7 +21,18 @@ Provide the same JSON object either as a **file** (`--range-json`) or an **inlin
 }
 ```
 
-These values are converted to Unix **milliseconds** for Grafana’s `from` and `to` query parameters.
+**Relative:** Use the same expressions as Grafana’s time picker / dashboard URL, e.g. `now`, `now-1h`, `now-7d`, `now/d` (start of day). Any `from`/`to` string that is **not** valid ISO is passed through unchanged.
+
+```json
+{
+  "from": "now-1h",
+  "to": "now"
+}
+```
+
+Exports then reflect “last hour” (or whatever window you set) at the moment the script runs, not a fixed historical window.
+
+**X-axis and legends.** Relative `from`/`to` only tells Grafana **which time window** to query (the same sliding window as “Last 1 hour” in the UI). Grafana still **resolves** that to concrete `from`/`to` instants when rendering. Time series panels therefore show the **usual clock times on the X-axis** (e.g. 20:15 … 21:15 in your timezone)—not tick labels like “−60m … 0”. Series **legends** (metric names, labels) come from the panel queries, not from relative vs absolute range. To match the live dashboard for a given export, keep **`--tz`** aligned with the dashboard time zone and watch for **per-panel time overrides** in the dashboard JSON, which can ignore the global range.
 
 Inline example (quote the JSON so the shell parses it as one argument):
 
@@ -94,5 +107,7 @@ Equivalent to one panel from the script (replace `panelId`, times, and credentia
 ```bash
 curl "http://admin:admin@localhost:3000/render/d-solo/lina-systemd?orgId=1&from=<ms>&to=<ms>&panelId=6&width=600&height=448&tz=Europe%2FZurich&theme=light&timeout=120" -o chart.png
 ```
+
+Relative example: `from=now-1h&to=now` instead of millisecond `from`/`to`.
 
 Rendering many panels issues one request per panel and can take several minutes; the script sets an HTTP client wait at least `--timeout` plus a buffer so Grafana can finish waiting on the image renderer.
