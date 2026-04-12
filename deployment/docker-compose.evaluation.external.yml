@@ -73,10 +73,22 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
       - GF_LOG_LEVEL=warn
+      - GF_RENDERING_SERVER_URL=http://renderer:8081/render
+      - GF_RENDERING_CALLBACK_URL=http://grafana:3000/
+      # How long Grafana waits for the remote renderer HTTP response (seconds).
+      - GF_RENDERING_TIMEOUT=120
     volumes:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+    restart: unless-stopped
+
+  renderer:
+    image: grafana/grafana-image-renderer:latest
+    container_name: renderer
+    environment:
+      # Default is 30s; slow Prometheus panels hit 408 ~30–40s regardless of ?timeout= on the request.
+      - BROWSER_READINESS_TIMEOUT=120s
     restart: unless-stopped
 
 volumes:

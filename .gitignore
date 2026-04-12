@@ -97,6 +97,10 @@ measurements/
 !/evaluation/*.log
 
 venv/
+__pycache__/
+
+# Grafana panel export output (render_dashboard_panels.py)
+infrastructure/grafana/scripts/panel-images/
 
 # Measurement output files
 measurement/docker_stats.csv
