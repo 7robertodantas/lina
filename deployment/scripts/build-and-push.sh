@@ -84,27 +84,27 @@ build_and_push() {
 # Build and push all services
 echo -e "${BLUE}=== Building infrastructure services ===${NC}\n"
 
-# build_and_push "caddy" "./infrastructure/caddy/Dockerfile" "./infrastructure/caddy"
-# build_and_push "redis" "./infrastructure/redis/Dockerfile" "./infrastructure/redis"
-# build_and_push "mosquitto" "./infrastructure/mosquitto/Dockerfile" "./infrastructure/mosquitto"
-# build_and_push "prometheus" "./infrastructure/prometheus/Dockerfile" "./infrastructure/prometheus"
+build_and_push "caddy" "./infrastructure/caddy/Dockerfile" "./infrastructure/caddy"
+build_and_push "redis" "./infrastructure/redis/Dockerfile" "./infrastructure/redis"
+build_and_push "mosquitto" "./infrastructure/mosquitto/Dockerfile" "./infrastructure/mosquitto"
+build_and_push "prometheus" "./infrastructure/prometheus/Dockerfile" "./infrastructure/prometheus"
 build_and_push "grafana" "./infrastructure/grafana/Dockerfile" "./infrastructure/grafana"
 
 echo -e "${BLUE}=== Building application services ===${NC}\n"
 
-# build_and_push "device" "./services/Dockerfile" "." "--build-arg" "SERVICE=device"
-# build_and_push "ledger" "./services/Dockerfile" "." "--build-arg" "SERVICE=ledger"
-# build_and_push "consumption" "./services/Dockerfile" "." "--build-arg" "SERVICE=consumption"
-# build_and_push "lightning" "./services/Dockerfile" "." "--build-arg" "SERVICE=lightning"
-# build_and_push "autopay" "./services/Dockerfile" "." "--build-arg" "SERVICE=autopay"
+build_and_push "device" "./services/Dockerfile" "." "--build-arg" "SERVICE=device"
+build_and_push "ledger" "./services/Dockerfile" "." "--build-arg" "SERVICE=ledger"
+build_and_push "consumption" "./services/Dockerfile" "." "--build-arg" "SERVICE=consumption"
+build_and_push "lightning" "./services/Dockerfile" "." "--build-arg" "SERVICE=lightning"
+build_and_push "autopay" "./services/Dockerfile" "." "--build-arg" "SERVICE=autopay"
 
 echo -e "${BLUE}=== Building testing tools ===${NC}\n"
 
 # Smartmeter WebSocket URL is now dynamically determined from browser location
-# build_and_push "smartmeter" "./testing/smartmeter/Dockerfile" "."
+build_and_push "smartmeter" "./testing/smartmeter/Dockerfile" "."
 
 # HTTP devices service for load testing
-# build_and_push "httpdevices" "./testing/loadtest/httpdevices/Dockerfile" "."
+build_and_push "httpdevices" "./testing/loadtest/httpdevices/Dockerfile" "."
 
 echo -e "${GREEN}=== All images built and pushed successfully! ===${NC}"
 echo -e "${BLUE}You can now use docker-compose.production.yml to pull and run these images${NC}"
