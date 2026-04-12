@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/robertodantas/lina/internal"
 	lightningservicepb "github.com/robertodantas/lina/proto/gen/interfaces/lightning"
 	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 	"google.golang.org/grpc/codes"
@@ -74,7 +75,7 @@ func (s *EastWestGRPCServer) CreateInvoice(ctx context.Context, req *lightningmo
 	if s.streamPublisher != nil {
 		if err := s.streamPublisher.PublishInvoiceCreated(ctx, invoice); err != nil {
 			logger.WithDeviceID(req.DeviceId).
-				WithStream("event.lightning", "produce").
+				WithStream(internal.StreamLightningEphemeral, "produce").
 				Error(ctx, "Failed to publish invoice created event via eastwest gRPC", err)
 		}
 	}

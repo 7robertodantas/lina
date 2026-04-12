@@ -219,7 +219,7 @@ services:
     environment:
       - REDIS_ADDR=redis://redis:6379
       - REDIS_EXPORTER_REDIS_ONLY_METRICS=true
-      - REDIS_EXPORTER_CHECK_SINGLE_STREAMS=event.ledger,event.consumption,event.device,event.lightning
+      - REDIS_EXPORTER_CHECK_SINGLE_STREAMS=event.ledger,event.consumption,event.device,event.lightning,event.lightning.ephemeral
     depends_on:
       redis:
         condition: service_healthy

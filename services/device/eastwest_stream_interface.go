@@ -99,25 +99,28 @@ func (ewsi *EastWestStreamInterface) StartLightningInvoiceSubscriber(ctx context
 }
 
 func (ewsi *EastWestStreamInterface) consumeLightningInvoiceEvents(ctx context.Context, handler *EastWestStreamHandler) {
-	streamName := "event.lightning"
-	lastID := "$"
+	lastSettled := "$"
+	lastEphemeral := "$"
 
-	logger.WithStream(streamName, "consume").
-		Info(ctx, "Starting lightning invoice subscriber")
+	logger.WithStream(internal.StreamLightning, "consume").
+		Info(ctx, "Starting lightning invoice subscriber (event.lightning + event.lightning.ephemeral)")
 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.WithStream(streamName, "consume").
+			logger.WithStream(internal.StreamLightning, "consume").
 				Info(ctx, "Stopping lightning invoice subscriber")
 			return
 		default:
 		}
 
-		streams, err := ewsi.XReadWithSpan(ctx, streamName, &redis.XReadArgs{
-			Streams: []string{streamName, lastID},
-			Count:   20,
-			Block:   5 * time.Second,
+		streams, err := ewsi.XReadWithSpan(ctx, "", &redis.XReadArgs{
+			Streams: []string{
+				internal.StreamLightning, lastSettled,
+				internal.StreamLightningEphemeral, lastEphemeral,
+			},
+			Count: 20,
+			Block: 5 * time.Second,
 		})
 		if err != nil {
 			if err == redis.Nil {
@@ -126,17 +129,22 @@ func (ewsi *EastWestStreamInterface) consumeLightningInvoiceEvents(ctx context.C
 			if ctx.Err() != nil {
 				return
 			}
-			logger.WithStream(streamName, "consume").
+			logger.WithStream(internal.StreamLightning, "consume").
 				Error(ctx, "Lightning invoice subscriber read error", err)
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 
 		for _, stream := range streams {
+			streamName := stream.Stream
 			for _, msg := range stream.Messages {
-				lastID = msg.ID
+				switch streamName {
+				case internal.StreamLightning:
+					lastSettled = msg.ID
+				case internal.StreamLightningEphemeral:
+					lastEphemeral = msg.ID
+				}
 
-				// Wrap message handling with tracing
 				if err := internal.TraceEventProcessing(ctx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 					raw, ok := msg.Values["event"].(string)
 					if !ok {
@@ -227,10 +235,9 @@ func (ewsi *EastWestStreamInterface) handleLightningMessage(ctx context.Context,
 		return handler.HandleInvoiceExpired(ctx, payload)
 
 	default:
-		logger.WithStream("event.lightning", "consume").
-			DebugWithFields(ctx, "Ignoring lightning event type", map[string]interface{}{
-				"type": lightningEvent.GetType().String(),
-			})
+		logger.DebugWithFields(ctx, "Ignoring lightning event type", map[string]interface{}{
+			"type": lightningEvent.GetType().String(),
+		})
 		return nil
 	}
 }

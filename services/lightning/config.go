@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"os"
+	"time"
 
 	"github.com/robertodantas/lina/internal"
 )
@@ -21,6 +23,10 @@ type Config struct {
 	// OpenTelemetry / Jaeger
 	OTELExporterOTLPEndpoint string
 	OTELServiceName          string
+
+	// LightningEphemeralRetention is how long entries may remain in event.lightning.ephemeral
+	// (created/expired) before XTRIM MINID drops them. Set via LIGHTNING_EPHEMERAL_RETENTION (Go duration, e.g. 1m).
+	LightningEphemeralRetention time.Duration
 }
 
 func LoadConfig() *Config {
@@ -39,6 +45,17 @@ func LoadConfig() *Config {
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 		OTELServiceName:          internal.GetEnv("OTEL_SERVICE_NAME", "lightning-service"),
+
+		LightningEphemeralRetention: time.Minute,
+	}
+
+	if s := os.Getenv("LIGHTNING_EPHEMERAL_RETENTION"); s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			logger.Warnf(context.Background(), "Invalid LIGHTNING_EPHEMERAL_RETENTION %q, using 1m: %v", s, err)
+		} else {
+			cfg.LightningEphemeralRetention = d
+		}
 	}
 
 	ctx := context.Background()

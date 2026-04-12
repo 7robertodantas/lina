@@ -24,6 +24,13 @@ var (
 
 var logger = NewLogger("internal")
 
+// StreamLightning holds invoice-settled events (ledger + device consume; not time-trimmed here).
+// StreamLightningEphemeral holds invoice created/expired; the lightning service time-trims this stream.
+const (
+	StreamLightning          = "event.lightning"
+	StreamLightningEphemeral = "event.lightning.ephemeral"
+)
+
 // StreamClient wraps the Redis client for stream operations
 type StreamClient struct {
 	client *redis.Client

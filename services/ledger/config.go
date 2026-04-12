@@ -34,9 +34,9 @@ func LoadConfig() Config {
 		GRPCAddr:       internal.GetEnv("GRPC_ADDR", ":9090"),
 		MaxPageSize:    internal.IntEnv("MAX_PAGE_SIZE", 200),
 
-		StreamConsumerName:       internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "ledger-service"),
-		ConsumeParallelism:       internal.IntEnv("LEDGER_STREAM_PARALLELISM", 1),
-		StreamReadCount: internal.ClampStreamReadCount(internal.IntEnv("LEDGER_STREAM_READ_COUNT", 100)),
+		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "ledger-service"),
+		ConsumeParallelism: internal.IntEnv("LEDGER_STREAM_PARALLELISM", 2),
+		StreamReadCount:    internal.ClampStreamReadCount(internal.IntEnv("LEDGER_STREAM_READ_COUNT", 100)),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),

@@ -105,3 +105,9 @@ graphs/
 
 testing/measurement/docker_stats.csv
 *.tex
+
+# Binaries
+services/ledger/ledger
+services/consumption/consumption
+services/device/device
+services/lightning/lightning

@@ -43,6 +43,7 @@ This directory contains k6 load testing scripts to simulate thousands of devices
 
 The script can be configured via environment variables:
 
+- `LOG_LEVEL`: Script log verbosity — `debug`, `info`, `warn`, or `error` (default: `info`). Matches backend `LOG_LEVEL`: at `info`, per-request success lines and batch progress are hidden; use `debug` for those. Ramp **stage target** lines (`[loadtest] ramp stage …`) are always printed to stdout (VU 1) so you can see VU targets regardless of `LOG_LEVEL`. The active level is printed once at setup: `[loadtest] LOG_LEVEL=…`.
 - `API_BASE_URL`: Base URL for the device service API (default: `http://localhost:8080`)
 - `API_DEVICES_ENDPOINT`: API endpoint path for device registration (default: `/devices`)
   - Use `/devices` if accessing through Caddy reverse proxy (Caddy rewrites to `/api/v1/devices`)

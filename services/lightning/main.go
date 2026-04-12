@@ -85,7 +85,7 @@ func main() {
 	})
 
 	// Create stream publisher (publishes to Redis)
-	streamPublisher := NewEastWestStreamPublisher(streamClient)
+	streamPublisher := NewEastWestStreamPublisher(streamClient, cfg.LightningEphemeralRetention)
 
 	// Create LND stream handler
 	lndStreamHandler := NewLNDStreamHandler(streamPublisher)

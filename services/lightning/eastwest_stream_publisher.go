@@ -12,19 +12,22 @@ import (
 	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
 )
 
-const LightningEventsStream = "event.lightning"
-
 type EastWestStreamPublisher struct {
-	streamClient *internal.StreamClient
+	streamClient       *internal.StreamClient
+	ephemeralRetention time.Duration
 }
 
-func NewEastWestStreamPublisher(streamClient *internal.StreamClient) *EastWestStreamPublisher {
+func NewEastWestStreamPublisher(streamClient *internal.StreamClient, ephemeralRetention time.Duration) *EastWestStreamPublisher {
+	if ephemeralRetention <= 0 {
+		ephemeralRetention = time.Minute
+	}
 	return &EastWestStreamPublisher{
-		streamClient: streamClient,
+		streamClient:       streamClient,
+		ephemeralRetention: ephemeralRetention,
 	}
 }
 
-// PublishInvoiceCreated publishes an invoice created event.
+// PublishInvoiceCreated publishes an invoice created event to the ephemeral stream (time-trimmed).
 func (sp *EastWestStreamPublisher) PublishInvoiceCreated(ctx context.Context, invoice *lightningmodel.Invoice) error {
 	event := &lightningmodel.LightningEvent{
 		Type: lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_CREATED,
@@ -34,10 +37,10 @@ func (sp *EastWestStreamPublisher) PublishInvoiceCreated(ctx context.Context, in
 			},
 		},
 	}
-	return sp.publishEvent(ctx, event, invoice.DeviceId)
+	return sp.publishToStream(ctx, internal.StreamLightningEphemeral, event, invoice.DeviceId)
 }
 
-// PublishInvoiceSettled publishes an invoice settled event.
+// PublishInvoiceSettled publishes an invoice settled event to the durable stream (ledger processing).
 func (sp *EastWestStreamPublisher) PublishInvoiceSettled(ctx context.Context, invoiceID, deviceID string, amountReceivedMsat int64, timestamp string) error {
 	event := &lightningmodel.LightningEvent{
 		Type: lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_SETTLED,
@@ -51,10 +54,10 @@ func (sp *EastWestStreamPublisher) PublishInvoiceSettled(ctx context.Context, in
 			},
 		},
 	}
-	return sp.publishEvent(ctx, event, deviceID)
+	return sp.publishToStream(ctx, internal.StreamLightning, event, deviceID)
 }
 
-// PublishInvoiceExpired publishes an invoice expired event.
+// PublishInvoiceExpired publishes an invoice expired event to the ephemeral stream (time-trimmed).
 func (sp *EastWestStreamPublisher) PublishInvoiceExpired(ctx context.Context, invoiceID, deviceID, timestamp string) error {
 	event := &lightningmodel.LightningEvent{
 		Type: lightningmodel.LightningEventType_LIGHTNING_EVENT_TYPE_INVOICE_EXPIRED,
@@ -66,10 +69,10 @@ func (sp *EastWestStreamPublisher) PublishInvoiceExpired(ctx context.Context, in
 			},
 		},
 	}
-	return sp.publishEvent(ctx, event, deviceID)
+	return sp.publishToStream(ctx, internal.StreamLightningEphemeral, event, deviceID)
 }
 
-func (sp *EastWestStreamPublisher) publishEvent(ctx context.Context, event *lightningmodel.LightningEvent, deviceID string) error {
+func (sp *EastWestStreamPublisher) publishToStream(ctx context.Context, streamName string, event *lightningmodel.LightningEvent, deviceID string) error {
 	if event == nil {
 		return fmt.Errorf("event is nil")
 	}
@@ -86,23 +89,29 @@ func (sp *EastWestStreamPublisher) publishEvent(ctx context.Context, event *ligh
 	}
 
 	args := &redis.XAddArgs{
-		Stream: LightningEventsStream,
+		Stream: streamName,
 		Values: values,
 	}
 
-	// Extract event type for span naming
 	eventTypeFull := event.GetType().String()
 	eventType := eventTypeFull
 	if len(eventTypeFull) > len("LIGHTNING_EVENT_TYPE_") && eventTypeFull[:len("LIGHTNING_EVENT_TYPE_")] == "LIGHTNING_EVENT_TYPE_" {
 		eventType = eventTypeFull[len("LIGHTNING_EVENT_TYPE_"):]
 	}
 
-	streamID, err := sp.streamClient.XAddWithSpan(ctx, LightningEventsStream, args, eventType)
+	streamID, err := sp.streamClient.XAddWithSpan(ctx, streamName, args, eventType)
 	if err != nil {
 		return fmt.Errorf("failed to publish lightning event: %w", err)
 	}
 
-	logEntry := logger.WithStream(LightningEventsStream, "produce")
+	if streamName == internal.StreamLightningEphemeral {
+		if trimErr := sp.trimEphemeralStream(ctx); trimErr != nil {
+			logger.WithStream(streamName, "produce").
+				Warnf(ctx, "Ephemeral stream trim after XADD failed (non-fatal): %v", trimErr)
+		}
+	}
+
+	logEntry := logger.WithStream(streamName, "produce")
 	if deviceID != "" {
 		logEntry = logEntry.WithDeviceID(deviceID)
 	}
@@ -111,4 +120,16 @@ func (sp *EastWestStreamPublisher) publishEvent(ctx context.Context, event *ligh
 		"event_type": event.GetType().String(),
 	})
 	return nil
+}
+
+// trimEphemeralStream drops entries older than ephemeralRetention using XTRIM MINID.
+// Best-effort: may remove entries before a slow XREAD subscriber sees them; acceptable for created/expired only.
+func (sp *EastWestStreamPublisher) trimEphemeralStream(ctx context.Context) error {
+	minMs := time.Now().Add(-sp.ephemeralRetention).UnixMilli()
+	if minMs < 0 {
+		minMs = 0
+	}
+	minID := fmt.Sprintf("%d-0", minMs)
+	_, err := sp.streamClient.Client().XTrimMinID(ctx, internal.StreamLightningEphemeral, minID).Result()
+	return err
 }

@@ -198,9 +198,9 @@ func (ewsi *EastWestStreamInterface) processConsumptionMessagesParallelMode(stre
 	})
 }
 
-// StartLightningConsumer starts consuming from the event.lightning stream
+// StartLightningConsumer starts consuming from the durable lightning stream (invoice settled only).
 func (ewsi *EastWestStreamInterface) StartLightningConsumer(ctx context.Context) error {
-	streamName := "event.lightning"
+	streamName := internal.StreamLightning
 	streamCtx := ewsi.Context()
 
 	// Create consumer group if it doesn't exist
@@ -272,7 +272,7 @@ func (ewsi *EastWestStreamInterface) handleLightningMessage(ctx context.Context,
 		return ewsi.handler.HandleInvoiceSettled(ctx, settled)
 
 	default:
-		logger.WithStream("event.lightning", "consume").
+		logger.WithStream(internal.StreamLightning, "consume").
 			Debugf(ctx, "Skipping lightning event type: %v", lightningEvent.GetType())
 		return nil
 	}
@@ -520,7 +520,7 @@ func (ewsi *EastWestStreamInterface) startPendingMessageRetry(ctx context.Contex
 			}
 
 			switch streamName {
-			case "event.lightning":
+			case internal.StreamLightning:
 				ewsi.processLightningMessagesParallelMode(streamCtx, streamName, claimed, true)
 			case "event.consumption":
 				ewsi.processConsumptionMessagesParallelMode(streamCtx, streamName, claimed, true)
