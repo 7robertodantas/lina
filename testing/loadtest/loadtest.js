@@ -107,27 +107,19 @@ const TEARDOWN = '60s'
 
 // Define load test stages
 const loadTestStages = [
-  { duration: WARMUP, target: 100 },
-  { duration: MEASURE, target: 100 },   // warmup
-  { duration: WARMUP, target: 200 },
-  { duration: MEASURE, target: 200 },   // warmup
-  { duration: WARMUP, target: 250 },
-  { duration: MEASURE, target: 250 },   // warmup
-  
-  
-  // { duration: IDLE, target: 0 },
-  // { duration: WARMUP, target: LEVEL_VUS },
-  // { duration: MEASURE, target: LEVEL_VUS },   // warmup
-  // { duration: WARMUP, target: LEVEL_VUS * 2 },
-  // { duration: MEASURE, target: LEVEL_VUS * 2 },
-  // { duration: WARMUP, target: LEVEL_VUS * 3 },
-  // { duration: MEASURE, target: LEVEL_VUS * 3 },
-  // { duration: WARMUP, target: LEVEL_VUS * 4 },
-  // { duration: MEASURE, target: LEVEL_VUS * 4 },
-  // { duration: WARMUP, target: LEVEL_VUS * 5 },
-  // { duration: MEASURE, target: LEVEL_VUS * 5 },
-  // { duration: WARMUP, target: LEVEL_VUS * 6 },
-  // { duration: MEASURE, target: LEVEL_VUS * 6 },
+  { duration: IDLE, target: 0 },
+  { duration: WARMUP, target: LEVEL_VUS },
+  { duration: MEASURE, target: LEVEL_VUS },   // warmup
+  { duration: WARMUP, target: LEVEL_VUS * 2 },
+  { duration: MEASURE, target: LEVEL_VUS * 2 },
+  { duration: WARMUP, target: LEVEL_VUS * 3 },
+  { duration: MEASURE, target: LEVEL_VUS * 3 },
+  { duration: WARMUP, target: LEVEL_VUS * 4 },
+  { duration: MEASURE, target: LEVEL_VUS * 4 },
+  { duration: WARMUP, target: LEVEL_VUS * 5 },
+  { duration: MEASURE, target: LEVEL_VUS * 5 },
+  { duration: WARMUP, target: LEVEL_VUS * 6 },
+  { duration: MEASURE, target: LEVEL_VUS * 6 },
   { duration: TEARDOWN, target: 0 },
 ];
 
