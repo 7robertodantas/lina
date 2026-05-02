@@ -100,13 +100,13 @@ docker-compose -f deployment/docker-compose.development.yml up
 docker-compose -f deployment/docker-compose.development.yml up device ledger lightning consumption
 ```
 
-4. **Start the smart meter simulator** (in another terminal):
+4. **Start three smart meter simulators** (optional, another terminal):
 
 ```bash
-docker-compose -f deployment/docker-compose.simulators.yml up
+docker compose --profile simulators -f deployment/docker-compose.development.yml up
 ```
 
-The smart meter UI will be available at `http://localhost:3001`
+Simulator UIs use ports **3010**, **3011**, and **3012** (see the `simulators` profile in `docker-compose.development.yml`).
 
 ### Service Endpoints
 
@@ -160,10 +160,10 @@ make
 The smart meter simulator provides a web UI to simulate device behavior:
 
 ```bash
-docker-compose -f deployment/docker-compose.simulators.yml up
+docker compose --profile simulators -f deployment/docker-compose.development.yml up
 ```
 
-Access the UI at `http://localhost:3001`
+Access the simulator UIs at `http://localhost:3010`, `http://localhost:3011`, and `http://localhost:3012`.
 
 #### Load Testing
 
@@ -224,13 +224,15 @@ Services communicate via Redis Streams:
 
 For detailed deployment instructions, see `deployment/scripts/DEPLOYMENT.md`
 
-### Production
+### Edge (pre-built images)
 
-Use the production compose file which pulls pre-built images:
+Use the edge compose file which pulls pre-built images:
 
 ```bash
-docker-compose -f deployment/docker-compose.production.yml up -d
+docker compose -f deployment/docker-compose.edge.yml up -d
 ```
+
+Optional: set `EDGE_DATA_ROOT` in `deployment/.env` to store service data on a specific path (for example a fast disk). Otherwise data is stored under `deployment/.data/edge/`.
 
 ### Building and Pushing Docker Images
 

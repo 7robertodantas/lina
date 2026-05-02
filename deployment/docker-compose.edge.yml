@@ -1,3 +1,5 @@
+# Edge stack (pre-built images). Data dirs: set EDGE_DATA_ROOT to an absolute path (e.g. fast disk), or
+# omit to use .data/edge under deployment/ (relative to this compose file).
 # Container log rotation (json-file driver). Override via .env: DOCKER_LOG_MAX_SIZE, DOCKER_LOG_MAX_FILE
 x-logging: &default-logging
   driver: json-file
@@ -29,7 +31,7 @@ services:
     env_file:
       - .env
     volumes:
-      - redis-data:/data
+      - ${EDGE_DATA_ROOT:-.data/edge}/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -47,7 +49,7 @@ services:
     ports:
       - "${MQTT_TLS_PORT:-8883}:8883" # Southbound
     volumes:
-      - mosquitto-data:/mosquitto/data
+      - ${EDGE_DATA_ROOT:-.data/edge}/mosquitto:/mosquitto/data
       - ../infrastructure/certs:/mosquitto/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "/mosquitto/config/healthcheck.sh"]
@@ -95,7 +97,7 @@ services:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
       - ../infrastructure/certs/edge.crt:/certs/edge.crt:ro
       - ../infrastructure/certs/edge.key:/certs/edge.key:ro
-      - device-data:/data
+      - ${EDGE_DATA_ROOT:-.data/edge}/device:/data
     depends_on:
       mosquitto:
         condition: service_healthy
@@ -133,7 +135,7 @@ services:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
       - ../infrastructure/certs/server.crt:/certs/server.crt:ro
       - ../infrastructure/certs/server.key:/certs/server.key:ro
-      - ledger-data:/data
+      - ${EDGE_DATA_ROOT:-.data/edge}/ledger:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -159,7 +161,7 @@ services:
     env_file:
       - .env
     volumes:
-      - consumption-data:/data
+      - ${EDGE_DATA_ROOT:-.data/edge}/consumption:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -188,7 +190,7 @@ services:
       - ../infrastructure/certs/ca.crt:/certs/ca.crt:ro
       - ../infrastructure/certs/server.crt:/certs/server.crt:ro
       - ../infrastructure/certs/server.key:/certs/server.key:ro
-      - lightning-data:/data
+      - ${EDGE_DATA_ROOT:-.data/edge}/lightning:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -276,13 +278,4 @@ services:
     command:
       - --web.listen-address=:9558
     logging: *default-logging
-
-
-volumes:
-  mosquitto-data:
-  redis-data:
-  device-data:
-  ledger-data:
-  consumption-data:
-  lightning-data:
 

@@ -56,7 +56,7 @@ docker build -f autopay/Dockerfile -t 7robertodantas/lina-autopay:latest .
 
 ### Using Docker Compose
 
-The service is included in `docker-compose.evaluation.edge.yml` and will automatically start with the measurement stack.
+The service is included in `docker-compose.external.yml` and `docker-compose.development.yml` (not in the edge stack).
 
 You can also run it with the development stack. The service will start automatically, but payments are controlled by the `AUTOPAY_ENABLED` environment variable:
 

@@ -1,6 +1,6 @@
 ---
 # Docker evaluation stack mounts one writable volume per service at /data (see
-# deployment/docker-compose.evaluation.edge.yml). On the host we use
+# deployment/docker-compose.edge.yml). On the host we use
 # {{ lina_lib_dir }}/<binary>/ with the same ownership model: each service user
 # owns its subtree. The parent {{ lina_lib_dir }} must stay traversable (0755);
 # if it is created implicitly with a tight umask it can end up 0700 root, and

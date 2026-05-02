@@ -107,5 +107,5 @@ build_and_push "smartmeter" "./testing/smartmeter/Dockerfile" "."
 build_and_push "httpdevices" "./testing/loadtest/httpdevices/Dockerfile" "."
 
 echo -e "${GREEN}=== All images built and pushed successfully! ===${NC}"
-echo -e "${BLUE}You can now use docker-compose.production.yml to pull and run these images${NC}"
+echo -e "${BLUE}You can now use docker-compose.edge.yml to pull and run these images${NC}"
 

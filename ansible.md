@@ -107,7 +107,7 @@ Define dependencies where appropriate:
 Install Prometheus node_exporter:
 
 - Run as systemd service
-- Listen port: `9463` (aligned with `docker-compose.evaluation.edge.yml` host mapping and `prometheus.template.yml`)
+- Listen port: `9463` (aligned with `docker-compose.edge.yml` host mapping and `prometheus.template.yml`)
 - Collect:
   - CPU
   - Memory

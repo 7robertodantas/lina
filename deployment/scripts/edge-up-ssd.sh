@@ -28,7 +28,4 @@ mkdir -p \
   "${EDGE_DATA_ROOT}/consumption" \
   "${EDGE_DATA_ROOT}/lightning"
 
-docker compose \
-  -f docker-compose.evaluation.edge.yml \
-  -f docker-compose.evaluation.edge.ssd.yml \
-  up -d "$@"
+docker compose -f docker-compose.edge.yml up -d "$@"

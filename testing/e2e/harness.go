@@ -40,7 +40,7 @@ func (b *requestBodyCloser) Close() error {
 }
 
 // Env holds connectivity settings for integration tests against a running stack
-// (e.g. deployment/docker-compose.evaluation.edge.yml + Caddy on 8080, Mosquitto TLS on 8883).
+// (e.g. deployment/docker-compose.edge.yml + Caddy on 8080, Mosquitto TLS on 8883).
 //
 // Environment variables:
 //   - LINA_E2E: must be "1" for tests to run (otherwise skipped).
@@ -65,7 +65,7 @@ type Env struct {
 func LoadEnv(t *testing.T) Env {
 	t.Helper()
 	if os.Getenv("LINA_E2E") != "1" {
-		t.Skip("set LINA_E2E=1 and start the edge stack (see deployment/docker-compose.evaluation.edge.yml)")
+		t.Skip("set LINA_E2E=1 and start the edge stack (see deployment/docker-compose.edge.yml)")
 	}
 	base := os.Getenv("LINA_E2E_BASE_URL")
 	if base == "" {

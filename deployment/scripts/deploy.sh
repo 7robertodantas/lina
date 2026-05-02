@@ -26,9 +26,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # Change to project root directory
 cd "$PROJECT_ROOT"
 
-COMPOSE_FILE="deployment/docker-compose.production.yml"
-COMPOSE_MEAS_FILE="deployment/docker-compose.evaluation.edge.yml"
-COMPOSE_MEAS_SSD_FILE="deployment/docker-compose.evaluation.edge.ssd.yml"
+COMPOSE_FILE="deployment/docker-compose.edge.yml"
 CERTS_DIR="./infrastructure/certs"
 REMOTE_DIR="~/lina"
 EDGE_HELPER_SCRIPTS=(
@@ -39,8 +37,6 @@ EDGE_HELPER_SCRIPTS=(
 )
 # Extract just the filename for remote operations
 COMPOSE_FILE_BASENAME=$(basename "$COMPOSE_FILE")
-COMPOSE_MEAS_FILE_BASENAME=$(basename "$COMPOSE_MEAS_FILE")
-COMPOSE_MEAS_SSD_FILE_BASENAME=$(basename "$COMPOSE_MEAS_SSD_FILE")
 
 # Show usage/help
 show_usage() {
@@ -61,7 +57,7 @@ show_usage() {
     echo "  ./deploy.sh remote user@hostname -p 2222"
     echo ""
     echo "Remote deployment will:"
-    echo "  - Copy deployment/docker-compose.production.yml, deployment/docker-compose.evaluation.edge.yml, deployment/docker-compose.evaluation.edge.ssd.yml to ~/lina/deployment on remote"
+    echo "  - Copy deployment/docker-compose.edge.yml to ~/lina/deployment on remote"
     echo "  - Copy edge helper scripts to ~/lina/deployment/scripts on remote"
     echo "  - Copy infrastructure/certs/ to ~/lina/infrastructure/certs on remote"
     echo "  - Verify prerequisites (Docker, docker-compose)"
@@ -229,21 +225,11 @@ scp_copy() {
     return 1
 }
 
-# Check if docker-compose.production.yml exists locally
+# Check if docker-compose.edge.yml exists locally
 if [ ! -f "$COMPOSE_FILE" ]; then
     echo -e "${RED}ERROR: $COMPOSE_FILE not found${NC}"
     echo "Please ensure you're in the project directory"
     exit 1
-fi
-
-# Check if docker-compose.evaluation.edge.yml exists locally (optional, just warn if missing)
-if [ ! -f "$COMPOSE_MEAS_FILE" ]; then
-    echo -e "${YELLOW}Note: $COMPOSE_MEAS_FILE not found (optional file)${NC}"
-fi
-
-# Check if docker-compose.evaluation.edge.ssd.yml exists locally (optional, just warn if missing)
-if [ ! -f "$COMPOSE_MEAS_SSD_FILE" ]; then
-    echo -e "${YELLOW}Note: $COMPOSE_MEAS_SSD_FILE not found (optional file)${NC}"
 fi
 
 # Check Docker and docker-compose on target
@@ -316,25 +302,9 @@ if [ "$REMOTE_DEPLOY" = "true" ]; then
     run_cmd "mkdir -p $REMOTE_DIR/deployment/scripts"
     run_cmd "mkdir -p $REMOTE_DIR/infrastructure/certs"
     
-    # Copy docker-compose.production.yml
-    echo "Copying docker-compose.production.yml..."
+    # Copy docker-compose.edge.yml
+    echo "Copying docker-compose.edge.yml..."
     scp_copy "$COMPOSE_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_FILE_BASENAME"
-    
-    # Copy docker-compose.evaluation.edge.yml if it exists
-    if [ -f "$COMPOSE_MEAS_FILE" ]; then
-        echo "Copying docker-compose.evaluation.edge.yml..."
-        scp_copy "$COMPOSE_MEAS_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_FILE_BASENAME"
-    else
-        echo -e "${YELLOW}Note: docker-compose.evaluation.edge.yml not found locally, skipping${NC}"
-    fi
-
-    # Copy docker-compose.evaluation.edge.ssd.yml if it exists
-    if [ -f "$COMPOSE_MEAS_SSD_FILE" ]; then
-        echo "Copying docker-compose.evaluation.edge.ssd.yml..."
-        scp_copy "$COMPOSE_MEAS_SSD_FILE" "$SSH_TARGET:$REMOTE_DIR/deployment/$COMPOSE_MEAS_SSD_FILE_BASENAME"
-    else
-        echo -e "${YELLOW}Note: docker-compose.evaluation.edge.ssd.yml not found locally, skipping${NC}"
-    fi
 
     # Copy edge helper scripts if they exist
     for script in "${EDGE_HELPER_SCRIPTS[@]}"; do
@@ -443,9 +413,9 @@ fi
 
 # Check compose file exists
 if run_cmd "test -f $REMOTE_COMPOSE_FILE"; then
-    echo -e "${GREEN}✓ docker-compose.production.yml found${NC}"
+    echo -e "${GREEN}✓ docker-compose.edge.yml found${NC}"
 else
-    echo -e "${RED}ERROR: docker-compose.production.yml not found${NC}"
+    echo -e "${RED}ERROR: docker-compose.edge.yml not found${NC}"
     exit 1
 fi
 

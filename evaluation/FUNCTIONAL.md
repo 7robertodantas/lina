@@ -10,7 +10,7 @@ External Machine at 192.168.0.166
 ## Running the infrastructure on edge node 
 
 ```bash
-docker compose -f deployment/docker-compose.evaluation.edge.yml up -d
+docker compose -f deployment/docker-compose.edge.yml up -d
 ```
 
 That runs:
@@ -28,7 +28,7 @@ That runs:
 Then, the edge was configured to collect the service logs to a file so that we can observe them later.
 
 ```bash
-docker compose -f deployment/docker-compose.evaluation.edge.yml logs -f -t --no-color device ledger lightning consumption |& tee functional-evaluation-edge-node.log
+docker compose -f deployment/docker-compose.edge.yml logs -f -t --no-color device ledger lightning consumption |& tee functional-evaluation-edge-node.log
 ```
 
 ## Running the LND node on External Machine
@@ -46,7 +46,7 @@ LND Node B (User / Payer): 192.168.0.166:10002
 ## Running the infrastructure on external machine
 
 ```bash
-docker compose -f deployment/docker-compose.evaluation.external.yml up -d
+docker compose -f deployment/docker-compose.external.yml up -d
 ```
 
 That runs:
@@ -63,7 +63,7 @@ The http devices was not used in functional tests, instead, the smartmeter was u
 The external machine was configured to also collect smart meter logs.
 
 ```bash
-docker compose -f deployment/docker-compose.evaluation.external.yml logs -f -t --no-color smartmeter |& tee functional-evaluation-external-machine.log
+docker compose -f deployment/docker-compose.external.yml logs -f -t --no-color smartmeter |& tee functional-evaluation-external-machine.log
 ```
 
 ## Device Setup

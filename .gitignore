@@ -25,6 +25,7 @@ bin/
 dist/
 build/
 deployment/ansible/.build/
+deployment/.data/
 
 # IDE - VSCode
 .vscode/*

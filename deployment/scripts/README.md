@@ -50,7 +50,7 @@ Builds and pushes Docker images to a registry.
 See `DOCKER_PUBLISH.md` for detailed documentation.
 
 ### `edge-up-default.sh`
-Starts `docker-compose.evaluation.edge.yml` using Docker-managed named volumes.
+Starts `docker-compose.edge.yml`. Loads `deployment/.env` if present, creates data directories under `EDGE_DATA_ROOT` (default: `deployment/.data/edge`), then runs `docker compose up -d`.
 
 **Usage:**
 ```bash
@@ -59,7 +59,7 @@ Starts `docker-compose.evaluation.edge.yml` using Docker-managed named volumes.
 ```
 
 ### `edge-up-ssd.sh`
-Starts edge evaluation compose with SSD bind mounts override (`docker-compose.evaluation.edge.ssd.yml`).
+Same compose file as `edge-up-default.sh`, but **requires** `EDGE_DATA_ROOT` (for example a fast disk path). Use this when you want an explicit root and no default under `deployment/.data/edge`.
 
 **Usage:**
 ```bash

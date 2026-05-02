@@ -6,4 +6,4 @@ DEPLOYMENT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${DEPLOYMENT_DIR}"
 
-docker compose -f docker-compose.evaluation.edge.yml down "$@"
+docker compose -f docker-compose.edge.yml down "$@"
