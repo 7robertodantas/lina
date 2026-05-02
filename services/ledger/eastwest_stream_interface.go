@@ -356,14 +356,6 @@ func (ewsi *EastWestStreamInterface) handleConsumptionMessage(ctx context.Contex
 		return nil
 	}
 
-	// Mark message as processed in Redis after successful processing
-	// Use Redis SET with expiration to track processed messages
-	if err := ewsi.markMessageProcessed(ctx, streamName, msg.ID); err != nil {
-		// Log error but don't fail - Redis tracking is best-effort
-		logger.WithStream(streamName, "consume").
-			Warnf(ctx, "Failed to mark message as processed in Redis: %v", err)
-	}
-
 	return nil
 }
 
@@ -392,18 +384,6 @@ func (ewsi *EastWestStreamInterface) isMessageProcessed(ctx context.Context, str
 
 	// If set is false, the key already existed (message already processed or being processed)
 	return !set, nil
-}
-
-// markMessageProcessed marks a message as processed in Redis with TTL
-// Note: This is now called after successful processing, but the atomic check in
-// isMessageProcessed already prevents duplicates. This just ensures the key persists.
-func (ewsi *EastWestStreamInterface) markMessageProcessed(ctx context.Context, streamName, messageID string) error {
-	key := fmt.Sprintf("%s:%s:%s", processedMessageKeyPrefix, streamName, messageID)
-	client := ewsi.Client()
-
-	// Use SET with expiration to automatically clean up old entries
-	// This extends/refreshes the TTL after successful processing
-	return client.Set(ctx, key, "1", processedMessageTTL).Err()
 }
 
 // startPendingMessageRetry continuously retries pending messages that failed to process

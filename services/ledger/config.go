@@ -51,8 +51,10 @@ func LoadConfig() Config {
 		MaxPageSize:    internal.IntEnv("MAX_PAGE_SIZE", 200),
 
 		StreamConsumerName: internal.GetEnv("REDIS_STREAM_CONSUMER_NAME", "ledger-service"),
+		// Default of 2 suits Pebble (concurrent writes). For SQLite set LEDGER_STREAM_PARALLELISM=1
+		// to avoid goroutines spinning on the single connection pool while waiting to write.
 		ConsumeParallelism: internal.StreamParallelismFromEnv("LEDGER_STREAM_PARALLELISM", 2),
-		StreamReadCount:      internal.StreamReadCountFromEnv("LEDGER_STREAM_READ_COUNT", 100),
+		StreamReadCount:    internal.StreamReadCountFromEnv("LEDGER_STREAM_READ_COUNT", 100),
 
 		// OpenTelemetry / Jaeger
 		OTELExporterOTLPEndpoint: internal.GetEnv("OTEL_EXPORTER_OTLP_ENDPOINT", ""),

@@ -291,20 +291,42 @@ func (r *ledgerRepoSQLite) ListLedgerEntries(ctx context.Context, deviceID strin
    =========================================
 */
 
+// upsertBalanceReturning inserts or updates the balance row in a single statement and returns the new balance.
+// Uses INSERT ON CONFLICT to handle first-time devices without a separate EnsureBalanceRow call.
+func (r *ledgerRepoSQLite) upsertBalanceReturning(ctx context.Context, stx *sql.Tx, deviceID string, deltaMsat int64) (int64, error) {
+	attrs := []attribute.KeyValue{
+		attribute.String("db.operation", "UPSERT"),
+		attribute.String("db.table", "balances"),
+		attribute.String("device.id", deviceID),
+		attribute.Int64("delta_msat", deltaMsat),
+	}
+	// excluded.balance_msat is the delta from the VALUES clause.
+	// On conflict the existing balance is updated by adding the delta (negative for debits).
+	query := `
+		INSERT INTO balances(device_id, balance_msat, updated_at) VALUES(?, ?, ?)
+		ON CONFLICT(device_id) DO UPDATE SET
+			balance_msat = balance_msat + excluded.balance_msat,
+			updated_at   = excluded.updated_at
+		RETURNING balance_msat`
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] upsert balance", attrs, stx, query, deviceID, deltaMsat, now())
+	var bal int64
+	if err := row.Scan(&bal); err != nil {
+		return 0, err
+	}
+	return bal, nil
+}
+
 // ApplyCredit applies a credit to a device's balance and creates a ledger entry
 func (r *ledgerRepoSQLite) ApplyCredit(ctx context.Context, tx LedgerTx, in CreditRequest) (EntryResponse, error) {
 	if in.AmountMsat <= 0 {
 		return EntryResponse{}, errors.New("amount must be > 0")
 	}
-	if err := r.EnsureBalanceRow(ctx, tx, in.DeviceID); err != nil {
+	stx, err := expectSqliteTx(tx)
+	if err != nil {
 		return EntryResponse{}, err
 	}
-	// Add funds
-	if err := r.UpdateBalance(ctx, tx, in.DeviceID, in.AmountMsat); err != nil {
-		return EntryResponse{}, err
-	}
-	// Read new balance
-	bal, err := r.GetBalance(ctx, tx, in.DeviceID)
+	// Single UPSERT: creates the row if missing, adds amount, returns new balance.
+	bal, err := r.upsertBalanceReturning(ctx, stx, in.DeviceID, in.AmountMsat)
 	if err != nil {
 		return EntryResponse{}, err
 	}
@@ -329,11 +351,15 @@ func (r *ledgerRepoSQLite) ApplyDebit(ctx context.Context, tx LedgerTx, in Debit
 	if in.AmountMsat <= 0 {
 		return EntryResponse{}, errors.New("amount must be > 0")
 	}
-	if err := r.EnsureBalanceRow(ctx, tx, in.DeviceID); err != nil {
+	stx, err := expectSqliteTx(tx)
+	if err != nil {
 		return EntryResponse{}, err
 	}
-	// Funds check
 	if !in.AllowNegative {
+		// Funds check: ensure row exists and read balance before subtracting.
+		if err := r.EnsureBalanceRow(ctx, tx, in.DeviceID); err != nil {
+			return EntryResponse{}, err
+		}
 		bal, err := r.GetBalance(ctx, tx, in.DeviceID)
 		if err != nil {
 			return EntryResponse{}, err
@@ -342,12 +368,8 @@ func (r *ledgerRepoSQLite) ApplyDebit(ctx context.Context, tx LedgerTx, in Debit
 			return EntryResponse{}, fmt.Errorf("insufficient funds: have %d need %d", bal, in.AmountMsat)
 		}
 	}
-	// Subtract
-	if err := r.UpdateBalance(ctx, tx, in.DeviceID, -in.AmountMsat); err != nil {
-		return EntryResponse{}, err
-	}
-	// Read new balance
-	bal, err := r.GetBalance(ctx, tx, in.DeviceID)
+	// Single UPSERT: creates the row if missing (AllowNegative path), subtracts amount, returns new balance.
+	bal, err := r.upsertBalanceReturning(ctx, stx, in.DeviceID, -in.AmountMsat)
 	if err != nil {
 		return EntryResponse{}, err
 	}
@@ -580,67 +602,41 @@ func (r *ledgerRepoSQLite) UpdateAuthorization(ctx context.Context, tx LedgerTx,
 	return err
 }
 
-// ConsumeAuthorization atomically consumes from an authorization
-// This reduces lock contention by doing the calculation and update in a single SQL statement
-// Returns the new remaining_msat, consumed_msat, overflow_msat, and status
+// ConsumeAuthorization atomically consumes from an authorization in a single SQL statement.
+// Uses scalar MIN/MAX expressions so all calculation and the write happen in one round-trip.
+// Returns the new remaining_msat, consumed_msat, overflow_msat, and status.
 func (r *ledgerRepoSQLite) ConsumeAuthorization(ctx context.Context, tx LedgerTx, authorizationID string, debitAmount int64) (newRemaining int64, newConsumed int64, newOverflow int64, newStatus string, err error) {
 	stx, err := expectSqliteTx(tx)
 	if err != nil {
 		return 0, 0, 0, "", err
 	}
-	// Use a single UPDATE statement with CASE expressions to calculate new values atomically
-	// This reduces lock contention by minimizing the time the row is locked
-	// SQLite doesn't support MAX()/MIN() in UPDATE, so we use CASE expressions
 	attrs := []attribute.KeyValue{
 		attribute.String("db.operation", "UPDATE"),
 		attribute.String("db.table", "authorizations"),
 		attribute.String("authorization.id", authorizationID),
 		attribute.Int64("debit_amount", debitAmount),
 	}
-
-	// First, read current values to calculate new ones
-	query := `SELECT remaining_msat, consumed_msat, overflow_msat, granted_msat FROM authorizations WHERE authorization_id = ?`
-	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] get authorization for consume", attrs, stx, query, authorizationID)
-	var currentRemaining, currentConsumed, currentOverflow, grantedMsat int64
-	if err = row.Scan(&currentRemaining, &currentConsumed, &currentOverflow, &grantedMsat); err != nil {
+	// Column references inside SET expressions refer to the OLD row values, so:
+	//   actualDebit  = MIN(remaining_msat, debitAmount)
+	//   newRemaining = MAX(0, remaining_msat - debitAmount)
+	//   newConsumed  = MIN(granted_msat, consumed_msat + actualDebit)
+	//   newOverflow  = overflow_msat + MAX(0, debitAmount - remaining_msat)
+	//   newStatus    = 'completed' when remaining_msat <= debitAmount (newRemaining would be 0)
+	// RETURNING gives the post-update values so the caller gets them without a second round-trip.
+	query := `
+		UPDATE authorizations SET
+			remaining_msat = MAX(0, remaining_msat - ?),
+			consumed_msat  = MIN(granted_msat, consumed_msat + MIN(remaining_msat, ?)),
+			overflow_msat  = overflow_msat + MAX(0, ? - remaining_msat),
+			status         = CASE WHEN remaining_msat <= ? THEN 'completed' ELSE 'active' END
+		WHERE authorization_id = ?
+		RETURNING remaining_msat, consumed_msat, overflow_msat, status`
+	row := r.sqlTracer.QueryRowWithSpan(ctx, "[repository] consume authorization", attrs, stx, query,
+		debitAmount, debitAmount, debitAmount, debitAmount, authorizationID,
+	)
+	if err = row.Scan(&newRemaining, &newConsumed, &newOverflow, &newStatus); err != nil {
 		return 0, 0, 0, "", mapSQLRowErr(err)
 	}
-
-	// Calculate new values
-	actualDebit := debitAmount
-	if currentRemaining < debitAmount {
-		actualDebit = currentRemaining
-	}
-
-	newRemaining = currentRemaining - actualDebit
-	if newRemaining < 0 {
-		newRemaining = 0
-	}
-
-	newConsumed = currentConsumed + actualDebit
-	if newConsumed > grantedMsat {
-		newConsumed = grantedMsat
-	}
-
-	overflowDelta := debitAmount - actualDebit
-	newOverflow = currentOverflow + overflowDelta
-
-	newStatus = "active"
-	if newRemaining <= 0 {
-		newStatus = "completed"
-	}
-
-	// Update with calculated values
-	_, err = r.sqlTracer.ExecWithSpan(ctx, "[repository] consume authorization", attrs, stx, `
-		UPDATE authorizations
-		SET remaining_msat = ?, consumed_msat = ?, overflow_msat = ?, status = ?
-		WHERE authorization_id = ?`,
-		newRemaining, newConsumed, newOverflow, newStatus, authorizationID,
-	)
-	if err != nil {
-		return 0, 0, 0, "", err
-	}
-
 	return newRemaining, newConsumed, newOverflow, newStatus, nil
 }
 
