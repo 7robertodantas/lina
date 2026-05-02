@@ -387,8 +387,12 @@ func TraceEventProcessing(ctx context.Context, streamName string, msg redis.XMes
 
 // extractEventTypeFromMessage extracts the event type from a Redis stream message
 // Returns empty string if extraction fails (non-fatal)
-// Tries to extract a clean event type name like "AUTHORIZATION_DEBITED" from protobuf enum strings
+// Prefers explicit event_type field (set by producers of binary payloads); else parses JSON event.
 func extractEventTypeFromMessage(msg redis.XMessage) string {
+	if v, ok := msg.Values["event_type"].(string); ok && v != "" {
+		return v
+	}
+
 	eventJSON, ok := msg.Values["event"].(string)
 	if !ok {
 		return ""

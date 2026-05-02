@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	consumptionpb "github.com/robertodantas/lina/proto/gen/model/consumption"
@@ -219,14 +218,13 @@ func (ewsi *EastWestStreamInterface) StartLightningConsumer(ctx context.Context)
 
 // handleLightningMessage decodes lightning event, checks event type, and delegates to appropriate handler method
 func (ewsi *EastWestStreamInterface) handleLightningMessage(ctx context.Context, msg redis.XMessage) error {
-	eventJSON, ok := msg.Values["event"].(string)
+	eventData, ok := msg.Values["event"].(string)
 	if !ok {
 		return fmt.Errorf("invalid lightning event format: missing 'event' field")
 	}
 
 	var lightningEvent lightningmodel.LightningEvent
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-	if err := opts.Unmarshal([]byte(eventJSON), &lightningEvent); err != nil {
+	if err := internal.UnmarshalStreamEvent(eventData, &lightningEvent); err != nil {
 		return fmt.Errorf("failed to unmarshal lightning event: %w", err)
 	}
 
@@ -319,16 +317,13 @@ func (ewsi *EastWestStreamInterface) handleConsumptionMessage(ctx context.Contex
 		return nil
 	}
 
-	// Extract event JSON from message
-	eventJSON, ok := msg.Values["event"].(string)
+	eventData, ok := msg.Values["event"].(string)
 	if !ok {
 		return fmt.Errorf("invalid event format: missing 'event' field")
 	}
 
-	// Unmarshal ConsumptionEvent
 	var consumptionEvent consumptionpb.ConsumptionEvent
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-	if err := opts.Unmarshal([]byte(eventJSON), &consumptionEvent); err != nil {
+	if err := internal.UnmarshalStreamEvent(eventData, &consumptionEvent); err != nil {
 		return fmt.Errorf("failed to unmarshal consumption event: %w", err)
 	}
 

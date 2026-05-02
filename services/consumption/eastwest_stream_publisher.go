@@ -7,7 +7,6 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/otel/propagation"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	consumptionpb "github.com/robertodantas/lina/proto/gen/model/consumption"
@@ -52,26 +51,25 @@ func (esp *EastWestStreamPublisher) PublishConsumptionEvent(ctx context.Context,
 		},
 	}
 
-	// Serialize to JSON
-	opts := protojson.MarshalOptions{UseProtoNames: true}
-	jsonBytes, err := opts.Marshal(consumptionEvent)
+	eventStr, err := internal.MarshalStreamEvent(consumptionEvent)
 	if err != nil {
-		return fmt.Errorf("failed to marshal consumption event to JSON: %w", err)
+		return fmt.Errorf("failed to marshal consumption event: %w", err)
 	}
 
 	streamName := internal.StreamConsumption
-	values := map[string]interface{}{
-		"event":     string(jsonBytes),
-		"timestamp": time.Now().UnixMilli(),
-	}
-
-	// Use XADD to add entry to stream
 	// Clean event type: "CONSUMPTION_EVENT_TYPE_DEVICE_CONSUMPTION_RECORDED" -> "DEVICE_CONSUMPTION_RECORDED"
 	eventTypeFull := consumptionEvent.Type.String()
 	eventType := eventTypeFull
 	if len(eventTypeFull) > len("CONSUMPTION_EVENT_TYPE_") && eventTypeFull[:len("CONSUMPTION_EVENT_TYPE_")] == "CONSUMPTION_EVENT_TYPE_" {
 		eventType = eventTypeFull[len("CONSUMPTION_EVENT_TYPE_"):]
 	}
+	values := map[string]interface{}{
+		"event":      eventStr,
+		"event_type": eventType,
+		"timestamp":  time.Now().UnixMilli(),
+	}
+
+	// Use XADD to add entry to stream
 	streamID, err := esp.streamInterface.XAddWithSpan(ctx, streamName, &redis.XAddArgs{
 		Stream: streamName,
 		Values: values,

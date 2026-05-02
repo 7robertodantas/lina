@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
@@ -163,26 +162,25 @@ func (esp *EastWestStreamPublisher) PublishAuthorizationDebitFailed(ctx context.
 
 // publishLedgerEvent publishes a LedgerEvent to the event.ledger stream
 func (esp *EastWestStreamPublisher) publishLedgerEvent(ctx context.Context, ledgerEvent *ledgermodel.LedgerEvent, deviceID string) error {
-	// Serialize to JSON
-	opts := protojson.MarshalOptions{UseProtoNames: true}
-	jsonBytes, err := opts.Marshal(ledgerEvent)
+	eventStr, err := internal.MarshalStreamEvent(ledgerEvent)
 	if err != nil {
-		return fmt.Errorf("failed to marshal ledger event to JSON: %w", err)
+		return fmt.Errorf("failed to marshal ledger event: %w", err)
 	}
 
 	streamName := internal.StreamLedger
-	values := map[string]interface{}{
-		"event":     string(jsonBytes),
-		"timestamp": time.Now().UnixMilli(),
-	}
-
-	// Use XADD to add entry to stream
 	// Clean event type: "LEDGER_EVENT_TYPE_AUTHORIZATION_DEBITED" -> "AUTHORIZATION_DEBITED"
 	eventTypeFull := ledgerEvent.GetType().String()
 	eventType := eventTypeFull
 	if len(eventTypeFull) > len("LEDGER_EVENT_TYPE_") && eventTypeFull[:len("LEDGER_EVENT_TYPE_")] == "LEDGER_EVENT_TYPE_" {
 		eventType = eventTypeFull[len("LEDGER_EVENT_TYPE_"):]
 	}
+	values := map[string]interface{}{
+		"event":      eventStr,
+		"event_type": eventType,
+		"timestamp":  time.Now().UnixMilli(),
+	}
+
+	// Use XADD to add entry to stream
 	streamID, err := esp.streamClient.XAddWithSpan(ctx, streamName, &redis.XAddArgs{
 		Stream: streamName,
 		Values: values,

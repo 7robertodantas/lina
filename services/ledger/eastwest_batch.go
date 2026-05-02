@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/robertodantas/lina/internal"
 	consumptionpb "github.com/robertodantas/lina/proto/gen/model/consumption"
 )
 
@@ -82,7 +82,7 @@ func (ewsi *EastWestStreamInterface) runConsumptionBatch(
 	}
 }
 
-// decodeBatchItem checks Redis idempotency and unmarshals the protojson event for one message.
+// decodeBatchItem checks Redis idempotency and unmarshals the stream event for one message.
 func (ewsi *EastWestStreamInterface) decodeBatchItem(ctx context.Context, streamName string, msg redis.XMessage) consumptionBatchItem {
 	item := consumptionBatchItem{msg: msg}
 
@@ -95,7 +95,7 @@ func (ewsi *EastWestStreamInterface) decodeBatchItem(ctx context.Context, stream
 		return item
 	}
 
-	eventJSON, ok := msg.Values["event"].(string)
+	eventData, ok := msg.Values["event"].(string)
 	if !ok {
 		logger.WithStream(streamName, "consume").
 			Errorf(ctx, "batch: missing 'event' field in message %s", msg.ID)
@@ -104,8 +104,7 @@ func (ewsi *EastWestStreamInterface) decodeBatchItem(ctx context.Context, stream
 	}
 
 	var consumptionEvent consumptionpb.ConsumptionEvent
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-	if err := opts.Unmarshal([]byte(eventJSON), &consumptionEvent); err != nil {
+	if err := internal.UnmarshalStreamEvent(eventData, &consumptionEvent); err != nil {
 		logger.WithStream(streamName, "consume").
 			Errorf(ctx, "batch: failed to unmarshal event %s: %v", msg.ID, err)
 		item.skip = true

@@ -11,7 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/robertodantas/lina/internal"
 	devicepb "github.com/robertodantas/lina/proto/gen/model/device"
-	"google.golang.org/protobuf/encoding/protojson"
 )
 
 // messageRetryInfo tracks retry information for a message
@@ -136,16 +135,13 @@ func (ewsi *EastWestStreamInterface) consumeDeviceEvents(ctx context.Context, st
 
 // handleDeviceMessage decodes device event and routes to appropriate handler method
 func (ewsi *EastWestStreamInterface) handleDeviceMessage(ctx context.Context, handler *EastWestStreamHandler, msg redis.XMessage) error {
-	// Extract event JSON from message
-	eventJSON, ok := msg.Values["event"].(string)
+	eventData, ok := msg.Values["event"].(string)
 	if !ok {
 		return fmt.Errorf("invalid event format: missing 'event' field")
 	}
 
-	// Unmarshal DeviceEvent
 	var deviceEvent devicepb.DeviceEvent
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-	if err := opts.Unmarshal([]byte(eventJSON), &deviceEvent); err != nil {
+	if err := internal.UnmarshalStreamEvent(eventData, &deviceEvent); err != nil {
 		return fmt.Errorf("failed to unmarshal device event: %w", err)
 	}
 

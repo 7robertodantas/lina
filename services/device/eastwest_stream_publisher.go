@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	devicepb "github.com/robertodantas/lina/proto/gen/model/device"
@@ -75,17 +74,16 @@ func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.
 		},
 	}
 
-	// Serialize to JSON for Redis stream
-	opts := protojson.MarshalOptions{UseProtoNames: true}
-	jsonBytes, err := opts.Marshal(deviceEvent)
+	eventStr, err := internal.MarshalStreamEvent(deviceEvent)
 	if err != nil {
-		return fmt.Errorf("failed to marshal device event to JSON: %w", err)
+		return fmt.Errorf("failed to marshal device event: %w", err)
 	}
 
 	streamName := internal.StreamDevice
 	values := map[string]interface{}{
-		"event":     string(jsonBytes),
-		"timestamp": time.Now().UnixMilli(),
+		"event":      eventStr,
+		"event_type": "USAGE_REPORTED",
+		"timestamp":  time.Now().UnixMilli(),
 	}
 
 	// Use XAddWithSpan to add entry to stream with tracing

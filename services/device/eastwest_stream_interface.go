@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
@@ -294,10 +293,8 @@ func (ewsi *EastWestStreamInterface) startDeviceLightningPendingRetry(ctx contex
 
 // handleLedgerMessage decodes ledger event and calls appropriate handler method
 func (ewsi *EastWestStreamInterface) handleLedgerMessage(ctx context.Context, handler *EastWestStreamHandler, rawEvent string) error {
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-
 	var ledgerEvent ledgermodel.LedgerEvent
-	if err := opts.Unmarshal([]byte(rawEvent), &ledgerEvent); err != nil {
+	if err := internal.UnmarshalStreamEvent(rawEvent, &ledgerEvent); err != nil {
 		return fmt.Errorf("failed to unmarshal ledger event: %w", err)
 	}
 
@@ -344,10 +341,8 @@ func (ewsi *EastWestStreamInterface) handleLedgerMessage(ctx context.Context, ha
 
 // handleLightningMessage decodes lightning event and calls appropriate handler method
 func (ewsi *EastWestStreamInterface) handleLightningMessage(ctx context.Context, handler *EastWestStreamHandler, rawEvent string) error {
-	opts := protojson.UnmarshalOptions{DiscardUnknown: true}
-
 	var lightningEvent lightningmodel.LightningEvent
-	if err := opts.Unmarshal([]byte(rawEvent), &lightningEvent); err != nil {
+	if err := internal.UnmarshalStreamEvent(rawEvent, &lightningEvent); err != nil {
 		return fmt.Errorf("failed to unmarshal lightning event: %w", err)
 	}
 

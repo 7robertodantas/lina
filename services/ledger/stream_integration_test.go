@@ -9,7 +9,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	ledgermodel "github.com/robertodantas/lina/proto/gen/model/ledger"
@@ -92,7 +91,7 @@ func assertLedgerEvent(t *testing.T, msg redis.XMessage, expectedType ledgermode
 	require.True(t, ok, "expected string event payload")
 
 	var event ledgermodel.LedgerEvent
-	err := protojson.Unmarshal([]byte(raw), &event)
+	err := internal.UnmarshalStreamEvent(raw, &event)
 	require.NoError(t, err)
 	require.Equal(t, expectedType, event.GetType())
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"google.golang.org/protobuf/encoding/protojson"
 
 	"github.com/robertodantas/lina/internal"
 	lightningmodel "github.com/robertodantas/lina/proto/gen/model/lightning"
@@ -77,26 +76,26 @@ func (sp *EastWestStreamPublisher) publishToStream(ctx context.Context, streamNa
 		return fmt.Errorf("event is nil")
 	}
 
-	opts := protojson.MarshalOptions{UseProtoNames: true}
-	payload, err := opts.Marshal(event)
+	payload, err := internal.MarshalStreamEvent(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal lightning event: %w", err)
-	}
-
-	values := map[string]interface{}{
-		"event":     string(payload),
-		"timestamp": time.Now().UnixMilli(),
-	}
-
-	args := &redis.XAddArgs{
-		Stream: streamName,
-		Values: values,
 	}
 
 	eventTypeFull := event.GetType().String()
 	eventType := eventTypeFull
 	if len(eventTypeFull) > len("LIGHTNING_EVENT_TYPE_") && eventTypeFull[:len("LIGHTNING_EVENT_TYPE_")] == "LIGHTNING_EVENT_TYPE_" {
 		eventType = eventTypeFull[len("LIGHTNING_EVENT_TYPE_"):]
+	}
+
+	values := map[string]interface{}{
+		"event":      payload,
+		"event_type": eventType,
+		"timestamp":  time.Now().UnixMilli(),
+	}
+
+	args := &redis.XAddArgs{
+		Stream: streamName,
+		Values: values,
 	}
 
 	streamID, err := sp.streamClient.XAddWithSpan(ctx, streamName, args, eventType)
