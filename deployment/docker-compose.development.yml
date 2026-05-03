@@ -15,6 +15,39 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=ledger
+      - POSTGRES_USER=ledger
+      - POSTGRES_PASSWORD=ledger
+    # Tuned for Raspberry Pi 4: small footprint, concurrent writers enabled.
+    # synchronous_commit=off trades up to ~200ms of committed data on a hard crash for
+    # ~3x write throughput (no data corruption, only recency risk on ungraceful shutdown).
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=512MB
+      -c max_connections=25
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c wal_buffers=8MB
+      -c checkpoint_completion_target=0.9
+      -c synchronous_commit=off
+      -c random_page_cost=1.1
+      -c log_min_messages=warning
+      -c log_min_error_statement=error
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
   redis:
     build:
       context: ../infrastructure/redis
@@ -110,6 +143,8 @@ services:
       - STREAM_READ_COUNT=${LEDGER_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${LEDGER_STREAM_PARALLELISM:-2}
       - DB_PATH=/data/ledger
+      - PG_DSN=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      - PG_MAX_OPEN_CONNS=${PG_MAX_OPEN_CONNS:-10}
     env_file:
       - .env
     volumes:
@@ -119,6 +154,8 @@ services:
       - ledger-data:/data
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -137,12 +174,16 @@ services:
       - STREAM_READ_COUNT=${CONSUMPTION_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${CONSUMPTION_STREAM_PARALLELISM:-4}
       - DB_PATH=/data/consumption
+      - PG_DSN=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      - PG_MAX_OPEN_CONNS=${PG_MAX_OPEN_CONNS:-10}
     env_file:
       - .env
     volumes:
       - consumption-data:/data
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
 
@@ -390,6 +431,7 @@ services:
 volumes:
   mosquitto-data:
   redis-data:
+  postgres-data:
   device-data:
   ledger-data:
   consumption-data:

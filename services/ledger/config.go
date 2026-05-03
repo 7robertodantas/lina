@@ -7,9 +7,11 @@ import (
 )
 
 type Config struct {
-	RepositoryType string // pebble (default) or sqlite
+	RepositoryType string // pebble (default), sqlite, or postgres
 	DBPath         string
-	BusyTimeoutMS  int // SQLite busy_timeout pragma (ignored for pebble)
+	BusyTimeoutMS  int    // SQLite busy_timeout pragma (ignored for pebble/postgres)
+	PostgresDSN    string // Postgres connection string (used when RepositoryType=postgres)
+	PGMaxOpenConns int    // Postgres connection pool size; > 1 enables concurrent writers
 	ServiceToken   string
 	ListenAddr     string
 	GRPCAddr       string
@@ -42,6 +44,8 @@ func LoadConfig() Config {
 		RepositoryType: internal.GetEnv("REPOSITORY_TYPE", "pebble"),
 		DBPath:         internal.GetEnv("DB_PATH", "ledger-pebble"),
 		BusyTimeoutMS:  internal.IntEnv("BUSY_TIMEOUT_MS", 5000),
+		PostgresDSN:    internal.GetEnv("PG_DSN", "postgres://ledger:ledger@localhost:5432/ledger?sslmode=disable"),
+		PGMaxOpenConns: internal.IntEnv("PG_MAX_OPEN_CONNS", 10),
 		ServiceToken:   internal.GetEnv("SERVICE_TOKEN", "dev-token"),
 		ListenAddr:     internal.GetEnv("LISTEN_ADDR", ":8080"),
 		GRPCAddr:       internal.GetEnv("GRPC_ADDR", ":9090"),

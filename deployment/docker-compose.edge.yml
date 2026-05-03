@@ -8,6 +8,37 @@ x-logging: &default-logging
     max-file: ${DOCKER_LOG_MAX_FILE:-2}
 
 services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: postgres
+    environment:
+      - POSTGRES_DB=ledger
+      - POSTGRES_USER=ledger
+      - POSTGRES_PASSWORD=ledger
+    command: >
+      postgres
+      -c shared_buffers=128MB
+      -c effective_cache_size=512MB
+      -c max_connections=25
+      -c work_mem=4MB
+      -c maintenance_work_mem=32MB
+      -c wal_buffers=8MB
+      -c checkpoint_completion_target=0.9
+      -c synchronous_commit=off
+      -c random_page_cost=1.1
+      -c log_min_messages=warning
+      -c log_min_error_statement=error
+    volumes:
+      - ${EDGE_DATA_ROOT:-.data/edge}/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ledger -d ledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    logging: *default-logging
+    restart: unless-stopped
+
   caddy:
     image: 7robertodantas/lina-caddy:latest
     container_name: caddy
@@ -120,6 +151,8 @@ services:
       - STREAM_READ_COUNT=${LEDGER_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${LEDGER_STREAM_PARALLELISM:-4}
       - DB_PATH=/data/ledger
+      - PG_DSN=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      - PG_MAX_OPEN_CONNS=${PG_MAX_OPEN_CONNS:-10}
       - GRPC_USE_TLS=true
       - GRPC_TLS_CA_CERT=/certs/ca.crt
       - GRPC_TLS_SERVER_CERT=/certs/server.crt
@@ -139,6 +172,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
     logging: *default-logging
     restart: unless-stopped
 
@@ -153,6 +188,8 @@ services:
       - STREAM_READ_COUNT=${CONSUMPTION_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${CONSUMPTION_STREAM_PARALLELISM:-4}
       - DB_PATH=/data/consumption
+      - PG_DSN=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
+      - PG_MAX_OPEN_CONNS=${PG_MAX_OPEN_CONNS:-10}
       # Disable OpenTelemetry
       - OTEL_EXPORTER_OTLP_ENDPOINT=
       - OTEL_SERVICE_NAME=consumption-service
@@ -164,6 +201,8 @@ services:
       - ${EDGE_DATA_ROOT:-.data/edge}/consumption:/data
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     logging: *default-logging
     restart: unless-stopped

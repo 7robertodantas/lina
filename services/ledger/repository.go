@@ -77,7 +77,13 @@ func OpenLedgerRepository(cfg Config) (repo LedgerRepository, implementation str
 			return nil, "", "", e
 		}
 		return r, "sqlite", path, nil
+	case "postgres":
+		r, e := openLedgerRepoPostgres(cfg.PostgresDSN, cfg.PGMaxOpenConns)
+		if e != nil {
+			return nil, "", "", e
+		}
+		return r, "postgres", cfg.PostgresDSN, nil
 	default:
-		return nil, "", "", fmt.Errorf("unsupported REPOSITORY_TYPE %q (want pebble or sqlite)", cfg.RepositoryType)
+		return nil, "", "", fmt.Errorf("unsupported REPOSITORY_TYPE %q (want pebble, sqlite, or postgres)", cfg.RepositoryType)
 	}
 }
