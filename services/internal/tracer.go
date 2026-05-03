@@ -49,6 +49,7 @@ func InitTracer(cfg TracerConfig) (func(context.Context) error, error) {
 		logger.Info(ctx, "Tracing is explicitly disabled via OTEL_TRACES_EXPORTER=none")
 		tp = sdktrace.NewTracerProvider(
 			sdktrace.WithResource(res),
+			sdktrace.WithSampler(sdktrace.NeverSample()),
 		)
 	} else {
 		logger.Info(ctx, "Tracing is enabled via OTEL_EXPORTER_OTLP_ENDPOINT="+cfg.ExporterOTLPEndpoint)
