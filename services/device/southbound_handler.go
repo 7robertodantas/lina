@@ -48,6 +48,9 @@ func (sh *SouthboundHandler) HandleHeartbeat(ctx context.Context, deviceID strin
 
 // HandleUsage processes usage messages from devices
 func (sh *SouthboundHandler) HandleUsage(ctx context.Context, deviceID string, payload *mqttpb.UsagePayload) {
+	// Capture as early as handler runs (after MQTT decode); used downstream for ledger debit latency.
+	serverReceivedAt := time.Now().UTC().Format(time.RFC3339Nano)
+
 	logger.WithDeviceID(payload.GetDeviceId()).
 		DebugWithFields(ctx, "Usage received on southbound mqtt", map[string]interface{}{
 			"report_id": payload.GetReportId(),
@@ -58,7 +61,7 @@ func (sh *SouthboundHandler) HandleUsage(ctx context.Context, deviceID string, p
 		})
 
 	// Publish DeviceUsageReportedEvent to Redis stream (with price_per_unit from device config)
-	if err := sh.streamPublisher.PublishDeviceUsageReportedEvent(ctx, payload, sh.repo); err != nil {
+	if err := sh.streamPublisher.PublishDeviceUsageReportedEvent(ctx, payload, sh.repo, serverReceivedAt); err != nil {
 		logger.WithDeviceID(payload.GetDeviceId()).
 			WithStream(internal.StreamDevice, "produce").
 			Error(ctx, "Error publishing usage event to Redis stream on southbound mqtt", err)

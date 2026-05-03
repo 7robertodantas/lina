@@ -91,7 +91,7 @@ func initMetrics() error {
 	}
 	debitLatencySeconds, err = meter.Float64Histogram(
 		"ledger_debit_latency_seconds",
-		metric.WithDescription("Latency of debit operations from usage in seconds"),
+		metric.WithDescription("Latency from device-service MQTT usage receive to successful ledger debit (seconds)"),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(buckets...),
 	)
@@ -215,7 +215,7 @@ func RecordEntry(ctx context.Context, entryType, source string) {
 	)
 }
 
-// RecordDebitLatency records the latency for a debit operation from usage
+// RecordDebitLatency records latency from the debit_latency_anchor time (device service receive) to debit commit.
 func RecordDebitLatency(ctx context.Context, latencySeconds float64) {
 	debitLatencySeconds.Record(ctx, latencySeconds,
 		metric.WithAttributes(

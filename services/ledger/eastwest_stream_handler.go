@@ -172,13 +172,13 @@ func (e *ExpectedFailureError) Unwrap() error {
 
 // processConsumptionResult holds the results of processing a consumption for event publishing
 type processConsumptionResult struct {
-	authorizationID   string
-	deviceID          string
-	actualDebit       int64
-	newRemaining      int64
-	newStatus         string
-	overflowEntry     *EntryResponse
-	recordedTimestamp string // original device timestamp; used for end-to-end latency tracking
+	authorizationID    string
+	deviceID           string
+	actualDebit        int64
+	newRemaining       int64
+	newStatus          string
+	overflowEntry      *EntryResponse
+	debitLatencyAnchor string // device-service MQTT receive time (RFC3339); ledger debit latency start
 }
 
 // processConsumptionWithTx debits from an authorization using the provided transaction
@@ -259,14 +259,19 @@ func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, 
 		RecordEntry(ctx, "debit", "overflow")
 	}
 
+	anchor := recorded.GetDebitLatencyAnchor()
+	if anchor == "" {
+		anchor = recorded.GetTimestamp()
+	}
+
 	return &processConsumptionResult{
-		authorizationID:   authorizationID,
-		deviceID:          deviceID,
-		actualDebit:       actualDebit,
-		newRemaining:      newRemaining,
-		newStatus:         newStatus,
-		overflowEntry:     overflowEntry,
-		recordedTimestamp: recorded.GetTimestamp(),
+		authorizationID:    authorizationID,
+		deviceID:           deviceID,
+		actualDebit:        actualDebit,
+		newRemaining:       newRemaining,
+		newStatus:          newStatus,
+		overflowEntry:      overflowEntry,
+		debitLatencyAnchor: anchor,
 	}, nil
 }
 
@@ -299,7 +304,7 @@ func (esh *EastWestStreamHandler) publishConsumptionResult(ctx context.Context, 
 		}
 	}
 
-	if ts := result.recordedTimestamp; ts != "" {
+	if ts := result.debitLatencyAnchor; ts != "" {
 		parseTimestamp := func(s string) (time.Time, error) {
 			if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
 				return t, nil

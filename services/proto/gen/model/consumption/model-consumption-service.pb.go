@@ -70,12 +70,14 @@ func (ConsumptionEventType) EnumDescriptor() ([]byte, []int) {
 
 // event.consumption: emitted after pricing a usage record.
 type DeviceConsumptionRecordedEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeviceId      string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
-	DebitMsat     int64                  `protobuf:"varint,2,opt,name=debit_msat,json=debitMsat,proto3" json:"debit_msat,omitempty"` // amount to debit from the authorization
-	Timestamp     string                 `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                   // ISO-8601 timestamp (when the usage was priced and recorded)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	DeviceId  string                 `protobuf:"bytes,1,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
+	DebitMsat int64                  `protobuf:"varint,2,opt,name=debit_msat,json=debitMsat,proto3" json:"debit_msat,omitempty"` // amount to debit from the authorization
+	Timestamp string                 `protobuf:"bytes,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                   // ISO-8601 device-reported usage time (from UsageRecord.timestamp)
+	// When the device service received the usage on MQTT (RFC3339); ledger uses this for debit latency.
+	DebitLatencyAnchor string `protobuf:"bytes,4,opt,name=debit_latency_anchor,json=debitLatencyAnchor,proto3" json:"debit_latency_anchor,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *DeviceConsumptionRecordedEvent) Reset() {
@@ -125,6 +127,13 @@ func (x *DeviceConsumptionRecordedEvent) GetDebitMsat() int64 {
 func (x *DeviceConsumptionRecordedEvent) GetTimestamp() string {
 	if x != nil {
 		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *DeviceConsumptionRecordedEvent) GetDebitLatencyAnchor() string {
+	if x != nil {
+		return x.DebitLatencyAnchor
 	}
 	return ""
 }
@@ -207,12 +216,13 @@ var File_model_model_consumption_service_proto protoreflect.FileDescriptor
 
 const file_model_model_consumption_service_proto_rawDesc = "" +
 	"\n" +
-	"%model/model-consumption-service.proto\x12\x16lina.model.consumption\"z\n" +
+	"%model/model-consumption-service.proto\x12\x16lina.model.consumption\"\xac\x01\n" +
 	"\x1eDeviceConsumptionRecordedEvent\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1d\n" +
 	"\n" +
 	"debit_msat\x18\x02 \x01(\x03R\tdebitMsat\x12\x1c\n" +
-	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\"\xd9\x01\n" +
+	"\ttimestamp\x18\x03 \x01(\tR\ttimestamp\x120\n" +
+	"\x14debit_latency_anchor\x18\x04 \x01(\tR\x12debitLatencyAnchor\"\xd9\x01\n" +
 	"\x10ConsumptionEvent\x12@\n" +
 	"\x04type\x18\x01 \x01(\x0e2,.lina.model.consumption.ConsumptionEventTypeR\x04type\x12x\n" +
 	"\x1bdevice_consumption_recorded\x18\x02 \x01(\v26.lina.model.consumption.DeviceConsumptionRecordedEventH\x00R\x19deviceConsumptionRecordedB\t\n" +

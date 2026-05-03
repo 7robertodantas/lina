@@ -12,7 +12,7 @@ type OutboxEvent struct {
 	ReportID     string
 	DeviceID     string
 	DebitMsat    int64
-	Timestamp    string
+	Timestamp    string // device-reported usage time
 	CreatedAt    int64
 	TraceContext map[string]string
 }

@@ -40,7 +40,7 @@ func convertReportingStrategy(strategy mqttpb.ReportingStrategy) devicepb.UsageR
 
 // PublishDeviceUsageReportedEvent publishes a DeviceEvent containing DeviceUsageReportedEvent to the Redis stream
 // It fetches device config from the repository to append price_per_unit_msat
-func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.Context, payload *mqttpb.UsagePayload, repo *DeviceRepository) error {
+func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.Context, payload *mqttpb.UsagePayload, repo *DeviceRepository, serverReceivedAt string) error {
 	// Fetch device config to get price_per_unit
 	device, err := repo.GetDevice(ctx, payload.GetDeviceId())
 	if err != nil {
@@ -50,7 +50,6 @@ func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.
 	// Use unit_price_msat directly (already in msat)
 	pricePerUnitMsat := device.UnitPriceMsat
 
-	// Convert MQTT UsagePayload to device UsageRecord
 	usageRecord := &devicepb.UsageRecord{
 		DeviceId:         payload.GetDeviceId(),
 		ReportId:         payload.GetReportId(),
@@ -59,6 +58,7 @@ func (esp *EastWestStreamPublisher) PublishDeviceUsageReportedEvent(ctx context.
 		Unit:             payload.GetUnit(),
 		Timestamp:        payload.GetTimestamp(),
 		PricePerUnitMsat: pricePerUnitMsat,
+		ServerReceivedAt: serverReceivedAt,
 	}
 
 	// Create the DeviceUsageReportedEvent

@@ -33,14 +33,15 @@ func (esp *EastWestStreamPublisher) GetOutboxTrigger() chan string {
 	return esp.outboxTrigger
 }
 
-// PublishConsumptionEvent publishes a DeviceConsumptionRecorded event to event.consumption stream
-// timestamp is the original device/MQTT timestamp from when the usage was reported (for end-to-end latency measurement)
-func (esp *EastWestStreamPublisher) PublishConsumptionEvent(ctx context.Context, reportID, deviceID string, debitMsat int64, timestamp string) error {
-	// Create DeviceConsumptionRecordedEvent
+// PublishConsumptionEvent publishes a DeviceConsumptionRecorded event to event.consumption stream.
+// deviceTimestamp is the device-reported usage time; debitLatencyAnchor is when the device service
+// received the usage on MQTT (RFC3339), used by the ledger for debit latency metrics.
+func (esp *EastWestStreamPublisher) PublishConsumptionEvent(ctx context.Context, reportID, deviceID string, debitMsat int64, deviceTimestamp, debitLatencyAnchor string) error {
 	event := &consumptionpb.DeviceConsumptionRecordedEvent{
-		DeviceId:  deviceID,
-		DebitMsat: debitMsat,
-		Timestamp: timestamp,
+		DeviceId:           deviceID,
+		DebitMsat:          debitMsat,
+		Timestamp:          deviceTimestamp,
+		DebitLatencyAnchor: debitLatencyAnchor,
 	}
 
 	// Wrap in ConsumptionEvent envelope
@@ -138,15 +139,14 @@ func (esp *EastWestStreamPublisher) publishOutboxEvents(ctx context.Context) err
 			publishCtx = ctx
 		}
 
-		// Use the original device/MQTT timestamp so latency is measured from when the device
-		// reported usage, not from when the consumption service created the record.
-		// Fall back to created_at only if the stored timestamp is missing.
-		timestamp := e.Timestamp
-		if timestamp == "" {
-			timestamp = time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339Nano)
+		deviceTS := e.Timestamp
+		if deviceTS == "" {
+			deviceTS = time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339Nano)
 		}
+		// Outbox retry: original MQTT receive time was not persisted; use record created_at (server) as latency start.
+		debitAnchor := time.Unix(e.CreatedAt, 0).UTC().Format(time.RFC3339Nano)
 
-		if err := esp.PublishConsumptionEvent(publishCtx, e.ReportID, e.DeviceID, e.DebitMsat, timestamp); err != nil {
+		if err := esp.PublishConsumptionEvent(publishCtx, e.ReportID, e.DeviceID, e.DebitMsat, deviceTS, debitAnchor); err != nil {
 			logger.WithDeviceID(e.DeviceID).
 				WithStream(internal.StreamConsumption, "produce").
 				Errorf(ctx, "Failed to publish event for report %s: %v", e.ReportID, err)

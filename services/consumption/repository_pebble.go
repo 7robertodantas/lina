@@ -17,10 +17,10 @@ import (
 
 // Key prefixes (Pebble lexicographic order). device_id and report_id must not contain '/'.
 const (
-	keyPrefixConsumptionRecord      = "consumption/record/"
-	keyPrefixConsumptionByDevice    = "consumption/by_device/"
-	keyPrefixOutboxRecord           = "outbox/record/"
-	keyPrefixOutboxUnpublished      = "outbox/unpublished/"
+	keyPrefixConsumptionRecord   = "consumption/record/"
+	keyPrefixConsumptionByDevice = "consumption/by_device/"
+	keyPrefixOutboxRecord        = "outbox/record/"
+	keyPrefixOutboxUnpublished   = "outbox/unpublished/"
 )
 
 // consumptionRepoPebble is the Pebble implementation of ConsumptionRepository.
@@ -89,7 +89,6 @@ func prefixUpperBound(prefix []byte) []byte {
 	}
 	return nil
 }
-
 
 // CreateConsumptionRecord inserts a consumption row and optional outbox entry in one atomic batch.
 // Idempotency: duplicate report_id is a no-op (inserted=false). Outbox row is created only when

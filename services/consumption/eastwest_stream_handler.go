@@ -81,7 +81,20 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 	si := reportStripeIndex(reportID)
 	esh.reportLocks[si].Lock()
 	defer esh.reportLocks[si].Unlock()
-	inserted, err := esh.repository.CreateConsumptionRecord(ctx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), usage.GetTimestamp(), carrier)
+	deviceTS := usage.GetTimestamp()
+	if deviceTS == "" {
+		deviceTS = time.Now().UTC().Format(time.RFC3339Nano)
+		logger.WithDeviceID(deviceID).
+			Warn(ctx, "Missing timestamp in usage record, using current time as fallback")
+	}
+	debitAnchor := usage.GetServerReceivedAt()
+	if debitAnchor == "" {
+		debitAnchor = time.Now().UTC().Format(time.RFC3339Nano)
+		logger.WithDeviceID(deviceID).
+			Warn(ctx, "Missing server_received_at on usage record (older device service); using consumption receive time for debit latency anchor")
+	}
+
+	inserted, err := esh.repository.CreateConsumptionRecord(ctx, reportID, deviceID, debitMsat, fractionalMsat, measure, pricePerUnitMsat, usage.GetUnit(), deviceTS, carrier)
 	if err != nil {
 		return err
 	}
@@ -102,10 +115,6 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 		})
 
 	// Publish consumption event
-	// Use explicit timestamp semantics:
-	// - timestamp: original device/MQTT timestamp from UsageRecord
-	// - report_timestamp: when the DeviceUsageReportedEvent was emitted (if available)
-	// - record_timestamp: now, when the usage is priced/recorded
 	// Extract parent context from stored trace context
 	publishCtx := ctx
 	if len(carrier) > 0 {
@@ -121,17 +130,7 @@ func (esh *EastWestStreamHandler) HandleUsageReported(ctx context.Context, usage
 			"rounded_up_by": debitMsat - int64(usageDebitMsat),
 		})
 
-	// Use the original device/MQTT timestamp from the usage record for accurate end-to-end latency measurement
-	// This measures from when the device originally reported usage to when it's debited in the ledger
-	timestamp := usage.GetTimestamp()
-	if timestamp == "" {
-		// Fallback to current time if timestamp is missing (shouldn't happen in normal operation)
-		timestamp = time.Now().UTC().Format(time.RFC3339Nano)
-		logger.WithDeviceID(deviceID).
-			Warn(ctx, "Missing timestamp in usage record, using current time as fallback")
-	}
-
-	if err := esh.publisher.PublishConsumptionEvent(publishCtx, reportID, deviceID, debitMsat, timestamp); err != nil {
+	if err := esh.publisher.PublishConsumptionEvent(publishCtx, reportID, deviceID, debitMsat, deviceTS, debitAnchor); err != nil {
 		logger.WithDeviceID(deviceID).
 			Warnf(ctx, "Failed to publish immediately, triggering outbox retry: %v", err)
 		// Non-blocking send to trigger outbox processing

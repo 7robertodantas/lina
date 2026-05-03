@@ -102,7 +102,7 @@ const TEARDOWN_DRAIN_SECONDS = (() => {
 const LEVEL_VUS = 50;
 const WARMUP = '60s';
 const MEASURE = '120s';
-const IDLE = '60s';
+const IDLE = '15s';
 const TEARDOWN = '60s'
 
 // Define load test stages

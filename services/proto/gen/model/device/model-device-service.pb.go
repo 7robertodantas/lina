@@ -131,6 +131,8 @@ type UsageRecord struct {
 	Unit             string                 `protobuf:"bytes,5,opt,name=unit,proto3" json:"unit,omitempty"`                                                      // e.g., "kWh"
 	Timestamp        string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`                                            // ISO-8601 timestamp (device/MQTT)
 	PricePerUnitMsat int64                  `protobuf:"varint,7,opt,name=price_per_unit_msat,json=pricePerUnitMsat,proto3" json:"price_per_unit_msat,omitempty"` // price per unit in millisatoshis (added by device service)
+	// When the device service received this usage on southbound MQTT (device-service clock; for debit latency).
+	ServerReceivedAt string `protobuf:"bytes,8,opt,name=server_received_at,json=serverReceivedAt,proto3" json:"server_received_at,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -212,6 +214,13 @@ func (x *UsageRecord) GetPricePerUnitMsat() int64 {
 		return x.PricePerUnitMsat
 	}
 	return 0
+}
+
+func (x *UsageRecord) GetServerReceivedAt() string {
+	if x != nil {
+		return x.ServerReceivedAt
+	}
+	return ""
 }
 
 // event.device: emitted when a device usage report is received.
@@ -337,7 +346,7 @@ var File_model_model_device_service_proto protoreflect.FileDescriptor
 
 const file_model_model_device_service_proto_rawDesc = "" +
 	"\n" +
-	" model/model-device-service.proto\x12\x11lina.model.device\"\x89\x02\n" +
+	" model/model-device-service.proto\x12\x11lina.model.device\"\xb7\x02\n" +
 	"\vUsageRecord\x12\x1b\n" +
 	"\tdevice_id\x18\x01 \x01(\tR\bdeviceId\x12\x1b\n" +
 	"\treport_id\x18\x02 \x01(\tR\breportId\x12E\n" +
@@ -345,7 +354,8 @@ const file_model_model_device_service_proto_rawDesc = "" +
 	"\ameasure\x18\x04 \x01(\x01R\ameasure\x12\x12\n" +
 	"\x04unit\x18\x05 \x01(\tR\x04unit\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12-\n" +
-	"\x13price_per_unit_msat\x18\a \x01(\x03R\x10pricePerUnitMsat\"P\n" +
+	"\x13price_per_unit_msat\x18\a \x01(\x03R\x10pricePerUnitMsat\x12,\n" +
+	"\x12server_received_at\x18\b \x01(\tR\x10serverReceivedAt\"P\n" +
 	"\x18DeviceUsageReportedEvent\x124\n" +
 	"\x05usage\x18\x01 \x01(\v2\x1e.lina.model.device.UsageRecordR\x05usage\"\xa6\x01\n" +
 	"\vDeviceEvent\x126\n" +
