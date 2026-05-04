@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -128,17 +127,11 @@ func (r *consumptionRepoPebble) CreateConsumptionRecord(ctx context.Context, rep
 		Timestamp:        timestamp,
 		CreatedAt:        now,
 	}
-	payload, err := json.Marshal(rec)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return false, fmt.Errorf("marshal consumption: %w", err)
-	}
 
 	batch := r.db.NewBatch()
 	defer batch.Close()
 
-	if err := batch.Set(crKey, payload, nil); err != nil {
+	if err := batch.Set(crKey, rec.marshalBinary(), nil); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return false, fmt.Errorf("batch set consumption: %w", err)
@@ -161,13 +154,7 @@ func (r *consumptionRepoPebble) CreateConsumptionRecord(ctx context.Context, rep
 			Traceparent: traceparent,
 			CreatedAt:   now,
 		}
-		obBytes, err := json.Marshal(ob)
-		if err != nil {
-			span.RecordError(err)
-			span.SetStatus(codes.Error, err.Error())
-			return false, fmt.Errorf("marshal outbox: %w", err)
-		}
-		if err := batch.Set(keyOutboxRecord(reportID), obBytes, nil); err != nil {
+		if err := batch.Set(keyOutboxRecord(reportID), ob.marshalBinary(), nil); err != nil {
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
 			return false, fmt.Errorf("batch set outbox: %w", err)
@@ -226,7 +213,7 @@ func (r *consumptionRepoPebble) GetUnpublishedOutboxEvents(ctx context.Context, 
 			return nil, fmt.Errorf("get consumption for outbox: %w", err)
 		}
 		var sc storedConsumption
-		if err := json.Unmarshal(crVal, &sc); err != nil {
+		if err := sc.unmarshalBinary(crVal); err != nil {
 			closer.Close()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
@@ -244,7 +231,7 @@ func (r *consumptionRepoPebble) GetUnpublishedOutboxEvents(ctx context.Context, 
 			return nil, fmt.Errorf("get outbox: %w", err)
 		}
 		var so storedOutbox
-		if err := json.Unmarshal(obVal, &so); err != nil {
+		if err := so.unmarshalBinary(obVal); err != nil {
 			closer.Close()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
@@ -307,7 +294,7 @@ func (r *consumptionRepoPebble) MarkOutboxAsPublished(ctx context.Context, repor
 		return fmt.Errorf("get outbox: %w", err)
 	}
 	var so storedOutbox
-	if err := json.Unmarshal(val, &so); err != nil {
+	if err := so.unmarshalBinary(val); err != nil {
 		closer.Close()
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -327,13 +314,7 @@ func (r *consumptionRepoPebble) MarkOutboxAsPublished(ctx context.Context, repor
 	}
 	so.Published = true
 	so.PublishedAt = time.Now().Unix()
-	obBytes, err := json.Marshal(so)
-	if err != nil {
-		span.RecordError(err)
-		span.SetStatus(codes.Error, err.Error())
-		return fmt.Errorf("marshal outbox: %w", err)
-	}
-	if err := batch.Set(obKey, obBytes, nil); err != nil {
+	if err := batch.Set(obKey, so.marshalBinary(), nil); err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return fmt.Errorf("set outbox: %w", err)
@@ -377,7 +358,7 @@ func (r *consumptionRepoPebble) CleanupOutbox(ctx context.Context, retentionDays
 	for iter.First(); iter.Valid(); iter.Next() {
 		val := iter.Value()
 		var so storedOutbox
-		if err := json.Unmarshal(val, &so); err != nil {
+		if err := so.unmarshalBinary(val); err != nil {
 			batch.Close()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
@@ -460,7 +441,7 @@ func (r *consumptionRepoPebble) ListDeviceConsumptions(ctx context.Context, devi
 			return nil, fmt.Errorf("get consumption: %w", err)
 		}
 		var sc storedConsumption
-		if err := json.Unmarshal(crVal, &sc); err != nil {
+		if err := sc.unmarshalBinary(crVal); err != nil {
 			closer.Close()
 			span.RecordError(err)
 			span.SetStatus(codes.Error, err.Error())
@@ -483,7 +464,7 @@ func (r *consumptionRepoPebble) ListDeviceConsumptions(ctx context.Context, devi
 		obVal, closer, err := r.db.Get(keyOutboxRecord(reportID))
 		if err == nil {
 			var so storedOutbox
-			if err := json.Unmarshal(obVal, &so); err != nil {
+			if err := so.unmarshalBinary(obVal); err != nil {
 				closer.Close()
 				span.RecordError(err)
 				span.SetStatus(codes.Error, err.Error())

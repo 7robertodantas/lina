@@ -34,6 +34,7 @@ const (
 	keyPrefixAuthRecord       = "auth/record/"
 	keyPrefixAuthByRequest    = "auth/by_request/"
 	keyPrefixAuthByDevice     = "auth/by_device/"
+	keyPrefixAuthActiveByDev  = "auth/active_by_device/"
 )
 
 // ledgerRepoPebble is the Pebble implementation of LedgerRepository.
@@ -177,6 +178,10 @@ func keyAuthByDevice(deviceID string, createdAt int64, authID string) []byte {
 	return []byte(fmt.Sprintf("%s%s/%016x/%s", keyPrefixAuthByDevice, deviceID, inv, authID))
 }
 
+func keyAuthActiveByDevice(deviceID string) []byte {
+	return []byte(keyPrefixAuthActiveByDev + deviceID)
+}
+
 func prefixUpperBound(prefix []byte) []byte {
 	end := make([]byte, len(prefix))
 	copy(end, prefix)
@@ -222,11 +227,7 @@ func (r *ledgerRepoPebble) EnsureBalanceRow(ctx context.Context, tx LedgerTx, de
 		return err
 	}
 	b := storedBalance{BalanceMsat: 0, UpdatedAt: now()}
-	payload, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
-	return r.setRaw(pt, k, payload)
+	return r.setRaw(pt, k, b.marshalBinary())
 }
 
 // GetBalance retrieves the balance for a device.
@@ -246,7 +247,7 @@ func (r *ledgerRepoPebble) GetBalance(ctx context.Context, tx LedgerTx, deviceID
 	}
 	defer closer.Close()
 	var b storedBalance
-	if err := json.Unmarshal(val, &b); err != nil {
+	if err := b.unmarshalBinary(val); err != nil {
 		return 0, err
 	}
 	return b.BalanceMsat, nil
@@ -263,27 +264,19 @@ func (r *ledgerRepoPebble) UpdateBalance(ctx context.Context, tx LedgerTx, devic
 	val, closer, err := r.getRaw(pt, k)
 	if errors.Is(err, pebble.ErrNotFound) {
 		b := storedBalance{BalanceMsat: amountMsat, UpdatedAt: now()}
-		payload, e := json.Marshal(b)
-		if e != nil {
-			return e
-		}
-		return r.setRaw(pt, k, payload)
+		return r.setRaw(pt, k, b.marshalBinary())
 	}
 	if err != nil {
 		return err
 	}
 	defer closer.Close()
 	var b storedBalance
-	if err := json.Unmarshal(val, &b); err != nil {
+	if err := b.unmarshalBinary(val); err != nil {
 		return err
 	}
 	b.BalanceMsat += amountMsat
 	b.UpdatedAt = now()
-	payload, err := json.Marshal(b)
-	if err != nil {
-		return err
-	}
-	return r.setRaw(pt, k, payload)
+	return r.setRaw(pt, k, b.marshalBinary())
 }
 
 /*
@@ -304,11 +297,7 @@ func (r *ledgerRepoPebble) CreateLedgerEntry(ctx context.Context, tx LedgerTx, e
 		AmountMsat: entry.AmountMsat, BalanceAfter: entry.BalanceAfter, Reason: entry.Reason,
 		CorrelationID: entry.CorrelationID, CreatedAt: entry.CreatedAt,
 	}
-	payload, err := json.Marshal(st)
-	if err != nil {
-		return err
-	}
-	if err := r.setRaw(pt, keyLedgerEntry(entry.EntryID), payload); err != nil {
+	if err := r.setRaw(pt, keyLedgerEntry(entry.EntryID), st.marshalBinary()); err != nil {
 		return err
 	}
 	idx := keyLedgerByDevice(entry.DeviceID, entry.CreatedAt, entry.EntryID)
@@ -356,7 +345,7 @@ func (r *ledgerRepoPebble) ListLedgerEntries(ctx context.Context, deviceID strin
 			return nil, err
 		}
 		var st storedLedgerEntry
-		if err := json.Unmarshal(val, &st); err != nil {
+		if err := st.unmarshalBinary(val); err != nil {
 			closer.Close()
 			continue
 		}
@@ -465,7 +454,7 @@ func (r *ledgerRepoPebble) GetCachedIdem(ctx context.Context, key string) (kind 
 	}
 	defer closer.Close()
 	var st storedIdem
-	if err := json.Unmarshal(val, &st); err != nil {
+	if err := st.unmarshalBinary(val); err != nil {
 		return "", nil, false, err
 	}
 	return st.Kind, []byte(st.ResponseJSON), true, nil
@@ -478,15 +467,13 @@ func (r *ledgerRepoPebble) SaveIdem(ctx context.Context, tx LedgerTx, key, kind,
 	if err != nil {
 		return err
 	}
+	// ResponseJSON stays as JSON: callers fetch this opaque blob via GetCachedIdem and pass it
+	// straight back as an HTTP response body (already JSON-shaped).
 	js, _ := json.Marshal(response)
 	st := storedIdem{
 		Kind: kind, RequestHash: reqHash, ResponseJSON: string(js), CreatedAt: now(),
 	}
-	payload, err := json.Marshal(st)
-	if err != nil {
-		return err
-	}
-	return r.setRaw(pt, keyIdem(key), payload)
+	return r.setRaw(pt, keyIdem(key), st.marshalBinary())
 }
 
 /*
@@ -494,6 +481,41 @@ func (r *ledgerRepoPebble) SaveIdem(ctx context.Context, tx LedgerTx, key, kind,
    Authorization operations
    =========================================
 */
+
+// loadActiveAuthPointer returns the authID currently marked as the device's active authorization.
+// Pointer absence is not an error — returns ok=false.
+func (r *ledgerRepoPebble) loadActiveAuthPointer(tx *pebbleLedgerTx, deviceID string) (string, bool, error) {
+	val, closer, err := r.getRaw(tx, keyAuthActiveByDevice(deviceID))
+	if errors.Is(err, pebble.ErrNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	defer closer.Close()
+	return string(val), true, nil
+}
+
+// setActiveAuthPointer writes the device → authID active-auth pointer (overwrites any prior value).
+func (r *ledgerRepoPebble) setActiveAuthPointer(tx *pebbleLedgerTx, deviceID, authID string) error {
+	return r.setRaw(tx, keyAuthActiveByDevice(deviceID), []byte(authID))
+}
+
+// clearActiveAuthPointerIfMatches deletes the pointer only when it currently points to expectedAuthID.
+// This guards against deleting a pointer that has already been overwritten by a newer authorization.
+func (r *ledgerRepoPebble) clearActiveAuthPointerIfMatches(tx *pebbleLedgerTx, deviceID, expectedAuthID string) error {
+	cur, ok, err := r.loadActiveAuthPointer(tx, deviceID)
+	if err != nil {
+		return err
+	}
+	if !ok || cur != expectedAuthID {
+		return nil
+	}
+	if tx == nil || tx.batch == nil {
+		return errors.New("ledger: clear pointer requires a write transaction")
+	}
+	return tx.batch.Delete(keyAuthActiveByDevice(deviceID), nil)
+}
 
 func (r *ledgerRepoPebble) loadAuthorization(ctx context.Context, tx *pebbleLedgerTx, authorizationID string) (*storedAuthorization, error) {
 	_ = ctx
@@ -507,18 +529,14 @@ func (r *ledgerRepoPebble) loadAuthorization(ctx context.Context, tx *pebbleLedg
 	}
 	defer closer.Close()
 	var st storedAuthorization
-	if err := json.Unmarshal(val, &st); err != nil {
+	if err := st.unmarshalBinary(val); err != nil {
 		return nil, err
 	}
 	return &st, nil
 }
 
 func (r *ledgerRepoPebble) putAuthorization(tx *pebbleLedgerTx, st *storedAuthorization) error {
-	payload, err := json.Marshal(st)
-	if err != nil {
-		return err
-	}
-	return r.setRaw(tx, keyAuthRecord(st.AuthorizationID), payload)
+	return r.setRaw(tx, keyAuthRecord(st.AuthorizationID), st.marshalBinary())
 }
 
 // CreateAuthorization creates a new authorization.
@@ -549,7 +567,10 @@ func (r *ledgerRepoPebble) CreateAuthorization(ctx context.Context, tx LedgerTx,
 		return err
 	}
 	idx := keyAuthByDevice(deviceID, createdAt, authID)
-	return r.setRaw(pt, idx, []byte{1})
+	if err := r.setRaw(pt, idx, []byte{1}); err != nil {
+		return err
+	}
+	return r.setActiveAuthPointer(pt, deviceID, authID)
 }
 
 // GetAuthorizationByRequestID retrieves an authorization by request_id (latest).
@@ -594,6 +615,16 @@ func (r *ledgerRepoPebble) GetActiveAuthorization(ctx context.Context, tx Ledger
 
 func (r *ledgerRepoPebble) findActiveAuthorization(ctx context.Context, tx *pebbleLedgerTx, deviceID string, expiresAfter string) (*storedAuthorization, error) {
 	_ = ctx
+	// Fast path: follow the active-auth pointer (O(1) Get + decode).
+	if authID, ok, err := r.loadActiveAuthPointer(tx, deviceID); err == nil && ok {
+		if st, lerr := r.loadAuthorization(ctx, tx, authID); lerr == nil &&
+			st.Status == "active" && st.ExpiresAt > expiresAfter {
+			return st, nil
+		}
+		// Pointer present but stale (auth completed/expired since last write); fall through to scan + repair.
+	}
+
+	// Slow path: linear scan over auth/by_device — used when no pointer exists or the cached one is stale.
 	prefix := []byte(fmt.Sprintf("%s%s/", keyPrefixAuthByDevice, deviceID))
 	iter, err := r.iterForTx(tx, prefix)
 	if err != nil {
@@ -613,6 +644,10 @@ func (r *ledgerRepoPebble) findActiveAuthorization(ctx context.Context, tx *pebb
 			continue
 		}
 		if st.Status == "active" && st.ExpiresAt > expiresAfter {
+			// Self-heal: repair the pointer when we have a write batch to amortise future lookups.
+			if tx != nil && tx.batch != nil {
+				_ = r.setActiveAuthPointer(tx, deviceID, st.AuthorizationID)
+			}
 			return st, nil
 		}
 	}
@@ -716,6 +751,11 @@ func (r *ledgerRepoPebble) ConsumeAuthorization(ctx context.Context, tx LedgerTx
 	if err := r.putAuthorization(pt, st); err != nil {
 		return 0, 0, 0, "", err
 	}
+	if newStatus != "active" {
+		if err := r.clearActiveAuthPointerIfMatches(pt, st.DeviceID, authorizationID); err != nil {
+			return 0, 0, 0, "", err
+		}
+	}
 	return newRemaining, newConsumed, newOverflow, newStatus, nil
 }
 
@@ -735,7 +775,7 @@ func (r *ledgerRepoPebble) GetExpiredAuthorizations(ctx context.Context, expires
 	for iter.First(); iter.Valid(); iter.Next() {
 		val := iter.Value()
 		var st storedAuthorization
-		if err := json.Unmarshal(val, &st); err != nil {
+		if err := st.unmarshalBinary(val); err != nil {
 			continue
 		}
 		if st.Status == "active" && st.ExpiresAt < expiresBefore {
@@ -778,7 +818,10 @@ func (r *ledgerRepoPebble) MarkAuthorizationExpired(ctx context.Context, tx Ledg
 	st.Status = "expired"
 	st.RemainingMsat = 0
 	_ = ctx
-	return r.putAuthorization(pt, st)
+	if err := r.putAuthorization(pt, st); err != nil {
+		return err
+	}
+	return r.clearActiveAuthPointerIfMatches(pt, st.DeviceID, authorizationID)
 }
 
 // ListAuthorizations retrieves authorizations for a device with optional status filter.
@@ -806,7 +849,7 @@ func (r *ledgerRepoPebble) ListAuthorizations(ctx context.Context, deviceID stri
 			continue
 		}
 		var st storedAuthorization
-		if err := json.Unmarshal(val, &st); err != nil {
+		if err := st.unmarshalBinary(val); err != nil {
 			closer.Close()
 			continue
 		}
