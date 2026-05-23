@@ -299,6 +299,25 @@ def merge_intervals(intervals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return merged
 
 
+def align_teardown_transition_segments(intervals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    aligned = []
+    for index, interval in enumerate(intervals):
+        adjusted = dict(interval)
+        next_interval = intervals[index + 1] if index + 1 < len(intervals) else None
+
+        # The plotted VU line connects samples, so the segment ending at the
+        # first teardown sample is the visible ramp-down segment.
+        if next_interval and adjusted['phase'] not in {'idle', 'teardown'} and next_interval['phase'] == 'teardown':
+            adjusted['phase'] = 'teardown'
+
+        if adjusted['phase'] == 'teardown':
+            adjusted['level_vus'] = 0
+
+        aligned.append(adjusted)
+
+    return aligned
+
+
 def build_marker_intervals(input_dir: Path, initial_time: pd.Timestamp, max_elapsed: float) -> List[Dict[str, Any]]:
     phase = load_single_series(input_dir, 'Load Test Phase')
     level = load_single_series(input_dir, 'Load Test Level VUs')
@@ -337,7 +356,9 @@ def build_marker_intervals(input_dir: Path, initial_time: pd.Timestamp, max_elap
         end = float(elapsed_values[index + 1]) if index + 1 < len(elapsed_values) else max_elapsed
         phase_code = int(round(row.get('phase_code', -1)))
         phase_name = PHASE_BY_CODE.get(phase_code, 'unknown')
-        if row.get('measurement_active', 0) >= 0.5:
+        # The measurement gauge is exported through a range query and can lag by
+        # one step, so only use it as a fallback when phase_code is unavailable.
+        if phase_name == 'unknown' and row.get('measurement_active', 0) >= 0.5:
             phase_name = 'measure'
         intervals.append({
             'start': start,
@@ -347,7 +368,7 @@ def build_marker_intervals(input_dir: Path, initial_time: pd.Timestamp, max_elap
             'source': 'marker',
         })
 
-    return merge_intervals(intervals)
+    return merge_intervals(align_teardown_transition_segments(intervals))
 
 
 def build_schedule_intervals(
