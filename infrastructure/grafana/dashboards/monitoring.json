@@ -125,7 +125,7 @@
         {
           "editorMode": "code",
           "expr": "100 * (1 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\",instance=~\"$instance\"}[2m])))",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "Node CPU",
           "range": true,
           "refId": "A"
         }
@@ -220,7 +220,7 @@
         {
           "editorMode": "code",
           "expr": "100 * (1 - (node_memory_MemAvailable_bytes{instance=~\"$instance\"} / node_memory_MemTotal_bytes{instance=~\"$instance\"}))",
-          "legendFormat": "{{instance}}",
+          "legendFormat": "Node memory",
           "range": true,
           "refId": "A"
         }
@@ -315,14 +315,14 @@
         {
           "editorMode": "code",
           "expr": "sum by (instance) (rate(node_disk_read_bytes_total{instance=~\"$instance\",device!~\"loop.*|ram.*\"}[1m]))",
-          "legendFormat": "read",
+          "legendFormat": "Read",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
           "expr": "sum by (instance) (rate(node_disk_written_bytes_total{instance=~\"$instance\",device!~\"loop.*|ram.*\"}[1m]))",
-          "legendFormat": "write",
+          "legendFormat": "Write",
           "range": true,
           "refId": "B"
         }
@@ -417,7 +417,7 @@
         {
           "editorMode": "code",
           "expr": "100 * (1 - (node_filesystem_avail_bytes{instance=~\"$instance\",fstype!~\"tmpfs|devtmpfs|overlay|squashfs\",mountpoint!~\"/run.*|/sys.*|/proc.*\"} / node_filesystem_size_bytes{instance=~\"$instance\",fstype!~\"tmpfs|devtmpfs|overlay|squashfs\",mountpoint!~\"/run.*|/sys.*|/proc.*\"}))",
-          "legendFormat": "{{instance}} {{mountpoint}}",
+          "legendFormat": "{{mountpoint}}",
           "range": true,
           "refId": "A"
         }
@@ -512,14 +512,14 @@
         {
           "editorMode": "code",
           "expr": "sum by (instance) (rate(node_network_receive_bytes_total{instance=~\"$instance\",device!~\"lo|docker.*|veth.*|br.*|cni.*\"}[1m]))",
-          "legendFormat": "{{instance}} rx",
+          "legendFormat": "Receive",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
           "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{instance=~\"$instance\",device!~\"lo|docker.*|veth.*|br.*|cni.*\"}[1m]))",
-          "legendFormat": "{{instance}} tx",
+          "legendFormat": "Transmit",
           "range": true,
           "refId": "B"
         }
@@ -614,21 +614,21 @@
         {
           "editorMode": "code",
           "expr": "node_load1{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}} load1",
+          "legendFormat": "1m load",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
           "expr": "node_load5{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}} load5",
+          "legendFormat": "5m load",
           "range": true,
           "refId": "B"
         },
         {
           "editorMode": "code",
           "expr": "node_load15{instance=~\"$instance\"}",
-          "legendFormat": "{{instance}} load15",
+          "legendFormat": "15m load",
           "range": true,
           "refId": "C"
         }
@@ -831,7 +831,7 @@
         {
           "editorMode": "code",
           "expr": "sum(container_memory_working_set_bytes{name!=\"\", name!~\".*_exporter.*\"}) by (name)",
-          "legendFormat": "__auto",
+          "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
         }
@@ -926,7 +926,7 @@
         {
           "editorMode": "code",
           "expr": "sum by (name) (\n  rate(container_fs_writes_bytes_total{name!=\"\", name!~\".*_exporter.*\"}[30s])\n)\n",
-          "legendFormat": "__auto",
+          "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
         }
@@ -1021,7 +1021,7 @@
         {
           "editorMode": "code",
           "expr": "sum by (name) (\n  rate(container_fs_reads_bytes_total{name!=\"\", name!~\".*_exporter.*\"}[30s])\n)\n",
-          "legendFormat": "__auto",
+          "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
         }
@@ -1116,7 +1116,7 @@
         {
           "editorMode": "code",
           "expr": "sum by (name) (\n  rate(container_network_receive_bytes_total{name!=\"\", name!~\".*_exporter.*\"}[30s])\n)\n",
-          "legendFormat": "__auto",
+          "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
         }
@@ -1211,7 +1211,7 @@
         {
           "editorMode": "code",
           "expr": "sum by (name) (\n  rate(container_network_transmit_bytes_total{name!=\"\", name!~\".*_exporter.*\"}[30s])\n)\n",
-          "legendFormat": "__auto",
+          "legendFormat": "{{name}}",
           "range": true,
           "refId": "A"
         }
@@ -1276,7 +1276,7 @@
         {
           "editorMode": "code",
           "expr": "sum(container_memory_working_set_bytes{name!=\"\"})",
-          "legendFormat": "__auto",
+          "legendFormat": "Total memory",
           "range": true,
           "refId": "A"
         }
@@ -1394,7 +1394,7 @@
           "hide": false,
           "instant": false,
           "interval": "15",
-          "legendFormat": "Devices",
+          "legendFormat": "Virtual users",
           "range": true,
           "refId": "A"
         }
@@ -1489,7 +1489,7 @@
         {
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum(rate(ledger_tx_commit_seconds_bucket{outcome=\"ok\"}[1m])) by (le, operation))",
-          "legendFormat": "__auto",
+          "legendFormat": "{{operation}}",
           "range": true,
           "refId": "A"
         }
@@ -1593,7 +1593,7 @@
           "hide": false,
           "instant": false,
           "interval": "15",
-          "legendFormat": "Devices",
+          "legendFormat": "Consumption events",
           "range": true,
           "refId": "A"
         }
@@ -1688,7 +1688,7 @@
         {
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum(rate(ledger_stream_handler_seconds_bucket{outcome=\"ok\"}[1m])) by (le, stream, operation, mode))",
-          "legendFormat": "__auto",
+          "legendFormat": "{{stream}} / {{operation}} / {{mode}}",
           "range": true,
           "refId": "A"
         }
@@ -1783,7 +1783,7 @@
         {
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum(rate(ledger_stream_message_age_seconds_bucket[1m])) by (le, stream, operation, mode))\n",
-          "legendFormat": "__auto",
+          "legendFormat": "{{stream}} / {{operation}} / {{mode}}",
           "range": true,
           "refId": "A"
         }
@@ -1887,7 +1887,7 @@
           "hide": false,
           "instant": false,
           "interval": "15",
-          "legendFormat": "Devices",
+          "legendFormat": "Authorization debits",
           "range": true,
           "refId": "A"
         }
@@ -1982,7 +1982,7 @@
         {
           "editorMode": "code",
           "expr": "histogram_quantile(0.99, sum(rate(ledger_stream_ack_seconds_bucket{outcome=\"ok\"}[1m])) by (le, stream, operation, mode))",
-          "legendFormat": "__auto",
+          "legendFormat": "{{stream}} / {{operation}} / {{mode}}",
           "range": true,
           "refId": "A"
         }
@@ -2083,7 +2083,7 @@
           "hide": false,
           "instant": false,
           "interval": "15",
-          "legendFormat": "Duration",
+          "legendFormat": "p95 duration",
           "range": true,
           "refId": "A"
         }
@@ -2147,7 +2147,7 @@
         {
           "editorMode": "code",
           "expr": "max_over_time(k6_vus[30s])",
-          "legendFormat": "__auto",
+          "legendFormat": "Virtual users",
           "range": true,
           "refId": "A"
         }
@@ -2212,7 +2212,7 @@
         {
           "editorMode": "code",
           "expr": "sum(rate(ledger_debit_latency_seconds_sum[30s]))\n/\nsum(rate(ledger_debit_latency_seconds_count[30s]))",
-          "legendFormat": "__auto",
+          "legendFormat": "Average latency",
           "range": true,
           "refId": "A"
         }
@@ -2407,7 +2407,7 @@
           "hide": false,
           "instant": false,
           "interval": "15",
-          "legendFormat": "__auto",
+          "legendFormat": "{{topic}}",
           "range": true,
           "refId": "A"
         }
@@ -2498,7 +2498,7 @@
         {
           "editorMode": "code",
           "expr": "redis_stream_group_consumer_messages_pending",
-          "legendFormat": "{{stream}}",
+          "legendFormat": "{{group}} / {{consumer}} [{{stream}}]",
           "range": true,
           "refId": "A"
         }
@@ -2602,7 +2602,7 @@
           "hide": false,
           "instant": false,
           "interval": "15",
-          "legendFormat": "__auto",
+          "legendFormat": "{{topic}}",
           "range": true,
           "refId": "A"
         }

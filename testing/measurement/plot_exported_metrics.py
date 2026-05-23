@@ -80,6 +80,24 @@ METADATA_COLUMNS = {
     'elapsed_minutes',
 }
 
+GRAFANA_LABEL_PATTERN = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+LEGEND_LABEL_ALIASES = {
+    'read': 'Read',
+    'write': 'Write',
+    'rx': 'Receive',
+    'tx': 'Transmit',
+}
+PREFERRED_LABEL_KEYS = (
+    'name',
+    'topic',
+    'group',
+    'stream',
+    'operation',
+    'mode',
+    'mountpoint',
+    'device',
+)
+
 sns.set_theme(style='whitegrid')
 
 
@@ -171,6 +189,16 @@ def load_units(input_dir: Path, dashboard_path: str) -> Dict[str, str]:
     return units
 
 
+def load_csv_metadata(input_dir: Path) -> Dict[str, Dict[str, Any]]:
+    metadata = {}
+    manifest = load_manifest(input_dir)
+    for query in manifest.get('queries', []):
+        csv_file = query.get('csv_file')
+        if csv_file:
+            metadata[Path(csv_file).name] = query
+    return metadata
+
+
 def get_unit_label(unit_code: str) -> str:
     return UNIT_LABELS.get(unit_code, unit_code or 'Value')
 
@@ -210,6 +238,21 @@ def read_metric_csv(csv_path: Path) -> Optional[pd.DataFrame]:
         return None
 
     return df.sort_values('datetime_parsed')
+
+
+def legacy_duplicate_base(csv_path: Path) -> str:
+    match = re.match(r'^(?P<base>.+)_(?P<index>[2-9]\d*)$', csv_path.stem)
+    if match and (csv_path.with_name(f"{match.group('base')}.csv")).exists():
+        return match.group('base')
+    return csv_path.stem
+
+
+def collect_metric_csv_groups(input_dir: Path) -> List[tuple[str, List[Path]]]:
+    groups: Dict[str, List[Path]] = {}
+    for csv_path in sorted(path for path in input_dir.glob('*.csv') if path.stem not in MARKER_TITLES):
+        metric_name = legacy_duplicate_base(csv_path)
+        groups.setdefault(metric_name, []).append(csv_path)
+    return sorted(groups.items(), key=lambda item: item[0])
 
 
 def coerce_metric_columns(df: pd.DataFrame) -> List[str]:
@@ -596,45 +639,158 @@ def add_saturation_thresholds(
         )
 
 
+def normalize_legend_label(label: str) -> str:
+    normalized = re.sub(r'\s+', ' ', str(label)).strip()
+    normalized = re.sub(r'\s+([\]\),])', r'\1', normalized)
+    normalized = re.sub(r'([\[\(])\s+', r'\1', normalized)
+    normalized = normalized.replace('[]', '').replace('()', '').strip(' -')
+    return LEGEND_LABEL_ALIASES.get(normalized.lower(), normalized)
+
+
+def parse_prometheus_label_column(column: str) -> Dict[str, str]:
+    labels = {}
+    for part in column.split(','):
+        if '=' not in part:
+            continue
+        key, value = part.split('=', 1)
+        key = key.strip()
+        value = value.strip()
+        if key:
+            labels[key] = value
+    return labels
+
+
+def render_grafana_legend(legend_format: str, labels: Dict[str, str]) -> str:
+    def replace_label(match):
+        label_name = match.group(1).strip()
+        return labels.get(label_name, '')
+
+    rendered = GRAFANA_LABEL_PATTERN.sub(replace_label, legend_format)
+    referenced_labels = {match.strip() for match in GRAFANA_LABEL_PATTERN.findall(legend_format)}
+    if 'instance' in referenced_labels:
+        without_instance = rendered.replace(labels.get('instance', ''), '')
+        without_instance = normalize_legend_label(without_instance)
+        if without_instance:
+            return without_instance
+        return ''
+    return normalize_legend_label(rendered)
+
+
 def clean_series_label(metric_name: str, column: str) -> str:
     if column == 'value':
         return metric_name
-    for key in ('name=', 'instance=', 'topic=', 'stream=', 'group='):
-        if key in column:
-            return column.split(key, 1)[1].split(',', 1)[0].strip()
-    return column
+
+    labels = parse_prometheus_label_column(column)
+    if 'group' in labels and 'stream' in labels:
+        return normalize_legend_label(f"{labels['group']} [{labels['stream']}]")
+
+    for key in PREFERRED_LABEL_KEYS:
+        if labels.get(key):
+            return normalize_legend_label(labels[key])
+
+    if labels:
+        non_instance = [value for key, value in sorted(labels.items()) if key != 'instance']
+        if non_instance:
+            return normalize_legend_label(', '.join(non_instance))
+        return metric_name
+
+    return normalize_legend_label(column)
+
+
+def legend_label_for_column(metric_name: str, column: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+    legend_format = (metadata or {}).get('legend_format', '')
+    labels = parse_prometheus_label_column(column)
+    if legend_format and legend_format != '__auto' and (labels or column == 'value'):
+        rendered = render_grafana_legend(legend_format, labels)
+        if rendered:
+            return rendered
+    return clean_series_label(metric_name, column)
 
 
 def conversion_for_metric(metric_name: str, unit_code: str) -> tuple[float, str]:
     lower_name = metric_name.lower()
     if unit_code in {'bytes', 'decbytes'} and 'memory' in lower_name:
         return 1 / (1024 * 1024), 'MiB'
-    if unit_code in {'Bps', 'binBps'}:
-        return 1 / 1024, 'KiB/s'
+    if unit_code == 'Bps':
+        return 1 / 1_000_000, 'MB/s'
+    if unit_code == 'binBps':
+        return 1 / (1024 * 1024), 'MB/s'
     return 1.0, get_unit_label(unit_code)
 
 
-def plot_csv_file(
-    csv_path: Path,
+def unique_plot_label(label: str, seen: Dict[str, int]) -> str:
+    count = seen.get(label, 0)
+    seen[label] = count + 1
+    if count:
+        return f"{label} ({count + 1})"
+    return label
+
+
+def load_metric_group_frame(
+    csv_paths: List[Path],
+    metric_name: str,
+    csv_metadata: Dict[str, Dict[str, Any]],
+) -> tuple[Optional[pd.DataFrame], List[str]]:
+    combined = None
+    data_cols = []
+    seen_labels = {}
+
+    for csv_path in csv_paths:
+        df = read_metric_csv(csv_path)
+        if df is None:
+            continue
+
+        source_data_cols = coerce_metric_columns(df)
+        if not source_data_cols:
+            continue
+
+        metadata = csv_metadata.get(csv_path.name, {})
+        rename_map = {}
+        for col in source_data_cols:
+            label = legend_label_for_column(metric_name, col, metadata)
+            rename_map[col] = unique_plot_label(label, seen_labels)
+
+        frame_cols = ['datetime_parsed']
+        frame_cols.extend(col for col in ('timestamp', 'datetime', 'elapsed_seconds') if col in df.columns)
+        frame_cols.extend(source_data_cols)
+        frame = df[frame_cols].rename(columns=rename_map).set_index('datetime_parsed')
+        renamed_cols = [rename_map[col] for col in source_data_cols]
+
+        if combined is None:
+            metadata_cols = [col for col in ('timestamp', 'datetime', 'elapsed_seconds') if col in frame.columns]
+            combined = frame[metadata_cols + renamed_cols]
+        else:
+            combined = combined.join(frame[renamed_cols], how='outer')
+
+        data_cols.extend(renamed_cols)
+
+    if combined is None:
+        return None, []
+
+    return combined.reset_index().sort_values('datetime_parsed'), data_cols
+
+
+def plot_metric_csv_group(
+    csv_paths: List[Path],
+    metric_name: str,
     output_dir: Path,
     units_map: Dict[str, str],
+    csv_metadata: Dict[str, Dict[str, Any]],
     initial_time: Optional[pd.Timestamp],
     intervals: List[Dict[str, Any]],
     report_interval_seconds: float,
     resource_threshold_percent: float,
     latency_threshold_seconds: float,
 ) -> bool:
-    metric_name = csv_path.stem
     if metric_name in MARKER_TITLES:
         return False
 
-    print(f"Processing: {csv_path.name}")
-    df = read_metric_csv(csv_path)
+    print(f"Processing: {', '.join(path.name for path in csv_paths)}")
+    df, data_cols = load_metric_group_frame(csv_paths, metric_name, csv_metadata)
     if df is None:
         print("  No valid timestamped data")
         return False
 
-    data_cols = coerce_metric_columns(df)
     if not data_cols:
         print("  No numeric data columns")
         return False
@@ -655,6 +811,8 @@ def plot_csv_file(
         return False
 
     unit_code = units_map.get(metric_name, '')
+    if not unit_code and csv_paths:
+        unit_code = units_map.get(csv_paths[0].stem, '')
     conversion_factor, ylabel = conversion_for_metric(metric_name, unit_code)
     if conversion_factor != 1.0:
         for col in data_cols:
@@ -718,6 +876,30 @@ def plot_csv_file(
     return True
 
 
+def plot_csv_file(
+    csv_path: Path,
+    output_dir: Path,
+    units_map: Dict[str, str],
+    initial_time: Optional[pd.Timestamp],
+    intervals: List[Dict[str, Any]],
+    report_interval_seconds: float,
+    resource_threshold_percent: float,
+    latency_threshold_seconds: float,
+) -> bool:
+    return plot_metric_csv_group(
+        [csv_path],
+        csv_path.stem,
+        output_dir,
+        units_map,
+        {},
+        initial_time,
+        intervals,
+        report_interval_seconds,
+        resource_threshold_percent,
+        latency_threshold_seconds,
+    )
+
+
 def generate_graphs(
     input_dir: str = DEFAULT_INPUT_DIR,
     output_dir: str = DEFAULT_OUTPUT_DIR,
@@ -739,6 +921,7 @@ def generate_graphs(
         return
 
     units_map = load_units(input_path, dashboard_path)
+    csv_metadata = load_csv_metadata(input_path)
     output_path.mkdir(parents=True, exist_ok=True)
 
     initial_time = find_initial_time(input_path)
@@ -757,22 +940,25 @@ def generate_graphs(
             intervals = build_schedule_intervals(max_elapsed, level_vus, level_count, warmup_seconds, measure_seconds)
             print(f"Using configured schedule fallback for {len(intervals)} timeline intervals.")
 
-    csv_files = sorted(path for path in input_path.glob('*.csv') if path.stem not in MARKER_TITLES)
-    if not csv_files:
+    csv_groups = collect_metric_csv_groups(input_path)
+    if not csv_groups:
         print(f"No metric CSV files found in '{input_dir}'")
         return
 
-    print(f"Found {len(csv_files)} plottable CSV files in '{input_dir}'")
+    print(f"Found {sum(len(paths) for _, paths in csv_groups)} plottable CSV files in '{input_dir}'")
+    print(f"Plotting {len(csv_groups)} metric graph(s)")
     print(f"Output directory: '{output_dir}'")
     print()
 
     successful = 0
     failed = 0
-    for csv_file in csv_files:
-        if plot_csv_file(
-            csv_file,
+    for metric_name, csv_paths in csv_groups:
+        if plot_metric_csv_group(
+            csv_paths,
+            metric_name,
             output_path,
             units_map,
+            csv_metadata,
             initial_time,
             intervals,
             report_interval_seconds,

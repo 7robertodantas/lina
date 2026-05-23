@@ -53,6 +53,24 @@ LOADTEST_MARKER_QUERIES = [
     },
 ]
 
+GRAFANA_LABEL_PATTERN = re.compile(r'\{\{\s*([^{}]+?)\s*\}\}')
+LEGEND_LABEL_ALIASES = {
+    'read': 'Read',
+    'write': 'Write',
+    'rx': 'Receive',
+    'tx': 'Transmit',
+}
+PREFERRED_AUTO_LABEL_KEYS = (
+    'name',
+    'topic',
+    'group',
+    'stream',
+    'operation',
+    'mode',
+    'mountpoint',
+    'device',
+)
+
 
 def parse_iso_datetime(iso_string: str) -> float:
     """Convert ISO 8601 datetime string to Unix timestamp."""
@@ -206,48 +224,148 @@ def export_to_json(data: Dict[str, Any], output_path: str):
         json.dump(data, f, indent=2)
 
 
-def export_to_csv(data: Dict[str, Any], output_path: str, start_timestamp: float):
-    """Export Prometheus query result to CSV file."""
-    if data.get('status') != 'success':
-        print(f"Warning: Query failed, skipping CSV export for {output_path}", file=sys.stderr)
-        return False
-    
-    result = data.get('data', {}).get('result', [])
-    if not result:
-        print(f"Warning: No data returned, skipping CSV export for {output_path}", file=sys.stderr)
-        return False
-    
+def normalize_legend_label(label: str) -> str:
+    """Make Grafana/Prometheus legend text report-friendly."""
+    normalized = re.sub(r'\s+', ' ', str(label)).strip()
+    normalized = re.sub(r'\s+([\]\),])', r'\1', normalized)
+    normalized = re.sub(r'([\[\(])\s+', r'\1', normalized)
+    normalized = normalized.replace('[]', '').replace('()', '').strip(' -')
+    return LEGEND_LABEL_ALIASES.get(normalized.lower(), normalized)
+
+
+def render_grafana_legend(legend_format: str, metric_labels: Dict[str, Any]) -> str:
+    def replace_label(match):
+        label_name = match.group(1).strip()
+        return str(metric_labels.get(label_name, ''))
+
+    rendered = GRAFANA_LABEL_PATTERN.sub(replace_label, legend_format)
+    referenced_labels = {match.strip() for match in GRAFANA_LABEL_PATTERN.findall(legend_format)}
+    if 'instance' in referenced_labels:
+        rendered_without_instance = rendered.replace(str(metric_labels.get('instance', '')), '')
+        rendered_without_instance = normalize_legend_label(rendered_without_instance)
+        if rendered_without_instance:
+            return rendered_without_instance
+        return ''
+    return normalize_legend_label(rendered)
+
+
+def auto_series_name(metric_labels: Dict[str, Any], panel_title: str, result_count: int) -> str:
+    if 'group' in metric_labels and 'stream' in metric_labels:
+        return normalize_legend_label(f"{metric_labels['group']} [{metric_labels['stream']}]")
+
+    for key in PREFERRED_AUTO_LABEL_KEYS:
+        value = metric_labels.get(key)
+        if value:
+            return normalize_legend_label(str(value))
+
+    non_instance_labels = {
+        key: value
+        for key, value in metric_labels.items()
+        if key != 'instance' and value not in (None, '')
+    }
+    if non_instance_labels:
+        return normalize_legend_label(', '.join(str(value) for _, value in sorted(non_instance_labels.items())))
+
+    return 'value' if result_count == 1 else panel_title
+
+
+def format_series_name(
+    metric_labels: Dict[str, Any],
+    legend_format: str,
+    panel_title: str,
+    ref_id: str,
+    result_count: int = 1,
+) -> str:
+    """Render a Grafana legendFormat without leaking instance IPs into reports."""
+    if legend_format and legend_format != '__auto':
+        rendered = render_grafana_legend(legend_format, metric_labels)
+        if rendered:
+            return rendered
+
+    automatic = auto_series_name(metric_labels, panel_title, result_count)
+    if automatic != panel_title or not ref_id:
+        return automatic
+    return f"{panel_title} {ref_id}"
+
+
+def unique_series_name(name: str, seen: Dict[str, int]) -> str:
+    count = seen.get(name, 0)
+    seen[name] = count + 1
+    if count:
+        return f"{name} ({count + 1})"
+    return name
+
+
+def group_queries_by_panel(queries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Group dashboard targets so each Grafana panel exports to one file."""
+    groups = []
+    by_key = {}
+
+    for query in queries:
+        key = (query.get('source', 'dashboard'), str(query.get('panel_id', '')), query.get('panel_title', ''))
+        if key not in by_key:
+            by_key[key] = {
+                'panel_title': query.get('panel_title', 'Panel'),
+                'panel_id': query.get('panel_id', ''),
+                'unit': query.get('unit', ''),
+                'source': query.get('source', 'dashboard'),
+                'queries': [],
+            }
+            groups.append(by_key[key])
+        by_key[key]['queries'].append(query)
+
+    return groups
+
+
+def export_panel_to_csv(target_results: List[Dict[str, Any]], output_path: str, start_timestamp: float):
+    """Export all successful target series for one Grafana panel to one CSV file."""
     # Collect all unique timestamps
     all_timestamps = set()
     series_data = {}
-    
-    for series in result:
-        metric_labels = series.get('metric', {})
-        # Create a label string for the series
-        if metric_labels:
-            label_parts = [f"{k}={v}" for k, v in sorted(metric_labels.items())]
-            series_name = ', '.join(label_parts)
-        else:
-            series_name = 'value'
-        
-        values = series.get('values', [])
-        series_data[series_name] = {}
-        
-        for timestamp, value in values:
-            ts = float(timestamp)
-            all_timestamps.add(ts)
-            series_data[series_name][ts] = value
-    
+    seen_series_names = {}
+
+    for target_result in target_results:
+        data = target_result.get('prometheus_response', {})
+        if data.get('status') != 'success':
+            print(f"Warning: Query failed, skipping target in {output_path}", file=sys.stderr)
+            continue
+
+        result = data.get('data', {}).get('result', [])
+        if not result:
+            continue
+
+        for series in result:
+            metric_labels = series.get('metric', {})
+            series_name = format_series_name(
+                metric_labels,
+                target_result.get('legend_format', '__auto'),
+                target_result.get('panel_title', 'value'),
+                target_result.get('ref_id', ''),
+                result_count=len(result),
+            )
+            series_name = unique_series_name(series_name, seen_series_names)
+            values = series.get('values', [])
+            series_data[series_name] = {}
+
+            for timestamp, value in values:
+                ts = float(timestamp)
+                all_timestamps.add(ts)
+                series_data[series_name][ts] = value
+
+    if not series_data:
+        print(f"Warning: No data returned, skipping CSV export for {output_path}", file=sys.stderr)
+        return False
+
     # Sort timestamps
     sorted_timestamps = sorted(all_timestamps)
-    
+
     # Write CSV
     with open(output_path, 'w', newline='') as f:
         writer = csv.writer(f)
         # Header row
         header = ['timestamp', 'datetime', 'elapsed_seconds'] + list(series_data.keys())
         writer.writerow(header)
-        
+
         # Data rows
         for ts in sorted_timestamps:
             dt = iso_from_timestamp(ts)
@@ -256,6 +374,24 @@ def export_to_csv(data: Dict[str, Any], output_path: str, start_timestamp: float
                 row.append(series_data[series_name].get(ts, ''))
             writer.writerow(row)
     return True
+
+
+def export_to_csv(
+    data: Dict[str, Any],
+    output_path: str,
+    start_timestamp: float,
+    legend_format: str = '__auto',
+    panel_title: str = 'value',
+    ref_id: str = '',
+):
+    """Export one Prometheus query result to CSV; kept for direct script users/tests."""
+    target_result = {
+        'panel_title': panel_title,
+        'ref_id': ref_id,
+        'legend_format': legend_format,
+        'prometheus_response': data,
+    }
+    return export_panel_to_csv([target_result], output_path, start_timestamp)
 
 
 def unique_output_stem(output_dir: Path, title: str, seen: Dict[str, int]) -> Path:
@@ -333,7 +469,8 @@ def main():
     queries = extract_queries_from_dashboard(str(dashboard_path))
     if args.include_loadtest_markers:
         queries.extend(LOADTEST_MARKER_QUERIES)
-    print(f"Found {len(queries)} Prometheus queries")
+    query_groups = group_queries_by_panel(queries)
+    print(f"Found {len(queries)} Prometheus queries across {len(query_groups)} export panels")
     if variables:
         print("Using Grafana variable substitutions:")
         for name, value in sorted(variables.items()):
@@ -343,29 +480,42 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Query Prometheus for each metric
+    # Query Prometheus by target, then export one file per Grafana panel.
     successful = 0
     failed = 0
     exported_queries = []
     seen_output_names = {}
     
-    for i, query_info in enumerate(queries, 1):
-        panel_title = query_info['panel_title']
-        original_query = query_info['query']
-        query = substitute_grafana_variables(original_query, variables, grafana_interval)
-        
-        print(f"\n[{i}/{len(queries)}] Querying: {panel_title}")
-        print(f"  Query: {query}")
-        
-        # Query Prometheus
-        result = query_prometheus(args.prometheus_url, query, start_ts, end_ts, args.step)
-        
-        if result.get('status') != 'success':
-            print(f"  ❌ Failed: {result.get('error', 'Unknown error')}")
-            failed += 1
+    for group_index, query_group in enumerate(query_groups, 1):
+        panel_title = query_group['panel_title']
+        panel_results = []
+
+        print(f"\n[{group_index}/{len(query_groups)}] Querying panel: {panel_title}")
+        for target_index, query_info in enumerate(query_group['queries'], 1):
+            original_query = query_info['query']
+            query = substitute_grafana_variables(original_query, variables, grafana_interval)
+            ref_id = query_info.get('ref_id') or str(target_index)
+
+            print(f"  Target {ref_id}: {query}")
+
+            result = query_prometheus(args.prometheus_url, query, start_ts, end_ts, args.step)
+
+            if result.get('status') != 'success':
+                print(f"    ❌ Failed: {result.get('error', 'Unknown error')}")
+                failed += 1
+                continue
+
+            panel_results.append({
+                **query_info,
+                'query': query,
+                'original_query': original_query,
+                'prometheus_response': result,
+            })
+            successful += 1
+
+        if not panel_results:
             continue
-        
-        # Generate output filenames
+
         base_path = unique_output_stem(output_dir, panel_title, seen_output_names)
         json_path = None
         csv_path = None
@@ -373,48 +523,63 @@ def main():
         # Export to JSON
         if args.format in ['json', 'both']:
             json_path = f"{base_path}.json"
+            first_result = panel_results[0]
             export_data = {
                 'panel_title': panel_title,
-                'panel_id': query_info['panel_id'],
-                'query': query,
-                'original_query': original_query,
-                'ref_id': query_info.get('ref_id', ''),
-                'legend_format': query_info['legend_format'],
-                'unit': query_info.get('unit', ''),
-                'source': query_info.get('source', 'dashboard'),
+                'panel_id': query_group['panel_id'],
+                'unit': query_group.get('unit', ''),
+                'source': query_group.get('source', 'dashboard'),
                 'time_range': {
                     'from': args.start_time,
                     'to': args.end_time,
                     'from_unix': start_ts,
                     'to_unix': end_ts,
                 },
-                'prometheus_response': result,
+                'targets': [
+                    {
+                        'query': target_result['query'],
+                        'original_query': target_result.get('original_query', target_result['query']),
+                        'ref_id': target_result.get('ref_id', ''),
+                        'legend_format': target_result.get('legend_format', ''),
+                        'series_count': len(target_result.get('prometheus_response', {}).get('data', {}).get('result', [])),
+                        'prometheus_response': target_result.get('prometheus_response', {}),
+                    }
+                    for target_result in panel_results
+                ],
             }
+            if len(panel_results) == 1:
+                export_data.update({
+                    'query': first_result['query'],
+                    'original_query': first_result.get('original_query', first_result['query']),
+                    'ref_id': first_result.get('ref_id', ''),
+                    'legend_format': first_result.get('legend_format', ''),
+                    'prometheus_response': first_result.get('prometheus_response', {}),
+                })
             export_to_json(export_data, json_path)
             print(f"  ✓ Exported JSON: {json_path}")
         
         # Export to CSV
         if args.format in ['csv', 'both']:
             csv_path = f"{base_path}.csv"
-            if export_to_csv(result, csv_path, start_ts):
+            if export_panel_to_csv(panel_results, csv_path, start_ts):
                 print(f"  ✓ Exported CSV: {csv_path}")
             else:
                 csv_path = None
-        
-        exported_queries.append({
-            'panel_title': panel_title,
-            'panel_id': query_info['panel_id'],
-            'query': query,
-            'original_query': original_query,
-            'ref_id': query_info.get('ref_id', ''),
-            'legend_format': query_info.get('legend_format', ''),
-            'unit': query_info.get('unit', ''),
-            'source': query_info.get('source', 'dashboard'),
-            'json_file': str(Path(json_path).name) if json_path else None,
-            'csv_file': str(Path(csv_path).name) if csv_path else None,
-            'series_count': len(result.get('data', {}).get('result', [])),
-        })
-        successful += 1
+
+        for target_result in panel_results:
+            exported_queries.append({
+                'panel_title': panel_title,
+                'panel_id': target_result['panel_id'],
+                'query': target_result['query'],
+                'original_query': target_result.get('original_query', target_result['query']),
+                'ref_id': target_result.get('ref_id', ''),
+                'legend_format': target_result.get('legend_format', ''),
+                'unit': target_result.get('unit', ''),
+                'source': target_result.get('source', 'dashboard'),
+                'json_file': str(Path(json_path).name) if json_path else None,
+                'csv_file': str(Path(csv_path).name) if csv_path else None,
+                'series_count': len(target_result.get('prometheus_response', {}).get('data', {}).get('result', [])),
+            })
 
     manifest_path = output_dir / 'manifest.json'
     manifest = {

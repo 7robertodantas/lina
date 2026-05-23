@@ -9,7 +9,13 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from plot_exported_metrics import build_marker_intervals, expected_rate_points
+from plot_exported_metrics import (
+    build_marker_intervals,
+    collect_metric_csv_groups,
+    conversion_for_metric,
+    expected_rate_points,
+    legend_label_for_column,
+)
 
 
 class MarkerIntervalTests(unittest.TestCase):
@@ -83,6 +89,53 @@ class MarkerIntervalTests(unittest.TestCase):
                 {'start': 75.0, 'end': 105.0, 'phase': 'warmup', 'level_vus': 50, 'source': 'marker'},
             ],
         )
+
+    def test_legacy_duplicate_target_csvs_are_grouped_by_panel_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp)
+            for name in ('Disk Throughput.csv', 'Disk Throughput_2.csv', 'CPU Usage (%).csv', 'HTTP_2xx.csv'):
+                (input_dir / name).write_text('timestamp,datetime,elapsed_seconds,value\n')
+
+            groups = collect_metric_csv_groups(input_dir)
+
+        self.assertEqual(
+            [(name, [path.name for path in paths]) for name, paths in groups],
+            [
+                ('CPU Usage (%)', ['CPU Usage (%).csv']),
+                ('Disk Throughput', ['Disk Throughput.csv', 'Disk Throughput_2.csv']),
+                ('HTTP_2xx', ['HTTP_2xx.csv']),
+            ],
+        )
+
+    def test_manifest_legend_format_is_used_instead_of_instance_ip(self):
+        self.assertEqual(
+            legend_label_for_column(
+                'Network Throughput',
+                'instance=192.168.0.200:9463',
+                {'legend_format': '{{instance}} rx'},
+            ),
+            'Receive',
+        )
+        self.assertEqual(
+            legend_label_for_column(
+                'Disk Throughput',
+                'instance=192.168.0.200:9463',
+                {'legend_format': 'write'},
+            ),
+            'Write',
+        )
+        self.assertEqual(
+            legend_label_for_column(
+                'Disk Throughput',
+                'Read',
+                {'legend_format': 'write'},
+            ),
+            'Read',
+        )
+
+    def test_throughput_units_are_plotted_as_mb_per_second(self):
+        self.assertEqual(conversion_for_metric('Disk Throughput', 'Bps'), (1 / 1_000_000, 'MB/s'))
+        self.assertEqual(conversion_for_metric('Per Service Disk write throughput', 'binBps'), (1 / (1024 * 1024), 'MB/s'))
 
 
 if __name__ == '__main__':

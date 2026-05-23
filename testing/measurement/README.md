@@ -159,7 +159,7 @@ The `export_metrics.py` script allows you to export all metrics from your Grafan
 
 ### Output Format
 
-The script extracts all Prometheus queries from the Grafana dashboard and exports each metric to separate files:
+The script extracts Prometheus queries from the Grafana dashboard and exports one file set per Grafana panel. Panels with multiple targets, such as Disk Throughput or Network Throughput, are merged into one CSV with one column per rendered legend:
 
 - **JSON files**: Contain the full Prometheus API response including metadata
 - **CSV files**: Time-series data with timestamps, export-relative elapsed seconds, and values for each series
@@ -174,10 +174,12 @@ The exporter also requests k6 load-test marker metrics when they are available:
 
 ```
 metrics_export/
-├── Disk_write_throughput.json
-├── Disk_write_throughput.csv
-├── Container_CPU_Usage.json
-├── Container_CPU_Usage.csv
+├── Disk Throughput.json
+├── Disk Throughput.csv
+├── Network Throughput.json
+├── Network Throughput.csv
+├── Per Service CPU Usage.json
+├── Per Service CPU Usage.csv
 ├── Consumption_Recorded_per_second.json
 ├── Consumption_Recorded_per_second.csv
 ...
@@ -217,9 +219,10 @@ python3 plot_exported_metrics.py --input-dir my_metrics --output-dir my_graphs
 The script automatically handles:
 - Single-series metrics (one value column)
 - Multi-series metrics (multiple labeled series)
+- Legacy exports where one panel was split into `_2`, `_3`, etc. target files
 - Proper datetime formatting on x-axis
 - Clean legend placement
-- **Automatic unit extraction from Grafana dashboard** - Y-axis labels use the correct units (e.g., "debits/s", "Bytes/s", "%", "s", "events/s", etc.)
+- **Automatic unit extraction from Grafana dashboard** - Y-axis labels use the correct units (e.g., "debits/s", "MB/s", "%", "s", "events/s", etc.)
 
 **Note:** The script reads unit information from the Grafana dashboard JSON file. If a metric doesn't have a unit defined in the dashboard, it will use "Value" as the default label.
 
