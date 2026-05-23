@@ -10,11 +10,13 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).parent))
 
 from plot_exported_metrics import (
+    build_service_color_map,
     build_marker_intervals,
     collect_metric_csv_groups,
     conversion_for_metric,
     expected_rate_points,
     legend_label_for_column,
+    service_color_for_series,
 )
 
 
@@ -136,6 +138,31 @@ class MarkerIntervalTests(unittest.TestCase):
     def test_throughput_units_are_plotted_as_mb_per_second(self):
         self.assertEqual(conversion_for_metric('Disk Throughput', 'Bps'), (1 / 1_000_000, 'MB/s'))
         self.assertEqual(conversion_for_metric('Per Service Disk write throughput', 'binBps'), (1 / (1024 * 1024), 'MB/s'))
+
+    def test_per_service_colors_are_shared_across_graphs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            input_dir = Path(tmp)
+
+            def write_metric(name, columns):
+                header = ','.join(['timestamp', 'datetime', 'elapsed_seconds', *columns])
+                row = ','.join(['1000', '2026-05-23T18:59:18Z', '0', *(['1'] * len(columns))])
+                (input_dir / f'{name}.csv').write_text(f'{header}\n{row}\n')
+
+            write_metric('Per Service CPU Usage', ['caddy', 'device'])
+            write_metric('Per Service Memory Usage', ['device', 'caddy'])
+
+            csv_groups = collect_metric_csv_groups(input_dir)
+            service_colors = build_service_color_map(csv_groups, {})
+
+        self.assertEqual(
+            service_color_for_series('Per Service CPU Usage', 'caddy', service_colors),
+            service_color_for_series('Per Service Memory Usage', 'caddy', service_colors),
+        )
+        self.assertEqual(
+            service_color_for_series('Per Service CPU Usage', 'device', service_colors),
+            service_color_for_series('Per Service Memory Usage', 'device', service_colors),
+        )
+        self.assertNotEqual(service_colors['caddy'], service_colors['device'])
 
 
 if __name__ == '__main__':

@@ -12,6 +12,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -96,6 +97,28 @@ PREFERRED_LABEL_KEYS = (
     'mode',
     'mountpoint',
     'device',
+)
+SERVICE_COLOR_PALETTE = (
+    '#1f77b4',
+    '#ff7f0e',
+    '#2ca02c',
+    '#d62728',
+    '#9467bd',
+    '#8c564b',
+    '#e377c2',
+    '#7f7f7f',
+    '#bcbd22',
+    '#17becf',
+    '#aec7e8',
+    '#ffbb78',
+    '#98df8a',
+    '#ff9896',
+    '#c5b0d5',
+    '#c49c94',
+    '#f7b6d2',
+    '#c7c7c7',
+    '#dbdb8d',
+    '#9edae5',
 )
 
 sns.set_theme(style='whitegrid')
@@ -707,6 +730,56 @@ def legend_label_for_column(metric_name: str, column: str, metadata: Optional[Di
     return clean_series_label(metric_name, column)
 
 
+def is_per_service_metric(metric_name: str) -> bool:
+    return metric_name.lower().startswith('per service ')
+
+
+def service_color_key(series_label: str) -> str:
+    return re.sub(r'\s+\(\d+\)$', '', normalize_legend_label(series_label))
+
+
+def color_for_service_name(service_name: str, used_colors: set[str]) -> str:
+    digest = hashlib.sha256(service_name.encode('utf-8')).hexdigest()
+    start_index = int(digest[:8], 16) % len(SERVICE_COLOR_PALETTE)
+    for offset in range(len(SERVICE_COLOR_PALETTE)):
+        color = SERVICE_COLOR_PALETTE[(start_index + offset) % len(SERVICE_COLOR_PALETTE)]
+        if color not in used_colors:
+            return color
+    return SERVICE_COLOR_PALETTE[start_index]
+
+
+def assign_service_colors(service_names: Iterable[str]) -> Dict[str, str]:
+    service_colors = {}
+    used_colors = set()
+    for service_name in sorted(service_names):
+        service_colors[service_name] = color_for_service_name(service_name, used_colors)
+        used_colors.add(service_colors[service_name])
+    return service_colors
+
+
+def build_service_color_map(
+    csv_groups: List[tuple[str, List[Path]]],
+    csv_metadata: Dict[str, Dict[str, Any]],
+) -> Dict[str, str]:
+    service_names = set()
+    for metric_name, csv_paths in csv_groups:
+        if not is_per_service_metric(metric_name):
+            continue
+        _, data_cols = load_metric_group_frame(csv_paths, metric_name, csv_metadata)
+        service_names.update(service_color_key(clean_series_label(metric_name, col)) for col in data_cols)
+    return assign_service_colors(service_names)
+
+
+def service_color_for_series(
+    metric_name: str,
+    series_label: str,
+    service_color_map: Optional[Dict[str, str]],
+) -> Optional[str]:
+    if not service_color_map or not is_per_service_metric(metric_name):
+        return None
+    return service_color_map.get(service_color_key(clean_series_label(metric_name, series_label)))
+
+
 def conversion_for_metric(metric_name: str, unit_code: str) -> tuple[float, str]:
     lower_name = metric_name.lower()
     if unit_code in {'bytes', 'decbytes'} and 'memory' in lower_name:
@@ -776,6 +849,7 @@ def plot_metric_csv_group(
     output_dir: Path,
     units_map: Dict[str, str],
     csv_metadata: Dict[str, Dict[str, Any]],
+    service_color_map: Optional[Dict[str, str]],
     initial_time: Optional[pd.Timestamp],
     intervals: List[Dict[str, Any]],
     report_interval_seconds: float,
@@ -833,12 +907,15 @@ def plot_metric_csv_group(
     annotate_phases(ax, intervals, use_minutes)
 
     for col in data_cols:
+        color = service_color_for_series(metric_name, col, service_color_map)
+        plot_kwargs = {'color': color} if color else {}
         ax.plot(
             df[x_col],
             df[col],
             label=clean_series_label(metric_name, col),
             linewidth=1.5,
             alpha=0.9,
+            **plot_kwargs,
         )
 
     add_expected_rate_overlay(ax, metric_name, intervals, use_minutes, report_interval_seconds)
@@ -892,6 +969,7 @@ def plot_csv_file(
         output_dir,
         units_map,
         {},
+        None,
         initial_time,
         intervals,
         report_interval_seconds,
@@ -944,6 +1022,7 @@ def generate_graphs(
     if not csv_groups:
         print(f"No metric CSV files found in '{input_dir}'")
         return
+    service_color_map = build_service_color_map(csv_groups, csv_metadata)
 
     print(f"Found {sum(len(paths) for _, paths in csv_groups)} plottable CSV files in '{input_dir}'")
     print(f"Plotting {len(csv_groups)} metric graph(s)")
@@ -959,6 +1038,7 @@ def generate_graphs(
             output_path,
             units_map,
             csv_metadata,
+            service_color_map,
             initial_time,
             intervals,
             report_interval_seconds,
