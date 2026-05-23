@@ -264,13 +264,22 @@ def validate_remote_data_dir(raw: str) -> str:
     return normalized
 
 
-def remote_reset_data_command(destination: str, target_dir: str, data_dir: str) -> list[str]:
+def remote_reset_data_command(
+    destination: str,
+    target_dir: str,
+    data_dir: str,
+    *,
+    use_sudo: bool,
+) -> list[str]:
     data_root = validate_remote_data_dir(data_dir)
     subdirs = [posixpath.join(data_root, subdir) for subdir in EDGE_DATA_SUBDIRS]
     mkdir_paths = ' '.join(shlex.quote(path) for path in [data_root, *subdirs])
+    remove_command = ['rm', '-rf', '--', data_root]
+    if use_sudo:
+        remove_command = ['sudo', '-n', *remove_command]
     remote = (
         f"cd {shlex.quote(target_dir)} && "
-        f"rm -rf -- {shlex.quote(data_root)} && "
+        f"{shlex.join(remove_command)} && "
         f"mkdir -p -- {mkdir_paths}"
     )
     return ['ssh', destination, remote]
@@ -410,6 +419,8 @@ def parse_args() -> argparse.Namespace:
                         help='Do not restart the remote target stack')
     parser.add_argument('--skip-target-data-reset', action='store_true',
                         help='Keep the remote target data directory when restarting the edge stack')
+    parser.add_argument('--no-target-data-reset-sudo', action='store_true',
+                        help='Do not use sudo for the remote target data directory removal')
     parser.add_argument('--pull-target-images', action='store_true',
                         help='Run docker compose pull on the target before starting the edge stack')
 
@@ -555,6 +566,7 @@ def main() -> int:
             'compose_file': args.target_compose_file,
             'data_dir': target_data_dir,
             'data_reset_enabled': should_reset_target_data,
+            'data_reset_sudo': should_reset_target_data and not args.no_target_data_reset_sudo,
             'api_base_url': api_base_url,
             'metrics_instance': None if args.no_target_instance_var else target_instance,
         },
@@ -615,7 +627,12 @@ def main() -> int:
             manifest['commands']['target_down'] = command_text(down_cmd)
             reset_data_cmd = None
             if target_data_dir is not None:
-                reset_data_cmd = remote_reset_data_command(destination, args.target_dir, target_data_dir)
+                reset_data_cmd = remote_reset_data_command(
+                    destination,
+                    args.target_dir,
+                    target_data_dir,
+                    use_sudo=not args.no_target_data_reset_sudo,
+                )
                 manifest['commands']['target_data_reset'] = command_text(reset_data_cmd)
             if args.pull_target_images:
                 manifest['commands']['target_pull'] = command_text(pull_cmd)
