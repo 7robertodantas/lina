@@ -99,10 +99,10 @@ const TEARDOWN_DRAIN_SECONDS = (() => {
   return Number.isNaN(n) ? 45 : Math.max(0, n);
 })();
 
-const LEVEL_VUS = 50;
+const LEVEL_VUS = 25;
 const WARMUP = '60s';
 const MEASURE = '120s';
-const IDLE = '15s';
+const IDLE = '30s';
 const TEARDOWN = '60s'
 
 // Define load test stages
@@ -120,6 +120,10 @@ const loadTestStages = [
   { duration: MEASURE, target: LEVEL_VUS * 5 },
   { duration: WARMUP, target: LEVEL_VUS * 6 },
   { duration: MEASURE, target: LEVEL_VUS * 6 },
+  { duration: WARMUP, target: LEVEL_VUS * 7 },
+  { duration: MEASURE, target: LEVEL_VUS * 7 },
+  { duration: WARMUP, target: LEVEL_VUS * 8 },
+  { duration: MEASURE, target: LEVEL_VUS * 8 },
   { duration: TEARDOWN, target: 0 },
 ];
 
