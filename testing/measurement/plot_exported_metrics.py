@@ -1,503 +1,727 @@
 #!/usr/bin/env python3
 """
-Plot metrics from exported CSV files (from export_metrics.py).
+Plot metrics exported by export_metrics.py with experiment-relative time.
 
-This script reads all CSV files from the metrics export directory and generates
-matplotlib graphs in the same style as plot_graphs.py.
+The graphs are intended for load-test reports: the x-axis is elapsed time, load
+levels are shaded directly on the plot, and teardown is called out so the final
+decrease is not mistaken for recovery during a measurement window.
 
 Usage:
     python plot_exported_metrics.py
     python plot_exported_metrics.py --input-dir metrics_export --output-dir graphs
 """
 
-import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import seaborn as sns
-import os
 import argparse
 import json
+import os
+import re
+import tempfile
 from pathlib import Path
-from datetime import datetime
+from typing import Any, Dict, Iterable, List, Optional
+
+plot_cache_dir = Path(tempfile.gettempdir()) / 'lnpay_plot_cache'
+(plot_cache_dir / 'matplotlib').mkdir(parents=True, exist_ok=True)
+(plot_cache_dir / 'xdg').mkdir(parents=True, exist_ok=True)
+os.environ.setdefault('MPLCONFIGDIR', str(plot_cache_dir / 'matplotlib'))
+os.environ.setdefault('XDG_CACHE_HOME', str(plot_cache_dir / 'xdg'))
+
+import matplotlib
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 
 
-# --- CONFIGURATION ---
 DEFAULT_INPUT_DIR = 'metrics_export'
 DEFAULT_OUTPUT_DIR = 'graphs'
 DEFAULT_DASHBOARD = 'infrastructure/grafana/dashboards/monitoring.json'
-sns.set_theme(style="whitegrid")  # Academic/Clean style
 
-
-# Map Grafana unit codes to human-readable labels
-UNIT_LABELS = {
-    'binBps': 'Bytes/s',  # Binary bytes per second (auto-formats to KiB/s, MiB/s, etc.)
-    'decbytes': 'Bytes',  # Decimal bytes (auto-formats to KB, MB, etc.)
-    'bytes': 'Bytes',
-    'debits/s': 'debits/s',
-    's': 'Seconds',
-    'percent': 'Percent %',
-    'eps': 'events/s',
-    'events': 'events',
-    'devices': 'devices',
-    'cores': 'cores',
+MARKER_TITLES = {
+    'Load Test Stage Index',
+    'Load Test Phase',
+    'Load Test Level VUs',
+    'Load Test Measurement Window',
 }
 
+PHASE_BY_CODE = {
+    0: 'idle',
+    1: 'warmup',
+    2: 'measure',
+    3: 'teardown',
+}
 
-def parse_datetime(dt_str):
-    """Parse ISO datetime string to datetime object."""
-    try:
-        # Remove 'Z' if present and replace with timezone offset
-        dt_str_clean = dt_str.replace('Z', '+00:00')
-        # Parse ISO format datetime
-        return datetime.fromisoformat(dt_str_clean)
-    except Exception as e:
-        # Fallback: try pandas parsing
-        try:
-            return pd.to_datetime(dt_str).to_pydatetime()
-        except:
-            return None
+PHASE_STYLES = {
+    'warmup': {'color': '#f4a261', 'alpha': 0.12, 'label': 'Warmup'},
+    'measure': {'color': '#2a9d8f', 'alpha': 0.14, 'label': 'Measurement'},
+    'teardown': {'color': '#6c757d', 'alpha': 0.16, 'label': 'Teardown'},
+}
 
+UNIT_LABELS = {
+    'Bps': 'Bytes/s',
+    'binBps': 'Bytes/s',
+    'bytes': 'Bytes',
+    'decbytes': 'Bytes',
+    'debits/s': 'debits/s',
+    'devices': 'devices',
+    'eps': 'events/s',
+    'events': 'events',
+    'percent': 'Percent (%)',
+    's': 'Seconds',
+    'short': 'Value',
+}
 
-def format_datetime_for_axis(dt):
-    """Format datetime for x-axis display."""
-    return dt.strftime('%H:%M:%S')
+METADATA_COLUMNS = {
+    'timestamp',
+    'datetime',
+    'elapsed_seconds',
+    'datetime_parsed',
+    'elapsed_from_experiment_start',
+    'elapsed_minutes',
+}
+
+sns.set_theme(style='whitegrid')
 
 
 def sanitize_filename(name: str) -> str:
-    """Sanitize a string to be used as a filename."""
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
         name = name.replace(char, '_')
-    name = name.strip('. ')
-    return name
+    return name.strip('. ')
 
 
-def load_dashboard_units(dashboard_path: str) -> dict:
-    """Load unit mappings from Grafana dashboard JSON."""
+def project_path(path: str) -> Path:
+    candidate = Path(path)
+    if candidate.is_absolute():
+        return candidate
+    return Path(__file__).parent.parent.parent / candidate
+
+
+def parse_duration_seconds(value: str) -> float:
+    """Parse k6-style durations such as 60s, 2m, or 1m30s."""
+    total = 0.0
+    matches = re.findall(r'(\d+(?:\.\d+)?)(ms|s|m|h)', value)
+    if not matches:
+        raise ValueError(f"Invalid duration '{value}'")
+
+    for amount_raw, unit in matches:
+        amount = float(amount_raw)
+        if unit == 'ms':
+            total += amount / 1000
+        elif unit == 's':
+            total += amount
+        elif unit == 'm':
+            total += amount * 60
+        elif unit == 'h':
+            total += amount * 3600
+
+    return total
+
+
+def load_manifest(input_dir: Path) -> Dict[str, Any]:
+    manifest_path = input_dir / 'manifest.json'
+    if not manifest_path.exists():
+        return {}
     try:
-        dashboard_file = Path(dashboard_path)
-        if not dashboard_file.is_absolute():
-            # Try relative to project root
-            project_root = Path(__file__).parent.parent.parent
-            dashboard_file = project_root / dashboard_path
-        
-        if not dashboard_file.exists():
-            print(f"Warning: Dashboard file not found: {dashboard_file}")
-            return {}
-        
-        with open(dashboard_file, 'r') as f:
-            dashboard = json.load(f)
-        
-        units_map = {}
-        
-        def extract_panels(panels):
-            for panel in panels:
-                if panel.get('type') == 'row':
-                    if 'panels' in panel:
-                        extract_panels(panel['panels'])
-                elif 'targets' in panel:
-                    title = panel.get('title', '')
-                    unit = panel.get('fieldConfig', {}).get('defaults', {}).get('unit', '')
-                    if title and unit:
-                        units_map[title] = unit
-        
-        extract_panels(dashboard.get('panels', []))
-        return units_map
-    
-    except Exception as e:
-        print(f"Warning: Could not load dashboard units: {e}")
+        with open(manifest_path, 'r') as f:
+            return json.load(f)
+    except Exception as exc:
+        print(f"Warning: Could not read manifest.json: {exc}")
         return {}
 
 
-def get_unit_label(unit_code: str) -> str:
-    """Convert Grafana unit code to human-readable label."""
-    return UNIT_LABELS.get(unit_code, unit_code)
+def load_dashboard_units(dashboard_path: str) -> Dict[str, str]:
+    """Load unit mappings from Grafana dashboard JSON."""
+    dashboard_file = project_path(dashboard_path)
+    if not dashboard_file.exists():
+        print(f"Warning: Dashboard file not found: {dashboard_file}")
+        return {}
 
-
-def find_initial_time(input_dir: Path) -> pd.Timestamp:
-    """Find the initial time when VU first becomes > 0."""
-    vu_csv = input_dir / 'Virtual Users over time.csv'
-    if not vu_csv.exists():
-        # Fallback: try VU's.csv
-        vu_csv = input_dir / "VU's.csv"
-        if not vu_csv.exists():
-            return None
-    
     try:
-        df_vu = pd.read_csv(vu_csv)
-        if 'datetime' in df_vu.columns:
-            df_vu['datetime_parsed'] = pd.to_datetime(df_vu['datetime'])
-        elif 'timestamp' in df_vu.columns:
-            df_vu['datetime_parsed'] = pd.to_datetime(df_vu['timestamp'], unit='s')
-        else:
-            return None
-        
-        # Find first time when VU > 0
-        data_col = 'value' if 'value' in df_vu.columns else df_vu.columns[2]  # Assume 3rd column is VU
-        first_vu = df_vu[df_vu[data_col] > 0]
-        if not first_vu.empty:
-            return first_vu['datetime_parsed'].iloc[0]
-    except Exception as e:
-        print(f"Warning: Could not find initial time: {e}")
-    
+        with open(dashboard_file, 'r') as f:
+            dashboard = json.load(f)
+    except Exception as exc:
+        print(f"Warning: Could not load dashboard units: {exc}")
+        return {}
+
+    units_map = {}
+
+    def extract_panels(panels: Iterable[Dict[str, Any]]):
+        for panel in panels:
+            if panel.get('type') == 'row':
+                extract_panels(panel.get('panels', []))
+                continue
+            title = panel.get('title', '')
+            unit = panel.get('fieldConfig', {}).get('defaults', {}).get('unit', '')
+            if title and unit:
+                units_map[title] = unit
+
+    extract_panels(dashboard.get('panels', []))
+    return units_map
+
+
+def load_units(input_dir: Path, dashboard_path: str) -> Dict[str, str]:
+    units = load_dashboard_units(dashboard_path)
+    manifest = load_manifest(input_dir)
+    for query in manifest.get('queries', []):
+        csv_file = query.get('csv_file')
+        unit = query.get('unit')
+        if csv_file and unit:
+            units[Path(csv_file).stem] = unit
+    return units
+
+
+def get_unit_label(unit_code: str) -> str:
+    return UNIT_LABELS.get(unit_code, unit_code or 'Value')
+
+
+def find_metric_csv(input_dir: Path, title: str) -> Optional[Path]:
+    candidates = [
+        input_dir / f'{title}.csv',
+        input_dir / f'{sanitize_filename(title)}.csv',
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+
+    globbed = sorted(input_dir.glob(f'{sanitize_filename(title)}*.csv'))
+    return globbed[0] if globbed else None
+
+
+def read_metric_csv(csv_path: Path) -> Optional[pd.DataFrame]:
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as exc:
+        print(f"  Error reading {csv_path.name}: {exc}")
+        return None
+
+    if df.empty:
+        return None
+
+    if 'datetime' in df.columns:
+        df['datetime_parsed'] = pd.to_datetime(df['datetime'], utc=True, errors='coerce')
+    elif 'timestamp' in df.columns:
+        df['datetime_parsed'] = pd.to_datetime(df['timestamp'], unit='s', utc=True, errors='coerce')
+    else:
+        return None
+
+    df = df[df['datetime_parsed'].notna()].copy()
+    if df.empty:
+        return None
+
+    return df.sort_values('datetime_parsed')
+
+
+def coerce_metric_columns(df: pd.DataFrame) -> List[str]:
+    columns = []
+    for column in df.columns:
+        if column in METADATA_COLUMNS or column.endswith('_min'):
+            continue
+        numeric = pd.to_numeric(df[column], errors='coerce')
+        if numeric.notna().any():
+            df[column] = numeric
+            columns.append(column)
+    return columns
+
+
+def load_single_series(input_dir: Path, title: str) -> Optional[pd.DataFrame]:
+    csv_path = find_metric_csv(input_dir, title)
+    if not csv_path:
+        return None
+
+    df = read_metric_csv(csv_path)
+    if df is None:
+        return None
+
+    data_cols = coerce_metric_columns(df)
+    if not data_cols:
+        return None
+
+    return df[['datetime_parsed', data_cols[0]]].rename(columns={data_cols[0]: 'value'})
+
+
+def find_initial_time(input_dir: Path) -> Optional[pd.Timestamp]:
+    """Prefer explicit load-test markers, then fall back to the first nonzero VU sample."""
+    for marker_title in ('Load Test Phase', 'Load Test Level VUs'):
+        marker = load_single_series(input_dir, marker_title)
+        if marker is not None and not marker.empty:
+            return marker['datetime_parsed'].iloc[0]
+
+    for vu_title in ('Virtual Users over time', "VU's"):
+        csv_path = find_metric_csv(input_dir, vu_title)
+        if not csv_path:
+            continue
+        df = read_metric_csv(csv_path)
+        if df is None:
+            continue
+        data_cols = coerce_metric_columns(df)
+        if not data_cols:
+            continue
+        active = df[df[data_cols].max(axis=1) > 0]
+        if not active.empty:
+            return active['datetime_parsed'].iloc[0]
+
     return None
 
 
-def identify_vu_levels(input_dir: Path, initial_time: pd.Timestamp) -> list:
-    """Identify VU level boundaries (every 90s, increments of 25)."""
+def find_max_elapsed(input_dir: Path, initial_time: Optional[pd.Timestamp]) -> float:
     if initial_time is None:
-        return []
-    
-    vu_csv = input_dir / 'Virtual Users over time.csv'
-    if not vu_csv.exists():
-        vu_csv = input_dir / "VU's.csv"
-        if not vu_csv.exists():
-            return []
-    
-    try:
-        df_vu = pd.read_csv(vu_csv)
-        if 'datetime' in df_vu.columns:
-            df_vu['datetime_parsed'] = pd.to_datetime(df_vu['datetime'])
-        elif 'timestamp' in df_vu.columns:
-            df_vu['datetime_parsed'] = pd.to_datetime(df_vu['timestamp'], unit='s')
-        else:
-            return []
-        
-        data_col = 'value' if 'value' in df_vu.columns else df_vu.columns[2]
-        df_vu['elapsed'] = (df_vu['datetime_parsed'] - initial_time).dt.total_seconds()
-        df_vu = df_vu[df_vu['elapsed'] >= 0].copy()
-        
-        if df_vu.empty:
-            return []
-        
-        # Identify level boundaries (every 90s)
-        # Pattern: WARMUP (30s) + MEASURE (60s) = 90s per level
-        # Each period: 0-30s WARMUP, 30-90s MEASURE
-        levels = []
-        max_elapsed = df_vu['elapsed'].max()
-        
-        # Find VU level for each 90s period by looking at MEASURE phase (30-90s of each period)
-        period = 0
-        while True:
-            period_start = period * 90
-            measure_start = period_start + 30  # MEASURE phase starts at 30s into period
-            measure_end = period_start + 90    # MEASURE phase ends at 90s (end of period)
-            
-            if measure_start > max_elapsed:
-                break
-            
-            # Get VU values during MEASURE phase of this period
-            measure_data = df_vu[(df_vu['elapsed'] >= measure_start) & (df_vu['elapsed'] < measure_end)]
-            
-            if not measure_data.empty:
-                # Use median or most common VU value during MEASURE phase
-                vu_values = measure_data[data_col].values
-                # Round to nearest 25
-                vu_level = round(vu_values.mean() / 25) * 25
-                
-                # Mark boundary at the end of this period (start of next period)
-                boundary_time = measure_end
-                if boundary_time <= max_elapsed:
-                    levels.append({
-                        'time': boundary_time,
-                        'vu_level': int(vu_level)
-                    })
-            
-            period += 1
-        
-        return levels
-    except Exception as e:
-        print(f"Warning: Could not identify VU levels: {e}")
-        return []
+        return 0.0
+
+    manifest = load_manifest(input_dir)
+    end_unix = manifest.get('time_range', {}).get('to_unix')
+    if end_unix is not None:
+        end_time = pd.to_datetime(float(end_unix), unit='s', utc=True)
+        return max(0.0, (end_time - initial_time).total_seconds())
+
+    max_time = initial_time
+    for csv_path in input_dir.glob('*.csv'):
+        df = read_metric_csv(csv_path)
+        if df is not None and not df.empty:
+            max_time = max(max_time, df['datetime_parsed'].max())
+    return max(0.0, (max_time - initial_time).total_seconds())
 
 
-def plot_csv_file(csv_path: Path, output_dir: Path, units_map: dict, initial_time: pd.Timestamp = None, vu_levels: list = None):
-    """Plot a single CSV file."""
-    print(f"Processing: {csv_path.name}")
-    
-    try:
-        df = pd.read_csv(csv_path)
-    except Exception as e:
-        print(f"  ❌ Error reading CSV: {e}")
-        return False
-    
-    if df.empty:
-        print(f"  ⚠️  CSV file is empty")
-        return False
-    
-    # Parse datetime column
-    if 'datetime' in df.columns:
-        # Use pandas to_datetime for better compatibility with matplotlib
-        df['datetime_parsed'] = pd.to_datetime(df['datetime'])
-        # Remove rows where datetime parsing failed
-        df = df[df['datetime_parsed'].notna()].copy()
-        if df.empty:
-            print(f"  ⚠️  No valid datetime data")
-            return False
-    elif 'timestamp' in df.columns:
-        # Fallback to timestamp if datetime not available
-        df['datetime_parsed'] = pd.to_datetime(df['timestamp'], unit='s')
+def merge_intervals(intervals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged = []
+    for interval in intervals:
+        if interval['end'] <= interval['start'] or interval['phase'] == 'idle':
+            continue
+        if (
+            merged
+            and merged[-1]['phase'] == interval['phase']
+            and int(merged[-1]['level_vus']) == int(interval['level_vus'])
+            and abs(merged[-1]['end'] - interval['start']) <= 1e-6
+        ):
+            merged[-1]['end'] = interval['end']
+            continue
+        merged.append(interval)
+    return merged
+
+
+def build_marker_intervals(input_dir: Path, initial_time: pd.Timestamp, max_elapsed: float) -> List[Dict[str, Any]]:
+    phase = load_single_series(input_dir, 'Load Test Phase')
+    level = load_single_series(input_dir, 'Load Test Level VUs')
+    measurement = load_single_series(input_dir, 'Load Test Measurement Window')
+    if phase is None or level is None or phase.empty or level.empty:
+        return []
+
+    timeline = pd.merge_asof(
+        phase.sort_values('datetime_parsed').rename(columns={'value': 'phase_code'}),
+        level.sort_values('datetime_parsed').rename(columns={'value': 'level_vus'}),
+        on='datetime_parsed',
+        direction='nearest',
+    )
+
+    if measurement is not None and not measurement.empty:
+        timeline = pd.merge_asof(
+            timeline.sort_values('datetime_parsed'),
+            measurement.sort_values('datetime_parsed').rename(columns={'value': 'measurement_active'}),
+            on='datetime_parsed',
+            direction='nearest',
+        )
     else:
-        print(f"  ❌ No timestamp or datetime column found")
-        return False
-    
-    # Convert to elapsed time if initial_time is provided
-    if initial_time is not None:
-        df['elapsed_seconds'] = (df['datetime_parsed'] - initial_time).dt.total_seconds()
-        # Filter to only include data after initial time
-        df = df[df['elapsed_seconds'] >= 0].copy()
-        if df.empty:
-            print(f"  ⚠️  No data after initial time")
-            return False
-        time_col = 'elapsed_seconds'
-    else:
-        # Fallback to absolute time
-        time_col = 'datetime_parsed'
-    
-    # Get metric name from filename
+        timeline['measurement_active'] = 0
+
+    timeline['elapsed'] = (timeline['datetime_parsed'] - initial_time).dt.total_seconds()
+    timeline = timeline[(timeline['elapsed'] >= 0) & (timeline['elapsed'] <= max_elapsed)].copy()
+    if timeline.empty:
+        return []
+
+    intervals = []
+    elapsed_values = timeline['elapsed'].tolist()
+    rows = timeline.to_dict('records')
+
+    for index, row in enumerate(rows):
+        start = 0.0 if index == 0 and row['elapsed'] < 1 else float(row['elapsed'])
+        end = float(elapsed_values[index + 1]) if index + 1 < len(elapsed_values) else max_elapsed
+        phase_code = int(round(row.get('phase_code', -1)))
+        phase_name = PHASE_BY_CODE.get(phase_code, 'unknown')
+        if row.get('measurement_active', 0) >= 0.5:
+            phase_name = 'measure'
+        intervals.append({
+            'start': start,
+            'end': end,
+            'phase': phase_name,
+            'level_vus': max(0, int(round(row.get('level_vus', 0) or 0))),
+            'source': 'marker',
+        })
+
+    return merge_intervals(intervals)
+
+
+def build_schedule_intervals(
+    max_elapsed: float,
+    level_vus: int,
+    level_count: int,
+    warmup_seconds: float,
+    measure_seconds: float,
+) -> List[Dict[str, Any]]:
+    intervals = []
+    cursor = 0.0
+    for level in range(1, level_count + 1):
+        target_vus = level * level_vus
+        warmup_end = min(max_elapsed, cursor + warmup_seconds)
+        intervals.append({
+            'start': cursor,
+            'end': warmup_end,
+            'phase': 'warmup',
+            'level_vus': target_vus,
+            'source': 'schedule',
+        })
+
+        measure_start = cursor + warmup_seconds
+        measure_end = min(max_elapsed, measure_start + measure_seconds)
+        intervals.append({
+            'start': measure_start,
+            'end': measure_end,
+            'phase': 'measure',
+            'level_vus': target_vus,
+            'source': 'schedule',
+        })
+
+        cursor += warmup_seconds + measure_seconds
+        if cursor >= max_elapsed:
+            break
+
+    if max_elapsed > cursor:
+        intervals.append({
+            'start': cursor,
+            'end': max_elapsed,
+            'phase': 'teardown',
+            'level_vus': 0,
+            'source': 'schedule',
+        })
+
+    return merge_intervals(intervals)
+
+
+def x_value(seconds: float, use_minutes: bool) -> float:
+    return seconds / 60 if use_minutes else seconds
+
+
+def annotate_phases(ax, intervals: List[Dict[str, Any]], use_minutes: bool):
+    if not intervals:
+        return
+
+    used_phases = set()
+    for interval in intervals:
+        phase = interval['phase']
+        style = PHASE_STYLES.get(phase)
+        if not style:
+            continue
+        start = x_value(interval['start'], use_minutes)
+        end = x_value(interval['end'], use_minutes)
+        label = style['label'] if phase not in used_phases else '_nolegend_'
+        ax.axvspan(start, end, color=style['color'], alpha=style['alpha'], linewidth=0, label=label)
+        used_phases.add(phase)
+
+        width_seconds = interval['end'] - interval['start']
+        if phase == 'measure' and width_seconds >= 30:
+            ax.text(
+                (start + end) / 2,
+                0.98,
+                f"{interval['level_vus']} devices\nmeasure",
+                transform=ax.get_xaxis_transform(),
+                ha='center',
+                va='top',
+                fontsize=8,
+                color='#0f5132',
+            )
+        elif phase == 'teardown' and width_seconds >= 10:
+            ax.text(
+                (start + end) / 2,
+                0.98,
+                'teardown',
+                transform=ax.get_xaxis_transform(),
+                ha='center',
+                va='top',
+                fontsize=8,
+                color='#343a40',
+            )
+
+
+def add_expected_rate_overlay(
+    ax,
+    metric_name: str,
+    intervals: List[Dict[str, Any]],
+    use_minutes: bool,
+    report_interval_seconds: float,
+):
+    if report_interval_seconds <= 0:
+        return
+
+    lower_name = metric_name.lower()
+    if not (
+        'consumption recorded' in lower_name
+        or 'authorization debits' in lower_name
+        or 'mqtt events received' in lower_name
+        or 'mqtt events processed' in lower_name
+    ):
+        return
+
+    points_x = []
+    points_y = []
+    for interval in intervals:
+        if interval['phase'] not in {'warmup', 'measure'}:
+            continue
+        expected = interval['level_vus'] / report_interval_seconds
+        points_x.extend([x_value(interval['start'], use_minutes), x_value(interval['end'], use_minutes)])
+        points_y.extend([expected, expected])
+
+    if points_x:
+        ax.step(
+            points_x,
+            points_y,
+            where='post',
+            color='#111827',
+            linestyle='--',
+            linewidth=1.2,
+            label='Incoming report rate',
+        )
+
+
+def add_saturation_thresholds(
+    ax,
+    metric_name: str,
+    ylabel: str,
+    resource_threshold_percent: float,
+    latency_threshold_seconds: float,
+):
+    lower_name = metric_name.lower()
+    if 'percent' in ylabel.lower() or '(%)' in metric_name or 'usage (%)' in lower_name:
+        ax.axhline(resource_threshold_percent, color='#b00020', linestyle=':', linewidth=1.2)
+        ax.text(
+            0.995,
+            resource_threshold_percent,
+            f'{resource_threshold_percent:g}% saturation',
+            transform=ax.get_yaxis_transform(),
+            ha='right',
+            va='bottom',
+            fontsize=8,
+            color='#b00020',
+        )
+
+    if 'latency' in lower_name and latency_threshold_seconds > 0:
+        ax.axhline(latency_threshold_seconds, color='#b00020', linestyle=':', linewidth=1.2)
+        ax.text(
+            0.995,
+            latency_threshold_seconds,
+            f'{latency_threshold_seconds:g}s threshold',
+            transform=ax.get_yaxis_transform(),
+            ha='right',
+            va='bottom',
+            fontsize=8,
+            color='#b00020',
+        )
+
+
+def clean_series_label(metric_name: str, column: str) -> str:
+    if column == 'value':
+        return metric_name
+    for key in ('name=', 'instance=', 'topic=', 'stream=', 'group='):
+        if key in column:
+            return column.split(key, 1)[1].split(',', 1)[0].strip()
+    return column
+
+
+def conversion_for_metric(metric_name: str, unit_code: str) -> tuple[float, str]:
+    lower_name = metric_name.lower()
+    if unit_code in {'bytes', 'decbytes'} and 'memory' in lower_name:
+        return 1 / (1024 * 1024), 'MiB'
+    if unit_code in {'Bps', 'binBps'}:
+        return 1 / 1024, 'KiB/s'
+    return 1.0, get_unit_label(unit_code)
+
+
+def plot_csv_file(
+    csv_path: Path,
+    output_dir: Path,
+    units_map: Dict[str, str],
+    initial_time: Optional[pd.Timestamp],
+    intervals: List[Dict[str, Any]],
+    report_interval_seconds: float,
+    resource_threshold_percent: float,
+    latency_threshold_seconds: float,
+) -> bool:
     metric_name = csv_path.stem
-    
-    # Get unit for this metric from dashboard
-    unit_code = units_map.get(metric_name, '')
-    
-    # Determine if we need to convert values and what the label should be
-    conversion_factor = 1.0
-    ylabel = get_unit_label(unit_code) if unit_code else 'Value'
-    
-    # Check if this is a memory metric (needs conversion from bytes to MB)
-    if 'Memory' in metric_name and unit_code in ['bytes', 'decbytes']:
-        conversion_factor = 1.0 / (1024 * 1024)  # Bytes to MB
-        ylabel = 'MB'
-    
-    # Check if this is a disk throughput metric (needs conversion from bytes/s to KiB/s)
-    elif 'Disk' in metric_name and unit_code == 'binBps':
-        conversion_factor = 1.0 / 1024  # Bytes/s to KiB/s
-        ylabel = 'KiB/s'
-    
-    # Check if this is a network throughput metric (needs conversion from bytes/s to KiB/s)
-    elif 'Network' in metric_name and unit_code == 'binBps':
-        conversion_factor = 1.0 / 1024  # Bytes/s to KiB/s
-        ylabel = 'KiB/s'
-    
-    # Identify data columns (exclude timestamp, datetime, datetime_parsed, elapsed_seconds, and any _min versions)
-    exclude_cols = {'timestamp', 'datetime', 'datetime_parsed', 'elapsed_seconds', 'elapsed_seconds_min'}
-    # Also exclude any columns that end with '_min' (time display columns)
-    data_cols = [col for col in df.columns if col not in exclude_cols and not col.endswith('_min')]
-    
-    if not data_cols:
-        print(f"  ❌ No data columns found")
+    if metric_name in MARKER_TITLES:
         return False
-    
-    # Apply conversion to data columns if needed
+
+    print(f"Processing: {csv_path.name}")
+    df = read_metric_csv(csv_path)
+    if df is None:
+        print("  No valid timestamped data")
+        return False
+
+    data_cols = coerce_metric_columns(df)
+    if not data_cols:
+        print("  No numeric data columns")
+        return False
+
+    if initial_time is not None:
+        df['elapsed_from_experiment_start'] = (df['datetime_parsed'] - initial_time).dt.total_seconds()
+        df = df[df['elapsed_from_experiment_start'] >= 0].copy()
+        if df.empty:
+            print("  No samples after experiment start")
+            return False
+        time_col = 'elapsed_from_experiment_start'
+        xlabel_prefix = 'Elapsed time'
+    elif 'elapsed_seconds' in df.columns:
+        time_col = 'elapsed_seconds'
+        xlabel_prefix = 'Elapsed time from export start'
+    else:
+        print("  Could not determine relative time")
+        return False
+
+    unit_code = units_map.get(metric_name, '')
+    conversion_factor, ylabel = conversion_for_metric(metric_name, unit_code)
     if conversion_factor != 1.0:
         for col in data_cols:
             df[col] = df[col] * conversion_factor
-    
-    # Create figure
-    plt.figure(figsize=(12, 6))
-    
-    # Determine if we need to convert to minutes for display
-    use_minutes = False
-    if initial_time is not None:
-        time_range = df[time_col].max() - df[time_col].min()
-        if time_range > 600:  # More than 10 minutes
-            use_minutes = True
-            df[time_col + '_min'] = df[time_col] / 60
-            time_col_display = time_col + '_min'
-        else:
-            time_col_display = time_col
+
+    max_elapsed = float(df[time_col].max())
+    use_minutes = max_elapsed > 600
+    if use_minutes:
+        df['elapsed_minutes'] = df[time_col] / 60
+        x_col = 'elapsed_minutes'
+        xlabel = f'{xlabel_prefix} (min)'
     else:
-        time_col_display = time_col
-    
-    # Plot each series
+        x_col = time_col
+        xlabel = f'{xlabel_prefix} (s)'
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+
+    annotate_phases(ax, intervals, use_minutes)
+
     for col in data_cols:
-        # Clean up column name for legend
-        if col == 'value':
-            label = metric_name
-        else:
-            # Extract meaningful parts from label strings like "instance=192.168.0.170:9462, name=caddy"
-            # Try to extract name= value
-            if 'name=' in col:
-                parts = col.split('name=')
-                if len(parts) > 1:
-                    label = parts[1].split(',')[0].strip()
-                else:
-                    label = col
-            else:
-                label = col
-        
-        # Plot the series
-        plt.plot(df[time_col_display], df[col], label=label, linewidth=1.5, alpha=0.9)
-    
-    # Styling
-    plt.title(metric_name, fontsize=16, fontweight='bold', pad=20)
-    plt.ylabel(ylabel, fontsize=12, fontweight='bold')
-    
-    # Format x-axis
-    ax = plt.gca()
-    
-    if initial_time is not None:
-        # Use elapsed time
-        time_range_seconds = df[time_col].max() - df[time_col].min()
-        
-        # Determine if we should use seconds or minutes
-        if not use_minutes:
-            plt.xlabel('Elapsed time (s)', fontsize=12, fontweight='bold')
-            # Show every 30 seconds for short experiments
-            if time_range_seconds <= 300:
-                ax.xaxis.set_major_locator(plt.MultipleLocator(30))
-            else:
-                ax.xaxis.set_major_locator(plt.MultipleLocator(60))
-            
-            # Add VU level markers (in seconds) - vertical lines only
-            if vu_levels:
-                for level in vu_levels:
-                    level_time = level['time']
-                    if df[time_col_display].min() <= level_time <= df[time_col_display].max():
-                        # Vertical line at time division
-                        ax.axvline(x=level_time, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-                        # Add label at top
-                        vu_level = level['vu_level']
-                        y_max = ax.get_ylim()[1]
-                        ax.text(level_time, y_max * 0.98, f'VU={vu_level}', 
-                               rotation=90, verticalalignment='top', horizontalalignment='right',
-                               fontsize=8, alpha=0.7, bbox=dict(boxstyle='round,pad=0.3', 
-                               facecolor='white', alpha=0.7, edgecolor='gray', linewidth=0.5))
-        else:
-            plt.xlabel('Elapsed time (min)', fontsize=12, fontweight='bold')
-            time_range_minutes = time_range_seconds / 60
-            # Show every 2 minutes
-            ax.xaxis.set_major_locator(plt.MultipleLocator(2))
-            
-            # Add VU level markers (in minutes) - vertical lines only
-            if vu_levels:
-                for level in vu_levels:
-                    level_time = level['time'] / 60
-                    if df[time_col_display].min() <= level_time <= df[time_col_display].max():
-                        # Vertical line at time division
-                        ax.axvline(x=level_time, color='gray', linestyle='--', alpha=0.5, linewidth=1)
-                        # Add label at top
-                        vu_level = level['vu_level']
-                        y_max = ax.get_ylim()[1]
-                        ax.text(level_time, y_max * 0.98, f'VU={vu_level}', 
-                               rotation=90, verticalalignment='top', horizontalalignment='right',
-                               fontsize=8, alpha=0.7, bbox=dict(boxstyle='round,pad=0.3', 
-                               facecolor='white', alpha=0.7, edgecolor='gray', linewidth=0.5))
+        ax.plot(
+            df[x_col],
+            df[col],
+            label=clean_series_label(metric_name, col),
+            linewidth=1.5,
+            alpha=0.9,
+        )
+
+    add_expected_rate_overlay(ax, metric_name, intervals, use_minutes, report_interval_seconds)
+    add_saturation_thresholds(ax, metric_name, ylabel, resource_threshold_percent, latency_threshold_seconds)
+
+    ax.set_title(metric_name, fontsize=16, fontweight='bold', pad=18)
+    ax.set_xlabel(xlabel, fontsize=12, fontweight='bold')
+    ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+    ax.grid(True, linestyle='--', alpha=0.55)
+    ax.set_xlim(float(df[x_col].min()), float(df[x_col].max()))
+
+    if use_minutes:
+        ax.xaxis.set_major_locator(plt.MultipleLocator(2))
+    elif max_elapsed <= 300:
+        ax.xaxis.set_major_locator(plt.MultipleLocator(30))
     else:
-        # Fallback to absolute time formatting
-        plt.xlabel('Time', fontsize=12, fontweight='bold')
-        time_range = (df[time_col].max() - df[time_col].min()).total_seconds()
-        
-        if time_range <= 60:
-            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=10))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        elif time_range <= 300:
-            ax.xaxis.set_major_locator(mdates.SecondLocator(interval=30))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        elif time_range <= 1800:
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=2))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-        elif time_range <= 3600:
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=5))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        else:
-            ax.xaxis.set_major_locator(mdates.MinuteLocator(interval=10))
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
-        plt.xticks(rotation=45)
-    
-    # Grid and Limits
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.xlim(df[time_col_display].min(), df[time_col_display].max())
-    
-    # Legend
-    if len(data_cols) > 1:
-        # Multiple series: place legend outside
-        plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0, title="Series")
-    # Single series: no legend needed
-    
-    # Save
-    safe_filename = sanitize_filename(metric_name)
-    output_path = output_dir / f"{safe_filename}.png"
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=300)
-    print(f"  ✓ Saved: {output_path}")
-    plt.close()
-    
+        ax.xaxis.set_major_locator(plt.MultipleLocator(60))
+
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(
+            handles,
+            labels,
+            bbox_to_anchor=(1.02, 1),
+            loc='upper left',
+            borderaxespad=0,
+            title='Series / phase',
+        )
+
+    output_path = output_dir / f'{sanitize_filename(metric_name)}.png'
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300)
+    plt.close(fig)
+    print(f"  Saved: {output_path}")
     return True
 
 
-def generate_graphs(input_dir: str = DEFAULT_INPUT_DIR, output_dir: str = DEFAULT_OUTPUT_DIR, 
-                   dashboard_path: str = DEFAULT_DASHBOARD):
-    """Generate graphs from all CSV files in the input directory."""
+def generate_graphs(
+    input_dir: str = DEFAULT_INPUT_DIR,
+    output_dir: str = DEFAULT_OUTPUT_DIR,
+    dashboard_path: str = DEFAULT_DASHBOARD,
+    level_vus: int = 25,
+    level_count: int = 8,
+    warmup: str = '60s',
+    measure: str = '120s',
+    report_interval_seconds: float = 1.0,
+    resource_threshold_percent: float = 90.0,
+    latency_threshold_seconds: float = 5.0,
+):
     input_path = Path(input_dir)
     output_path = Path(output_dir)
-    
+
     if not input_path.exists():
         print(f"Error: Input directory '{input_dir}' not found.")
         print("Run export_metrics.py first to generate CSV files.")
         return
-    
-    # Load dashboard units
-    print(f"Loading unit mappings from dashboard...")
-    units_map = load_dashboard_units(dashboard_path)
-    if units_map:
-        print(f"  Loaded units for {len(units_map)} metrics")
-    print()
-    
-    # Create output directory if it doesn't exist
+
+    units_map = load_units(input_path, dashboard_path)
     output_path.mkdir(parents=True, exist_ok=True)
-    
-    # Find initial time from VU data
-    print("Finding initial experiment time...")
+
     initial_time = find_initial_time(input_path)
-    if initial_time is not None:
-        print(f"  Initial time: {initial_time}")
-        vu_levels = identify_vu_levels(input_path, initial_time)
-        print(f"  Found {len(vu_levels)} VU level boundaries")
+    if initial_time is None:
+        print("Warning: Could not find experiment start; using export-relative elapsed seconds where available.")
+        intervals = []
     else:
-        print("  ⚠️  Could not find initial time, using absolute time")
-        initial_time = None
-        vu_levels = []
-    print()
-    
-    # Find all CSV files
-    csv_files = list(input_path.glob('*.csv'))
-    
+        print(f"Experiment start: {initial_time.isoformat()}")
+        max_elapsed = find_max_elapsed(input_path, initial_time)
+        intervals = build_marker_intervals(input_path, initial_time, max_elapsed)
+        if intervals:
+            print(f"Using load-test marker metrics for {len(intervals)} timeline intervals.")
+        else:
+            warmup_seconds = parse_duration_seconds(warmup)
+            measure_seconds = parse_duration_seconds(measure)
+            intervals = build_schedule_intervals(max_elapsed, level_vus, level_count, warmup_seconds, measure_seconds)
+            print(f"Using configured schedule fallback for {len(intervals)} timeline intervals.")
+
+    csv_files = sorted(path for path in input_path.glob('*.csv') if path.stem not in MARKER_TITLES)
     if not csv_files:
-        print(f"No CSV files found in '{input_dir}'")
+        print(f"No metric CSV files found in '{input_dir}'")
         return
-    
-    print(f"Found {len(csv_files)} CSV files in '{input_dir}'")
+
+    print(f"Found {len(csv_files)} plottable CSV files in '{input_dir}'")
     print(f"Output directory: '{output_dir}'")
     print()
-    
+
     successful = 0
     failed = 0
-    
-    for csv_file in sorted(csv_files):
-        if plot_csv_file(csv_file, output_path, units_map, initial_time, vu_levels):
+    for csv_file in csv_files:
+        if plot_csv_file(
+            csv_file,
+            output_path,
+            units_map,
+            initial_time,
+            intervals,
+            report_interval_seconds,
+            resource_threshold_percent,
+            latency_threshold_seconds,
+        ):
             successful += 1
         else:
             failed += 1
-    
+
     print()
-    print(f"{'='*60}")
-    print(f"Plotting complete!")
+    print(f"{'=' * 60}")
+    print("Plotting complete!")
     print(f"  Successful: {successful}")
-    print(f"  Failed: {failed}")
+    print(f"  Skipped/failed: {failed}")
     print(f"  Output directory: {output_path.absolute()}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Plot metrics from exported CSV files',
+        description='Plot exported metrics with load-level and teardown annotations',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   python plot_exported_metrics.py
-  python plot_exported_metrics.py --input-dir my_metrics --output-dir my_graphs
-        """
+  python plot_exported_metrics.py --input-dir metrics_export --output-dir graphs
+  python plot_exported_metrics.py --level-vus 25 --level-count 8 --warmup 60s --measure 120s
+        """,
     )
     parser.add_argument('--input-dir', default=DEFAULT_INPUT_DIR,
                         help=f'Input directory containing CSV files (default: {DEFAULT_INPUT_DIR})')
@@ -505,12 +729,35 @@ Examples:
                         help=f'Output directory for PNG files (default: {DEFAULT_OUTPUT_DIR})')
     parser.add_argument('--dashboard', default=DEFAULT_DASHBOARD,
                         help=f'Path to Grafana dashboard JSON (default: {DEFAULT_DASHBOARD})')
-    
+    parser.add_argument('--level-vus', type=int, default=25,
+                        help='Number of devices added per load level when marker metrics are unavailable')
+    parser.add_argument('--level-count', type=int, default=8,
+                        help='Number of configured load levels when marker metrics are unavailable')
+    parser.add_argument('--warmup', default='60s',
+                        help='Warmup duration per level when marker metrics are unavailable')
+    parser.add_argument('--measure', default='120s',
+                        help='Measurement duration per level when marker metrics are unavailable')
+    parser.add_argument('--report-interval-seconds', type=float, default=1.0,
+                        help='Expected usage report interval per device, used for incoming-rate overlays')
+    parser.add_argument('--resource-threshold-percent', type=float, default=90.0,
+                        help='Saturation threshold line for percent resource metrics')
+    parser.add_argument('--latency-threshold-seconds', type=float, default=5.0,
+                        help='Saturation threshold line for latency metrics')
+
     args = parser.parse_args()
-    
-    generate_graphs(args.input_dir, args.output_dir, args.dashboard)
+    generate_graphs(
+        input_dir=args.input_dir,
+        output_dir=args.output_dir,
+        dashboard_path=args.dashboard,
+        level_vus=args.level_vus,
+        level_count=args.level_count,
+        warmup=args.warmup,
+        measure=args.measure,
+        report_interval_seconds=args.report_interval_seconds,
+        resource_threshold_percent=args.resource_threshold_percent,
+        latency_threshold_seconds=args.latency_threshold_seconds,
+    )
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
-

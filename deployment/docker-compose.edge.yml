@@ -11,6 +11,7 @@ services:
   postgres:
     image: postgres:17-alpine
     container_name: postgres
+    profiles: ["postgres"]
     environment:
       - POSTGRES_DB=ledger
       - POSTGRES_USER=ledger
@@ -150,6 +151,7 @@ services:
       - REDIS_PORT=6379
       - STREAM_READ_COUNT=${LEDGER_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${LEDGER_STREAM_PARALLELISM:-4}
+      - REPOSITORY_TYPE=${REPOSITORY_TYPE:-sqlite}
       - DB_PATH=/data/ledger
       - PG_DSN=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
       - PG_MAX_OPEN_CONNS=${PG_MAX_OPEN_CONNS:-10}
@@ -174,6 +176,7 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+        required: false
     logging: *default-logging
     restart: unless-stopped
 
@@ -187,6 +190,7 @@ services:
       - REDIS_PORT=6379
       - STREAM_READ_COUNT=${CONSUMPTION_STREAM_READ_COUNT:-100}
       - STREAM_PARALLELISM=${CONSUMPTION_STREAM_PARALLELISM:-4}
+      - REPOSITORY_TYPE=${REPOSITORY_TYPE:-sqlite}
       - DB_PATH=/data/consumption
       - PG_DSN=postgres://ledger:ledger@postgres:5432/ledger?sslmode=disable
       - PG_MAX_OPEN_CONNS=${PG_MAX_OPEN_CONNS:-10}
@@ -204,6 +208,7 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+        required: false
     logging: *default-logging
     restart: unless-stopped
 
@@ -287,34 +292,5 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
     ports:
       - "9463:9100"   # remove this if you use network_mode: host
-    logging: *default-logging
-
-  # Host /proc via pid + mount (same idea as Ansible process-exporter on bare metal).
-  process_exporter:
-    image: ncabatoff/process-exporter:0.8.7
-    container_name: process_exporter
-    restart: unless-stopped
-    pid: host
-    ports:
-      - "9256:9256"
-    volumes:
-      - /proc:/host/proc:ro
-    command:
-      - --procfs=/host/proc
-      - --web.listen-address=:9256
-    logging: *default-logging
-
-  # Talks to the host systemd over D-Bus. Linux only; typically unusable on Docker Desktop (macOS).
-  systemd_exporter:
-    image: prometheuscommunity/systemd-exporter:v0.7.0
-    container_name: systemd_exporter
-    restart: unless-stopped
-    pid: host
-    ports:
-      - "9558:9558"
-    volumes:
-      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
-    command:
-      - --web.listen-address=:9558
     logging: *default-logging
 

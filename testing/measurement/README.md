@@ -130,6 +130,17 @@ The `export_metrics.py` script allows you to export all metrics from your Grafan
      --prometheus-url http://192.168.0.170:9090
    ```
 
+   If the dashboard contains Grafana variables, the exporter uses the current
+   values saved in the dashboard JSON. Override them explicitly when exporting a
+   different target:
+   ```bash
+   python3 export_metrics.py \
+     --from "2025-12-18T18:25:04.648Z" \
+     --to "2025-12-18T18:34:57.053Z" \
+     --prometheus-url http://localhost:9090 \
+     --var instance=192.168.0.200:9463
+   ```
+
 3. **Export only JSON or CSV**:
    ```bash
    python3 export_metrics.py \
@@ -151,9 +162,13 @@ The `export_metrics.py` script allows you to export all metrics from your Grafan
 The script extracts all Prometheus queries from the Grafana dashboard and exports each metric to separate files:
 
 - **JSON files**: Contain the full Prometheus API response including metadata
-- **CSV files**: Time-series data with timestamps and values for each series
+- **CSV files**: Time-series data with timestamps, export-relative elapsed seconds, and values for each series
+- **manifest.json**: Records the time range, substitutions, exported query list, and generated filenames
 
 Files are named based on the panel title from the dashboard (sanitized for filesystem compatibility).
+The exporter also requests k6 load-test marker metrics when they are available:
+`k6_loadtest_stage_index`, `k6_loadtest_phase_code`,
+`k6_loadtest_level_vus`, and `k6_loadtest_measurement_active`.
 
 ### Example Output
 
@@ -178,12 +193,21 @@ python3 plot_exported_metrics.py
 
 This will:
 - Read all CSV files from the `metrics_export/` directory
-- Generate matplotlib graphs in the same style as `plot_graphs.py`
+- Generate report-ready matplotlib graphs using elapsed time on the x-axis
+- Shade warmup, measurement, and teardown periods directly in each graph
+- Label measurement windows with the active device count
+- Overlay the expected incoming report rate on throughput graphs
+- Add default saturation threshold lines for 90% resource use and 5s latency
 - Save PNG files to the `graphs/` directory
 
 **Options:**
 - `--input-dir`: Specify custom input directory (default: `metrics_export`)
 - `--output-dir`: Specify custom output directory (default: `graphs`)
+- `--level-vus`: Devices added per level when marker metrics are unavailable (default: `25`)
+- `--level-count`: Number of load levels when marker metrics are unavailable (default: `8`)
+- `--warmup`: Warmup duration per level when marker metrics are unavailable (default: `60s`)
+- `--measure`: Measurement duration per level when marker metrics are unavailable (default: `120s`)
+- `--report-interval-seconds`: Expected per-device usage report interval for incoming-rate overlays (default: `1`)
 
 **Example:**
 ```bash

@@ -13,8 +13,8 @@ fi
 : "${PROMETHEUS_SELF_SCRAPE_TARGET:=localhost:9090}"
 
 # Comma-separated job_name:port (no spaces). Override fully in compose or Ansible.
-# Omit cadvisor here when the scrape target does not run cAdvisor; add cadvisor:9462 when it does.
-PROMETHEUS_SCRAPE_JOBS_DEFAULT='ledger:9460,consumption:9465,device:9466,redis:9461,node:9463,process:9256,systemd:9558'
+# monitoring.json uses app metrics plus redis, node, and cAdvisor exporter families.
+PROMETHEUS_SCRAPE_JOBS_DEFAULT='ledger:9460,consumption:9465,device:9466,redis:9461,node:9463,cadvisor:9462'
 : "${PROMETHEUS_SCRAPE_JOBS:=${PROMETHEUS_SCRAPE_JOBS_DEFAULT}}"
 
 substitute_cluster() {

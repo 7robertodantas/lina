@@ -1,4 +1,4 @@
-import { Counter, Rate } from 'k6/metrics';
+import { Counter, Gauge, Rate } from 'k6/metrics';
 import http from 'k6/http';
 import { randomString, getCurrentStageIndex } from 'https://jslib.k6.io/k6-utils/1.4.0/index.js';
 import { sleep } from 'k6';
@@ -56,20 +56,17 @@ const log = {
 /** VU 1 only: log ramping-vus stage transitions (always on stdout; not filtered by LOG_LEVEL). */
 let lastLoggedStageIndex = -1;
 
-function maybeLogRampStageTarget() {
+function maybeLogRampStageTarget(loadContext) {
   if (__VU !== 1) return;
-  try {
-    const idx = getCurrentStageIndex();
-    if (idx === lastLoggedStageIndex) return;
-    lastLoggedStageIndex = idx;
-    const st = loadTestStages[idx];
-    if (!st) return;
-    console.log(
-      `${logTimePrefix()} [loadtest] ramp stage ${idx + 1}/${loadTestStages.length}: target ${st.target} VUs, duration ${st.duration}`
-    );
-  } catch (_e) {
-    // Older k6 or non-stages executors: ignore
-  }
+  const idx = loadContext.index;
+  if (idx === lastLoggedStageIndex) return;
+  lastLoggedStageIndex = idx;
+  const st = loadContext.stage;
+  if (!st) return;
+  console.log(
+    `${logTimePrefix()} [loadtest] ramp stage ${idx + 1}/${loadTestStages.length}: ` +
+      `${st.phase}, target ${st.target} VUs, duration ${st.duration}`
+  );
 }
 
 // --- Metrics ---
@@ -81,13 +78,22 @@ const devicePaused = new Counter('device_paused'); // Times device was paused (S
 const deviceConnected = new Counter('device_connected'); // Successful device connections
 const deviceConnectionFailed = new Counter('device_connection_failed'); // Failed device connections
 
+// Experiment marker metrics. With k6 Prometheus remote write these are exported as:
+// k6_loadtest_stage_index, k6_loadtest_phase_code, k6_loadtest_level_vus, and
+// k6_loadtest_measurement_active. The plotting tools use them to annotate the
+// experiment timeline without relying on wall-clock labels.
+const loadtestStageIndex = new Gauge('loadtest_stage_index');
+const loadtestPhaseCode = new Gauge('loadtest_phase_code');
+const loadtestLevelVUs = new Gauge('loadtest_level_vus');
+const loadtestMeasurementActive = new Gauge('loadtest_measurement_active');
+
 // Initialize metrics to 0 to ensure they appear in results even if never used
 // Note: k6 only shows metrics that have been used, but initializing helps with visibility
 
 const API_BASE_URL = __ENV.API_BASE_URL || 'http://localhost:8080';
 const API_DEVICES_BATCH_ENDPOINT = __ENV.API_DEVICES_BATCH_ENDPOINT || '/devices/batch';
 const HTTPDEVICE_BASE_URL = __ENV.HTTPDEVICE_BASE_URL || 'http://localhost:3002';
-const USAGE_REPORT_INTERVAL = parseInt(__ENV.USAGE_REPORT_INTERVAL || '1'); // seconds between reports
+const USAGE_REPORT_INTERVAL = parsePositiveInt(__ENV.USAGE_REPORT_INTERVAL, 1); // seconds between reports
 const UNIT_PRICE_MSAT = parseInt(__ENV.UNIT_PRICE_MSAT || '100');
 const AUTHORIZE_REQUEST_MSAT = parseInt(__ENV.AUTHORIZE_REQUEST_MSAT || '10000');
 
@@ -99,33 +105,22 @@ const TEARDOWN_DRAIN_SECONDS = (() => {
   return Number.isNaN(n) ? 45 : Math.max(0, n);
 })();
 
-const LEVEL_VUS = 25;
-const WARMUP = '60s';
-const MEASURE = '120s';
-const IDLE = '30s';
-const TEARDOWN = '60s'
+const LEVEL_VUS = parsePositiveInt(__ENV.LEVEL_VUS, 25);
+const LEVEL_COUNT = parsePositiveInt(__ENV.LEVEL_COUNT, 8);
+const WARMUP = __ENV.WARMUP || '60s';
+const MEASURE = __ENV.MEASURE || '120s';
+const IDLE = __ENV.IDLE || '30s';
+const TEARDOWN = __ENV.TEARDOWN || '60s';
 
-// Define load test stages
-const loadTestStages = [
-  { duration: IDLE, target: 0 },
-  { duration: WARMUP, target: LEVEL_VUS },
-  { duration: MEASURE, target: LEVEL_VUS },   // warmup
-  { duration: WARMUP, target: LEVEL_VUS * 2 },
-  { duration: MEASURE, target: LEVEL_VUS * 2 },
-  { duration: WARMUP, target: LEVEL_VUS * 3 },
-  { duration: MEASURE, target: LEVEL_VUS * 3 },
-  { duration: WARMUP, target: LEVEL_VUS * 4 },
-  { duration: MEASURE, target: LEVEL_VUS * 4 },
-  { duration: WARMUP, target: LEVEL_VUS * 5 },
-  { duration: MEASURE, target: LEVEL_VUS * 5 },
-  { duration: WARMUP, target: LEVEL_VUS * 6 },
-  { duration: MEASURE, target: LEVEL_VUS * 6 },
-  { duration: WARMUP, target: LEVEL_VUS * 7 },
-  { duration: MEASURE, target: LEVEL_VUS * 7 },
-  { duration: WARMUP, target: LEVEL_VUS * 8 },
-  { duration: MEASURE, target: LEVEL_VUS * 8 },
-  { duration: TEARDOWN, target: 0 },
-];
+const PHASE_CODES = {
+  idle: 0,
+  warmup: 1,
+  measure: 2,
+  teardown: 3,
+};
+
+const loadTestSchedule = buildLoadTestSchedule();
+const loadTestStages = loadTestSchedule.map(({ duration, target }) => ({ duration, target }));
 
 // Calculate maximum VU count from stages (for setup - register all devices that will be used)
 const maxVUsFromStages = Math.max(...loadTestStages.map(stage => stage.target || 0));
@@ -151,6 +146,73 @@ export const options = {
 };
 
 // --- Helpers ---
+function parsePositiveInt(raw, defaultValue) {
+  const parsed = parseInt(raw, 10);
+  if (Number.isNaN(parsed) || parsed <= 0) return defaultValue;
+  return parsed;
+}
+
+function buildLoadTestSchedule() {
+  const stages = [
+    { duration: IDLE, target: 0, phase: 'idle', level: 0, levelVUs: 0 },
+  ];
+
+  for (let level = 1; level <= LEVEL_COUNT; level++) {
+    const target = LEVEL_VUS * level;
+    stages.push({ duration: WARMUP, target, phase: 'warmup', level, levelVUs: target });
+    stages.push({ duration: MEASURE, target, phase: 'measure', level, levelVUs: target });
+  }
+
+  stages.push({ duration: TEARDOWN, target: 0, phase: 'teardown', level: LEVEL_COUNT + 1, levelVUs: 0 });
+
+  return stages.map((stage, index) => ({ ...stage, index }));
+}
+
+function fallbackLoadContext() {
+  const stage = { duration: '0s', target: 0, phase: 'unknown', level: 0, levelVUs: 0, index: -1 };
+  return {
+    index: -1,
+    stage,
+    phaseCode: -1,
+    metricTags: {
+      phase: 'unknown',
+      load_level: '0',
+      target_vus: '0',
+    },
+  };
+}
+
+function getCurrentLoadContext() {
+  try {
+    const index = getCurrentStageIndex();
+    const stage = loadTestSchedule[index];
+    if (!stage) return fallbackLoadContext();
+
+    return {
+      index,
+      stage,
+      phaseCode: PHASE_CODES[stage.phase] ?? -1,
+      metricTags: {
+        phase: stage.phase,
+        load_level: String(stage.level),
+        target_vus: String(stage.levelVUs),
+      },
+    };
+  } catch (_e) {
+    // Older k6 or non-stages executors: keep the load path running.
+    return fallbackLoadContext();
+  }
+}
+
+function recordLoadTestMarkers(loadContext) {
+  if (loadContext.index < 0) return;
+
+  loadtestStageIndex.add(loadContext.index);
+  loadtestPhaseCode.add(loadContext.phaseCode);
+  loadtestLevelVUs.add(loadContext.stage.levelVUs);
+  loadtestMeasurementActive.add(loadContext.stage.phase === 'measure' ? 1 : 0);
+}
+
 function generateDeviceID(vuID) {
   // Match the pattern used in setup: k6_device_{id} with 6-digit padding
   return `k6_device_${String(vuID).padStart(6, '0')}`;
@@ -176,7 +238,7 @@ export function setup() {
   const vuSource = __ENV.VUS ? 'VUS environment variable' : `maximum from stages (${maxVUsFromStages})`;
   log.info(`Starting load test setup: pre-registering ${VUsCount} devices in batch (${vuSource})...`);
   log.info(
-    `Ramp profile: ${loadTestStages.map((s) => `${s.duration}@${s.target}VU`).join(' → ')}`
+    `Ramp profile: ${loadTestSchedule.map((s) => `${s.phase}:${s.duration}@${s.target}VU`).join(' → ')}`
   );
 
   // Generate device IDs
@@ -299,15 +361,20 @@ export function setup() {
     registered,
     connected,
     failed,
+    loadTestSchedule,
   };
 }
 
 // --- Load Usage Scenario ---
 export function load_usage() {
-  maybeLogRampStageTarget();
+  const loadContext = getCurrentLoadContext();
+  maybeLogRampStageTarget(loadContext);
+  recordLoadTestMarkers(loadContext);
 
   const vuID = __VU;
   const deviceID = generateDeviceID(vuID);
+  const metricTags = loadContext.metricTags;
+  const httpTags = { type: 'loadtest', ...metricTags };
 
   // k6 calls this function in a loop - each call sends one usage report
   // The httpdevices service handles all the MQTT logic, authorization maintenance, etc.
@@ -330,28 +397,28 @@ export function load_usage() {
     usagePayload,
     { 
       headers: { 'Content-Type': 'application/json' },
-      tags: { type: 'loadtest' },
+      tags: httpTags,
     }
   );
 
   if (usageRes.status === 200) {
-    usageReported.add(1);
-    usageReportRate.add(1);
+    usageReported.add(1, metricTags);
+    usageReportRate.add(1, metricTags);
     // Ensure device_paused metric is always visible (initialize to 0 if not paused)
     log.debug(`[VU ${vuID}] Usage report sent (${JSON.parse(usagePayload).reportId}): ${measure.toFixed(4)} kWh`);
-    devicePaused.add(0);
+    devicePaused.add(0, metricTags);
   } else if (usageRes.status === 423) {
     // 423 = Locked/Reporting disabled (STOP/PAUSE command received)
     // Device is paused, not failed - k6 will continue calling this function
-    devicePaused.add(1);
+    devicePaused.add(1, metricTags);
   } else {
-    usageReportFailed.add(1);
+    usageReportFailed.add(1, metricTags);
     // Ensure device_paused metric is always visible (initialize to 0 if not paused)
-    devicePaused.add(0);
+    devicePaused.add(0, metricTags);
     log.error(`[VU ${vuID}] Usage report failed: ${usageRes.status} - ${usageRes.body}`);
   }
 
-  sleep(1); // Sleep for 1 second for each usage report
+  sleep(USAGE_REPORT_INTERVAL); // Sleep between usage reports for each device
 
   // Sleep for a random interval between 0.1 and 1.0 seconds
   // This creates realistic, desynchronized load patterns

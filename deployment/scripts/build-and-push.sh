@@ -98,11 +98,11 @@ run_build() {
 # Build and push all services
 echo -e "${BLUE}=== Building infrastructure services ===${NC}\n"
 
-# run_build "caddy" "./infrastructure/caddy/Dockerfile" "./infrastructure/caddy" "${REGISTRY}-caddy:buildcache"
-# run_build "redis" "./infrastructure/redis/Dockerfile" "./infrastructure/redis" "${REGISTRY}-redis:buildcache"
-# run_build "mosquitto" "./infrastructure/mosquitto/Dockerfile" "./infrastructure/mosquitto" "${REGISTRY}-mosquitto:buildcache"
-# run_build "prometheus" "./infrastructure/prometheus/Dockerfile" "./infrastructure/prometheus" "${REGISTRY}-prometheus:buildcache"
-# run_build "grafana" "./infrastructure/grafana/Dockerfile" "./infrastructure/grafana" "${REGISTRY}-grafana:buildcache"
+run_build "caddy" "./infrastructure/caddy/Dockerfile" "./infrastructure/caddy" "${REGISTRY}-caddy:buildcache"
+run_build "redis" "./infrastructure/redis/Dockerfile" "./infrastructure/redis" "${REGISTRY}-redis:buildcache"
+run_build "mosquitto" "./infrastructure/mosquitto/Dockerfile" "./infrastructure/mosquitto" "${REGISTRY}-mosquitto:buildcache"
+run_build "prometheus" "./infrastructure/prometheus/Dockerfile" "./infrastructure/prometheus" "${REGISTRY}-prometheus:buildcache"
+run_build "grafana" "./infrastructure/grafana/Dockerfile" "./infrastructure/grafana" "${REGISTRY}-grafana:buildcache"
 
 # wait
 

@@ -174,11 +174,15 @@ API_BASE_URL=http://192.168.0.170:8080 K6_PROMETHEUS_RW_SERVER_URL=http://localh
 ```
 
 ```
-python3 export_metrics.py --from "2026-01-08T18:25:40.655Z" --to "2026-01-08T18:46:33.820Z" --prometheus-url http://localhost:9090
+python3 export_metrics.py \
+  --from "2026-01-08T18:25:40.655Z" \
+  --to "2026-01-08T18:46:33.820Z" \
+  --prometheus-url http://localhost:9090 \
+  --var instance=192.168.0.200:9463
 ```
 
 ```bash
-python3 plot_exported_metrics.py
+python3 plot_exported_metrics.py --level-vus 25 --level-count 8 --warmup 60s --measure 120s
 ```
 
 
@@ -194,6 +198,5 @@ python3 plot_exported_metrics.py
 - The core services consumed around 10 to 20 MB of ram each (device, consumption, ledger, lightning)
 - The redis service has increased its memory usage linearly when the number of connected devices increased, while the other services kept a constant memory usage.
     - The redis instance increased from 6 MB to 100 MB of ram usage in its peak, this can be due to the lag and accumulated messages in memory.
-
 
 

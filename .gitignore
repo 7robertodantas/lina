@@ -109,6 +109,7 @@ measurement/graphs/*.png
 graphs/
 
 testing/measurement/docker_stats.csv
+testing/measurement/runs/
 *.tex
 
 # Binaries

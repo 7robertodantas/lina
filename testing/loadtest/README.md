@@ -44,18 +44,28 @@ This directory contains k6 load testing scripts to simulate thousands of devices
 The script can be configured via environment variables:
 
 - `LOG_LEVEL`: Script log verbosity — `debug`, `info`, `warn`, or `error` (default: `info`). Matches backend `LOG_LEVEL`: at `info`, per-request success lines and batch progress are hidden; use `debug` for those. Ramp **stage target** lines (`[loadtest] ramp stage …`) are always printed to stdout (VU 1) so you can see VU targets regardless of `LOG_LEVEL`. The active level is printed once at setup: `[loadtest] LOG_LEVEL=…`.
+- `LEVEL_VUS`: Number of simulated devices added per load level (default: `25`)
+- `LEVEL_COUNT`: Number of load levels to execute (default: `8`)
+- `IDLE`: Initial idle stage duration (default: `30s`)
+- `WARMUP`: Warmup/ramp duration per load level (default: `60s`)
+- `MEASURE`: Measurement duration per load level (default: `120s`)
+- `TEARDOWN`: Ramp-down duration after the final level (default: `60s`)
 - `API_BASE_URL`: Base URL for the device service API (default: `http://localhost:8080`)
-- `API_DEVICES_ENDPOINT`: API endpoint path for device registration (default: `/devices`)
-  - Use `/devices` if accessing through Caddy reverse proxy (Caddy rewrites to `/api/v1/devices`)
-  - Use `/api/v1/devices` if accessing device service directly
-- `MQTT_BROKER`: MQTT broker hostname (default: `localhost`)
-- `MQTT_TLS_PORT`: MQTT TLS port (default: `8883`)
-- `USAGE_REPORT_INTERVAL`: Interval in seconds for publishing usage reports (default: `1`)
-- `AUTHORIZE_REQUEST_MSAT`: Amount in millisatoshis to request for authorization (default: `1000000000` = 1 BTC)
-- `HEARTBEAT_INTERVAL`: Interval in seconds for heartbeat messages (default: `60`)
-- `INVOICE_REQUEST_INTERVAL`: Interval in seconds for requesting invoices to add funds (default: `5`)
-- `INVOICE_AMOUNT_MSAT`: Amount in millisatoshis to request per invoice (default: `100000000` = 0.1 BTC)
-- `ABORT_ON_SETUP_FAILURE`: Abort test if setup fails (default: `true`, set to `false` to continue)
+- `API_DEVICES_BATCH_ENDPOINT`: API endpoint path for batch device registration (default: `/devices/batch`)
+- `HTTPDEVICE_BASE_URL`: Base URL for the HTTP device simulator (default: `http://localhost:3002`)
+- `USAGE_REPORT_INTERVAL`: Interval in seconds between usage reports per simulated device (default: `1`)
+- `UNIT_PRICE_MSAT`: Device unit price in millisatoshis (default: `100`)
+- `AUTHORIZE_REQUEST_MSAT`: Amount in millisatoshis to request for authorization (default: `10000`)
+- `CONNECT_BATCH_SIZE`: Number of devices connected per setup batch (default: `LEVEL_VUS`)
+- `CONNECT_BATCH_SLEEP`: Seconds to sleep between setup connection batches (default: `5`)
+- `CONNECT_TIMEOUT`: Timeout for each simulator connect request (default: `120s`)
+- `TEARDOWN_DRAIN_SECONDS`: Seconds to wait before disconnecting devices in teardown (default: `45`)
+
+When using k6 Prometheus remote write, the script also publishes experiment
+marker metrics (`k6_loadtest_stage_index`, `k6_loadtest_phase_code`,
+`k6_loadtest_level_vus`, and `k6_loadtest_measurement_active`). The measurement
+plotting script uses these to annotate warmup, measurement, and teardown in
+report graphs.
 
 ## Project Structure
 
@@ -221,4 +231,3 @@ All MQTT messages use JSON encoding (protojson format with `UseProtoNames: true`
 
 - For self-signed certificates, use k6's `--insecure-skip-tls-verify` flag
 - For production, use properly signed certificates or configure TLS properly
-
