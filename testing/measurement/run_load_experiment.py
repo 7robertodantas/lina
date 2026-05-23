@@ -14,8 +14,8 @@ The runner intentionally keeps each experiment in its own output directory:
 Example:
   python3 testing/measurement/run_load_experiment.py --target-host 192.168.0.200
 
-Use --dry-run to inspect the SSH, Docker Compose, k6, export, and plot commands
-without executing them.
+Use --dry-run to inspect the SSH, Docker Compose, remote data reset, k6,
+export, and plot commands without executing them.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import shlex
 import shutil
 import subprocess
@@ -37,6 +38,7 @@ DEFAULT_TARGET_HOST = '192.168.0.200'
 DEFAULT_TARGET_USER = 'dietpi'
 DEFAULT_TARGET_DIR = 'lina'
 DEFAULT_TARGET_COMPOSE_FILE = 'deployment/docker-compose.edge.yml'
+DEFAULT_TARGET_DATA_DIR = 'deployment/.data/edge'
 DEFAULT_LOCAL_COMPOSE_FILE = 'deployment/docker-compose.external.yml'
 DEFAULT_LOADTEST_FILE = 'testing/loadtest/loadtest.js'
 DEFAULT_EXPORT_SCRIPT = 'testing/measurement/export_metrics.py'
@@ -45,6 +47,15 @@ DEFAULT_DASHBOARD = 'infrastructure/grafana/dashboards/monitoring.json'
 DEFAULT_RESULTS_ROOT = 'testing/measurement/runs'
 DEFAULT_PROMETHEUS_SCRAPE_JOBS = (
     'ledger:9460,consumption:9465,device:9466,redis:9461,node:9463,process:9256,cadvisor:9462'
+)
+EDGE_DATA_SUBDIRS = (
+    'postgres',
+    'redis',
+    'mosquitto',
+    'device',
+    'ledger',
+    'consumption',
+    'lightning',
 )
 
 
@@ -237,6 +248,34 @@ def remote_compose_command(destination: str, target_dir: str, compose_file: str,
     return ['ssh', destination, remote]
 
 
+def validate_remote_data_dir(raw: str) -> str:
+    data_dir = raw.strip()
+    if not data_dir:
+        raise ValueError('--target-data-dir must not be empty')
+
+    parts = [part for part in data_dir.split('/') if part]
+    if '..' in parts:
+        raise ValueError(f"--target-data-dir must not contain '..': {raw}")
+
+    normalized = posixpath.normpath(data_dir)
+    if normalized in ('.', '/', '..'):
+        raise ValueError(f'--target-data-dir is too broad to reset safely: {raw}')
+
+    return normalized
+
+
+def remote_reset_data_command(destination: str, target_dir: str, data_dir: str) -> list[str]:
+    data_root = validate_remote_data_dir(data_dir)
+    subdirs = [posixpath.join(data_root, subdir) for subdir in EDGE_DATA_SUBDIRS]
+    mkdir_paths = ' '.join(shlex.quote(path) for path in [data_root, *subdirs])
+    remote = (
+        f"cd {shlex.quote(target_dir)} && "
+        f"rm -rf -- {shlex.quote(data_root)} && "
+        f"mkdir -p -- {mkdir_paths}"
+    )
+    return ['ssh', destination, remote]
+
+
 def collect_target_diagnostics(args: argparse.Namespace, project_root: Path, run_dir: Path) -> Path:
     destination = ssh_destination(args.target_user, args.target_host)
     diagnostics_path = run_dir / 'target_diagnostics.log'
@@ -363,10 +402,14 @@ def parse_args() -> argparse.Namespace:
                         help='Project directory on the target edge machine')
     parser.add_argument('--target-compose-file', default=DEFAULT_TARGET_COMPOSE_FILE,
                         help='Compose file path relative to --target-dir')
+    parser.add_argument('--target-data-dir', default=DEFAULT_TARGET_DATA_DIR,
+                        help='Remote edge data directory to clear before starting; relative to --target-dir unless absolute')
     parser.add_argument('--target-stabilize-seconds', type=int, default=180,
                         help='Wait after restarting the target edge stack')
     parser.add_argument('--skip-target-restart', action='store_true',
                         help='Do not restart the remote target stack')
+    parser.add_argument('--skip-target-data-reset', action='store_true',
+                        help='Keep the remote target data directory when restarting the edge stack')
     parser.add_argument('--pull-target-images', action='store_true',
                         help='Run docker compose pull on the target before starting the edge stack')
 
@@ -482,6 +525,8 @@ def main() -> int:
     export_vars = list(args.export_var or [])
     if not args.no_target_instance_var and not any(key == 'instance' for key, _value in export_vars):
         export_vars.append(('instance', target_instance))
+    should_reset_target_data = not args.skip_target_restart and not args.skip_target_data_reset
+    target_data_dir = validate_remote_data_dir(args.target_data_dir) if should_reset_target_data else None
 
     k6_env = {
         'API_BASE_URL': api_base_url,
@@ -508,6 +553,8 @@ def main() -> int:
             'ssh_destination': ssh_destination(args.target_user, args.target_host),
             'dir': args.target_dir,
             'compose_file': args.target_compose_file,
+            'data_dir': target_data_dir,
+            'data_reset_enabled': should_reset_target_data,
             'api_base_url': api_base_url,
             'metrics_instance': None if args.no_target_instance_var else target_instance,
         },
@@ -566,11 +613,19 @@ def main() -> int:
                 ['up', '-d', '--remove-orphans'],
             )
             manifest['commands']['target_down'] = command_text(down_cmd)
+            reset_data_cmd = None
+            if target_data_dir is not None:
+                reset_data_cmd = remote_reset_data_command(destination, args.target_dir, target_data_dir)
+                manifest['commands']['target_data_reset'] = command_text(reset_data_cmd)
             if args.pull_target_images:
                 manifest['commands']['target_pull'] = command_text(pull_cmd)
             manifest['commands']['target_up'] = command_text(up_cmd)
             write_json(manifest_path, manifest)
             run_command(down_cmd, cwd=project_root, dry_run=args.dry_run)
+            if reset_data_cmd is not None:
+                run_command(reset_data_cmd, cwd=project_root, dry_run=args.dry_run)
+                manifest['target']['data_reset_at'] = iso_z(utc_now())
+                write_json(manifest_path, manifest)
             if args.pull_target_images:
                 run_command(pull_cmd, cwd=project_root, dry_run=args.dry_run)
             try:
