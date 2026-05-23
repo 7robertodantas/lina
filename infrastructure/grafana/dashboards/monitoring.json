@@ -315,14 +315,14 @@
         {
           "editorMode": "code",
           "expr": "sum by (instance) (rate(node_disk_read_bytes_total{instance=~\"$instance\",device!~\"loop.*|ram.*\"}[1m]))",
-          "legendFormat": "{{instance}} read",
+          "legendFormat": "read",
           "range": true,
           "refId": "A"
         },
         {
           "editorMode": "code",
           "expr": "sum by (instance) (rate(node_disk_written_bytes_total{instance=~\"$instance\",device!~\"loop.*|ram.*\"}[1m]))",
-          "legendFormat": "{{instance}} write",
+          "legendFormat": "write",
           "range": true,
           "refId": "B"
         }
@@ -2651,5 +2651,5 @@
   "timezone": "browser",
   "title": "LINA Monitoring",
   "uid": "adp8dtw",
-  "version": 1
+  "version": 2
 }
