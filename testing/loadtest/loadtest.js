@@ -106,7 +106,7 @@ const TEARDOWN_DRAIN_SECONDS = (() => {
 })();
 
 const LEVEL_VUS = parsePositiveInt(__ENV.LEVEL_VUS, 25);
-const LEVEL_COUNT = parsePositiveInt(__ENV.LEVEL_COUNT, 8);
+const LEVEL_COUNT = parsePositiveInt(__ENV.LEVEL_COUNT, 10);
 const WARMUP = __ENV.WARMUP || '60s';
 const MEASURE = __ENV.MEASURE || '120s';
 const IDLE = __ENV.IDLE || '30s';
