@@ -318,6 +318,32 @@ def align_teardown_transition_segments(intervals: List[Dict[str, Any]]) -> List[
     return aligned
 
 
+def align_warmup_transition_segments(intervals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    aligned = []
+    previous_load_interval = None
+
+    for interval in intervals:
+        adjusted = dict(interval)
+
+        # Older exports used max_over_time() for marker gauges, so the first
+        # scrape after an upward level transition could keep the prior measure
+        # phase while already showing the new level target.
+        if (
+            previous_load_interval
+            and previous_load_interval['phase'] == 'measure'
+            and adjusted['phase'] == 'measure'
+            and adjusted['level_vus'] > previous_load_interval['level_vus']
+        ):
+            adjusted['phase'] = 'warmup'
+
+        aligned.append(adjusted)
+
+        if adjusted['phase'] in {'warmup', 'measure'}:
+            previous_load_interval = adjusted
+
+    return aligned
+
+
 def build_marker_intervals(input_dir: Path, initial_time: pd.Timestamp, max_elapsed: float) -> List[Dict[str, Any]]:
     phase = load_single_series(input_dir, 'Load Test Phase')
     level = load_single_series(input_dir, 'Load Test Level VUs')
@@ -368,7 +394,9 @@ def build_marker_intervals(input_dir: Path, initial_time: pd.Timestamp, max_elap
             'source': 'marker',
         })
 
-    return merge_intervals(align_teardown_transition_segments(intervals))
+    intervals = align_warmup_transition_segments(intervals)
+    intervals = align_teardown_transition_segments(intervals)
+    return merge_intervals(intervals)
 
 
 def build_schedule_intervals(
@@ -481,25 +509,56 @@ def add_expected_rate_overlay(
     ):
         return
 
-    points_x = []
-    points_y = []
-    for interval in intervals:
-        if interval['phase'] not in {'warmup', 'measure'}:
-            continue
-        expected = interval['level_vus'] / report_interval_seconds
-        points_x.extend([x_value(interval['start'], use_minutes), x_value(interval['end'], use_minutes)])
-        points_y.extend([expected, expected])
-
+    points_x, points_y = expected_rate_points(intervals, report_interval_seconds, use_minutes)
     if points_x:
-        ax.step(
+        ax.plot(
             points_x,
             points_y,
-            where='post',
             color='#111827',
             linestyle='--',
             linewidth=1.2,
             label='Incoming report rate',
         )
+
+
+def expected_rate_points(
+    intervals: List[Dict[str, Any]],
+    report_interval_seconds: float,
+    use_minutes: bool = False,
+) -> tuple[List[float], List[float]]:
+    if report_interval_seconds <= 0:
+        return [], []
+
+    points_x = []
+    points_y = []
+    previous_level_vus = 0
+
+    for interval in intervals:
+        if interval['phase'] not in {'warmup', 'measure'}:
+            if interval['phase'] == 'teardown':
+                previous_level_vus = 0
+            continue
+
+        start_level_vus = previous_level_vus if interval['phase'] == 'warmup' else interval['level_vus']
+        end_level_vus = interval['level_vus']
+
+        start = x_value(interval['start'], use_minutes)
+        end = x_value(interval['end'], use_minutes)
+        start_rate = start_level_vus / report_interval_seconds
+        end_rate = end_level_vus / report_interval_seconds
+
+        if points_x and points_x[-1] == start:
+            points_y[-1] = start_rate
+        else:
+            points_x.append(start)
+            points_y.append(start_rate)
+
+        points_x.append(end)
+        points_y.append(end_rate)
+
+        previous_level_vus = interval['level_vus']
+
+    return points_x, points_y
 
 
 def add_saturation_thresholds(

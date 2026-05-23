@@ -22,7 +22,7 @@ LOADTEST_MARKER_QUERIES = [
     {
         'panel_id': 'loadtest-marker-stage-index',
         'panel_title': 'Load Test Stage Index',
-        'query': 'max(max_over_time(k6_loadtest_stage_index[15s]))',
+        'query': 'max(last_over_time(k6_loadtest_stage_index[30s]))',
         'legend_format': 'stage',
         'unit': 'short',
         'source': 'loadtest_marker',
@@ -30,7 +30,7 @@ LOADTEST_MARKER_QUERIES = [
     {
         'panel_id': 'loadtest-marker-phase',
         'panel_title': 'Load Test Phase',
-        'query': 'max(max_over_time(k6_loadtest_phase_code[15s]))',
+        'query': 'max(last_over_time(k6_loadtest_phase_code[30s]))',
         'legend_format': 'phase',
         'unit': 'short',
         'source': 'loadtest_marker',
@@ -38,7 +38,7 @@ LOADTEST_MARKER_QUERIES = [
     {
         'panel_id': 'loadtest-marker-level-vus',
         'panel_title': 'Load Test Level VUs',
-        'query': 'max(max_over_time(k6_loadtest_level_vus[15s]))',
+        'query': 'max(last_over_time(k6_loadtest_level_vus[30s]))',
         'legend_format': 'devices',
         'unit': 'devices',
         'source': 'loadtest_marker',
@@ -46,7 +46,7 @@ LOADTEST_MARKER_QUERIES = [
     {
         'panel_id': 'loadtest-marker-measurement-window',
         'panel_title': 'Load Test Measurement Window',
-        'query': 'max(max_over_time(k6_loadtest_measurement_active[15s]))',
+        'query': 'max(last_over_time(k6_loadtest_measurement_active[30s]))',
         'legend_format': 'active',
         'unit': 'short',
         'source': 'loadtest_marker',
