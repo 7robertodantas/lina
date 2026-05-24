@@ -163,41 +163,30 @@ func (ewsi *EastWestStreamInterface) handleDeviceMessage(ctx context.Context, ha
 
 // processMessagesParallel runs TraceEventProcessing for each message with bounded concurrency.
 func (ewsi *EastWestStreamInterface) processMessagesParallel(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
+	var mu sync.Mutex
+	ackIDs := make([]string, 0, len(msgs))
 	internal.RunStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
-		ackFn := func(ctx context.Context, msg redis.XMessage) error {
-			if err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg); err != nil {
-				return err
-			}
-			if err := ewsi.XDelWithSpan(streamCtx, streamName, msg.ID); err != nil {
-				logger.WithStream(streamName, "consume").
-					Warnf(streamCtx, "XDEL after ACK failed for %s: %v", msg.ID, err)
-			}
-			return nil
-		}
 		if err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 			return ewsi.handleDeviceMessage(ctx, handler, msg)
-		}, ackFn); err != nil {
+		}, nil); err != nil {
 			logger.WithStream(streamName, "consume").
 				Errorf(streamCtx, "Error handling device event %s: %v", msg.ID, err)
+			return
 		}
+		mu.Lock()
+		ackIDs = append(ackIDs, msg.ID)
+		mu.Unlock()
 	})
+	ewsi.ackAndDeleteMessages(streamCtx, streamName, ackIDs)
 }
 
 func (ewsi *EastWestStreamInterface) processMessagesParallelRetry(streamCtx context.Context, streamName string, msgs []redis.XMessage, handler *EastWestStreamHandler) {
+	var mu sync.Mutex
+	ackIDs := make([]string, 0, len(msgs))
 	internal.RunStreamMessagesParallel(ewsi.cfg.ConsumeParallelism, msgs, func(msg redis.XMessage) {
-		ackFn := func(ctx context.Context, msg redis.XMessage) error {
-			if err := ewsi.XAckWithSpan(streamCtx, streamName, ewsi.groupName, msg.ID, &msg); err != nil {
-				return err
-			}
-			if err := ewsi.XDelWithSpan(streamCtx, streamName, msg.ID); err != nil {
-				logger.WithStream(streamName, "consume").
-					Warnf(streamCtx, "XDEL after ACK failed for %s: %v", msg.ID, err)
-			}
-			return nil
-		}
 		err := internal.TraceEventProcessing(streamCtx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
 			return ewsi.handleDeviceMessage(ctx, handler, msg)
-		}, ackFn)
+		}, nil)
 		if err != nil {
 			if isTransientPersistenceError(err) {
 				logger.WithStream(streamName, "consume").
@@ -208,9 +197,28 @@ func (ewsi *EastWestStreamInterface) processMessagesParallelRetry(streamCtx cont
 			}
 			return
 		}
+		mu.Lock()
+		ackIDs = append(ackIDs, msg.ID)
+		mu.Unlock()
 		logger.WithStream(streamName, "consume").
 			Debugf(streamCtx, "Successfully retried pending message %s", msg.ID)
 	})
+	ewsi.ackAndDeleteMessages(streamCtx, streamName, ackIDs)
+}
+
+func (ewsi *EastWestStreamInterface) ackAndDeleteMessages(streamCtx context.Context, streamName string, messageIDs []string) {
+	if len(messageIDs) == 0 {
+		return
+	}
+	if err := ewsi.XAckManyWithSpan(streamCtx, streamName, ewsi.groupName, messageIDs); err != nil {
+		logger.WithStream(streamName, "consume").
+			Warnf(streamCtx, "XACK failed for %d messages: %v", len(messageIDs), err)
+		return
+	}
+	if err := ewsi.XDelManyWithSpan(streamCtx, streamName, messageIDs); err != nil {
+		logger.WithStream(streamName, "consume").
+			Warnf(streamCtx, "XDEL after ACK failed for %d messages: %v", len(messageIDs), err)
+	}
 }
 
 // startPendingMessageRetry continuously retries pending messages that failed to process

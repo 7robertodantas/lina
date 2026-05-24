@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -105,6 +106,8 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 			}
 			lastID = msgs[len(msgs)-1].ID
 
+			var mu sync.Mutex
+			deleteIDs := make([]string, 0, len(msgs))
 			internal.RunStreamMessagesParallel(ewsi.consumeParallelism, msgs, func(msg redis.XMessage) {
 				// Wrap message handling with tracing; XDEL after success keeps event.ledger bounded (single consumer).
 				if err := internal.TraceEventProcessing(ctx, streamName, msg, func(ctx context.Context, msg redis.XMessage) error {
@@ -117,12 +120,15 @@ func (ewsi *EastWestStreamInterface) consumeLedgerBalanceEvents(ctx context.Cont
 					logger.WithStream(streamName, "consume").
 						Errorf(ctx, "Failed to handle ledger message %s: %v", msg.ID, err)
 				} else {
-					if err := ewsi.XDelWithSpan(ctx, streamName, msg.ID); err != nil {
-						logger.WithStream(streamName, "consume").
-							Warnf(ctx, "XDEL after successful ledger event processing failed for %s: %v", msg.ID, err)
-					}
+					mu.Lock()
+					deleteIDs = append(deleteIDs, msg.ID)
+					mu.Unlock()
 				}
 			})
+			if err := ewsi.XDelManyWithSpan(ctx, streamName, deleteIDs); err != nil {
+				logger.WithStream(streamName, "consume").
+					Warnf(ctx, "XDEL after successful ledger event processing failed for %d messages: %v", len(deleteIDs), err)
+			}
 		}
 	}
 }

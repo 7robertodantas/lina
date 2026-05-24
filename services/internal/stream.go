@@ -170,10 +170,6 @@ func (sc *StreamClient) XAddWithSpan(ctx context.Context, streamName string, arg
 	}
 	defer span.End()
 
-	// Inject trace context into the message values
-	carrier := make(propagation.MapCarrier)
-	propagator.Inject(ctx, carrier)
-
 	// Ensure Values is a map
 	if args.Values == nil {
 		args.Values = make(map[string]interface{})
@@ -185,10 +181,7 @@ func (sc *StreamClient) XAddWithSpan(ctx context.Context, streamName string, arg
 		args.Values = valuesMap
 	}
 
-	// Add trace context to the message under a special key
-	for k, v := range carrier {
-		valuesMap["_trace_"+k] = v
-	}
+	InjectTraceContext(ctx, valuesMap)
 
 	client := sc.Client()
 	result := client.XAdd(ctx, args)
@@ -202,6 +195,17 @@ func (sc *StreamClient) XAddWithSpan(ctx context.Context, streamName string, arg
 	span.SetAttributes(attribute.String("redis.stream.id", streamID))
 	span.SetStatus(codes.Ok, "success")
 	return streamID, nil
+}
+
+// InjectTraceContext adds the active trace context to Redis stream values using
+// the same keys as XAddWithSpan. It is useful for batched producers that use a
+// Redis pipeline instead of one XADD helper call per message.
+func InjectTraceContext(ctx context.Context, values map[string]interface{}) {
+	carrier := make(propagation.MapCarrier)
+	propagator.Inject(ctx, carrier)
+	for k, v := range carrier {
+		values["_trace_"+k] = v
+	}
 }
 
 // XAckWithSpan performs XAck with a meaningful OpenTelemetry span
@@ -246,6 +250,31 @@ func (sc *StreamClient) XAckWithSpan(ctx context.Context, streamName, groupName,
 	return nil
 }
 
+// XAckManyWithSpan acknowledges multiple stream entries with one Redis command.
+func (sc *StreamClient) XAckManyWithSpan(ctx context.Context, streamName, groupName string, messageIDs []string) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	ctx, span := streamTracer.Start(ctx, fmt.Sprintf("[stream] %s ack batch", streamName),
+		trace.WithAttributes(
+			attribute.String("redis.stream.name", streamName),
+			attribute.String("redis.stream.group", groupName),
+			attribute.Int("redis.stream.message.count", len(messageIDs)),
+			attribute.String("redis.operation", "XACK"),
+		),
+	)
+	defer span.End()
+
+	result := sc.Client().XAck(ctx, streamName, groupName, messageIDs...)
+	if result.Err() != nil {
+		span.RecordError(result.Err())
+		span.SetStatus(codes.Error, result.Err().Error())
+		return result.Err()
+	}
+	span.SetStatus(codes.Ok, "success")
+	return nil
+}
+
 // XDelWithSpan removes a stream entry by ID (e.g. after XACK) with a short OpenTelemetry span.
 func (sc *StreamClient) XDelWithSpan(ctx context.Context, streamName, messageID string) error {
 	ctx, span := streamTracer.Start(ctx, fmt.Sprintf("[stream] %s xdel", streamName),
@@ -258,6 +287,30 @@ func (sc *StreamClient) XDelWithSpan(ctx context.Context, streamName, messageID 
 	defer span.End()
 
 	result := sc.Client().XDel(ctx, streamName, messageID)
+	if result.Err() != nil {
+		span.RecordError(result.Err())
+		span.SetStatus(codes.Error, result.Err().Error())
+		return result.Err()
+	}
+	span.SetStatus(codes.Ok, "success")
+	return nil
+}
+
+// XDelManyWithSpan removes multiple stream entries with one Redis command.
+func (sc *StreamClient) XDelManyWithSpan(ctx context.Context, streamName string, messageIDs []string) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	ctx, span := streamTracer.Start(ctx, fmt.Sprintf("[stream] %s xdel batch", streamName),
+		trace.WithAttributes(
+			attribute.String("redis.stream.name", streamName),
+			attribute.Int("redis.stream.message.count", len(messageIDs)),
+			attribute.String("redis.operation", "XDEL"),
+		),
+	)
+	defer span.End()
+
+	result := sc.Client().XDel(ctx, streamName, messageIDs...)
 	if result.Err() != nil {
 		span.RecordError(result.Err())
 		span.SetStatus(codes.Error, result.Err().Error())

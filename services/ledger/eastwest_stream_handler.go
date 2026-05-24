@@ -278,32 +278,57 @@ func (esh *EastWestStreamHandler) processConsumptionWithTx(ctx context.Context, 
 // publishConsumptionResult publishes all post-commit events for a successfully processed consumption.
 // Safe to call from both the single-message path and the batch path.
 func (esh *EastWestStreamHandler) publishConsumptionResult(ctx context.Context, result *processConsumptionResult) {
-	timestamp := time.Now().Format(time.RFC3339)
+	esh.publishConsumptionResultsBatch(ctx, []*processConsumptionResult{result})
+}
 
-	if err := esh.publisher.PublishAuthorizationDebited(ctx, result.authorizationID, result.deviceID, result.actualDebit, result.newRemaining, timestamp); err != nil {
-		logger.WithDeviceID(result.deviceID).
-			WithStream(internal.StreamLedger, "produce").
-			Error(ctx, "Failed to publish AuthorizationDebited event", err)
+// publishConsumptionResultsBatch publishes post-commit events for a batch of successfully
+// processed consumptions with a single Redis pipeline where possible.
+func (esh *EastWestStreamHandler) publishConsumptionResultsBatch(ctx context.Context, results []*processConsumptionResult) {
+	if len(results) == 0 {
+		return
 	}
-	RecordAuthorizationDebited(ctx)
+	events := make([]ledgerEventEnvelope, 0, len(results))
+	for _, result := range results {
+		events = append(events, ledgerEventsForConsumptionResult(result)...)
+	}
+	if err := esh.publisher.publishLedgerEventsBatch(ctx, events); err != nil {
+		logger.WithStream(internal.StreamLedger, "produce").
+			Error(ctx, "Failed to publish batched consumption ledger events", err)
+	}
+	for _, result := range results {
+		RecordAuthorizationDebited(ctx)
+		recordConsumptionDebitLatency(ctx, result)
+	}
+}
+
+func ledgerEventsForConsumptionResult(result *processConsumptionResult) []ledgerEventEnvelope {
+	timestamp := time.Now().Format(time.RFC3339)
+	events := []ledgerEventEnvelope{
+		{
+			event:    newAuthorizationDebitedEvent(result.authorizationID, result.deviceID, result.actualDebit, result.newRemaining, timestamp),
+			deviceID: result.deviceID,
+		},
+	}
 
 	if result.newStatus == "completed" {
-		if err := esh.publisher.PublishAuthorizationCompleted(ctx, result.authorizationID, result.deviceID, timestamp); err != nil {
-			logger.WithDeviceID(result.deviceID).
-				WithStream(internal.StreamLedger, "produce").
-				Error(ctx, "Failed to publish AuthorizationCompleted event", err)
-		}
+		events = append(events, ledgerEventEnvelope{
+			event:    newAuthorizationCompletedEvent(result.authorizationID, result.deviceID, timestamp),
+			deviceID: result.deviceID,
+		})
 	}
 
 	if result.overflowEntry != nil {
 		overflowTimestamp := time.Unix(result.overflowEntry.CreatedAt, 0).UTC().Format(time.RFC3339)
-		if err := esh.publisher.PublishDeviceDebited(ctx, result.deviceID, result.authorizationID, result.overflowEntry.AmountMsat, result.overflowEntry.BalanceAfter, overflowTimestamp); err != nil {
-			logger.WithDeviceID(result.deviceID).
-				WithStream(internal.StreamLedger, "produce").
-				Error(ctx, "Failed to publish DeviceDebited event for overflow", err)
-		}
+		events = append(events, ledgerEventEnvelope{
+			event:    newDeviceDebitedEvent(result.deviceID, result.authorizationID, result.overflowEntry.AmountMsat, result.overflowEntry.BalanceAfter, overflowTimestamp),
+			deviceID: result.deviceID,
+		})
 	}
 
+	return events
+}
+
+func recordConsumptionDebitLatency(ctx context.Context, result *processConsumptionResult) {
 	if ts := result.debitLatencyAnchor; ts != "" {
 		parseTimestamp := func(s string) (time.Time, error) {
 			if t, err := time.Parse(time.RFC3339Nano, s); err == nil {

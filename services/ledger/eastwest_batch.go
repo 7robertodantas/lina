@@ -16,7 +16,7 @@ import (
 type consumptionBatchItem struct {
 	msg      redis.XMessage
 	recorded *consumptionpb.DeviceConsumptionRecordedEvent // nil when skip is true
-	skip     bool                                           // already processed or invalid; ACK'd without DB work
+	skip     bool                                          // already processed or invalid; ACK'd without DB work
 }
 
 // consumptionBatchResult holds the per-message outcome of a batch run.
@@ -58,27 +58,36 @@ func (ewsi *EastWestStreamInterface) runConsumptionBatch(
 	results := ewsi.executeBatchTx(ctx, streamName, items)
 
 	// Phase 3: publish events (successes only) and ACK processed messages.
+	// Keep Redis round trips proportional to batches instead of messages.
+	publishResults := make([]*processConsumptionResult, 0, len(results))
+	ackIDs := make([]string, 0, len(results))
 	for _, r := range results {
 		if r.result != nil {
-			ewsi.handler.publishConsumptionResult(ctx, r.result)
+			publishResults = append(publishResults, r.result)
 		}
 		if r.ack {
-			ackStart := time.Now()
-			err := ewsi.XAckWithSpan(ctx, streamName, ewsi.groupName, r.msg.ID, &r.msg)
-			RecordStreamAckLatency(ctx, streamName, "handle_consumption", time.Since(ackStart).Seconds(), err == nil, pendingRetry)
-			if err != nil {
-				logger.WithStream(streamName, "consume").
-					Warnf(ctx, "batch: XACK failed for %s: %v", r.msg.ID, err)
-				continue
-			}
-			if err := ewsi.XDelWithSpan(ctx, streamName, r.msg.ID); err != nil {
-				logger.WithStream(streamName, "consume").
-					Warnf(ctx, "batch: XDEL failed for %s: %v", r.msg.ID, err)
-			}
+			ackIDs = append(ackIDs, r.msg.ID)
 		} else if r.err != nil {
 			logger.WithStream(streamName, "consume").
 				Errorf(ctx, "batch: message %s left in pending: %v", r.msg.ID, r.err)
 		}
+	}
+	ewsi.handler.publishConsumptionResultsBatch(ctx, publishResults)
+	if len(ackIDs) == 0 {
+		return
+	}
+
+	ackStart := time.Now()
+	err := ewsi.XAckManyWithSpan(ctx, streamName, ewsi.groupName, ackIDs)
+	RecordStreamAckLatency(ctx, streamName, "handle_consumption", time.Since(ackStart).Seconds(), err == nil, pendingRetry)
+	if err != nil {
+		logger.WithStream(streamName, "consume").
+			Warnf(ctx, "batch: XACK failed for %d messages: %v", len(ackIDs), err)
+		return
+	}
+	if err := ewsi.XDelManyWithSpan(ctx, streamName, ackIDs); err != nil {
+		logger.WithStream(streamName, "consume").
+			Warnf(ctx, "batch: XDEL failed for %d messages: %v", len(ackIDs), err)
 	}
 }
 
