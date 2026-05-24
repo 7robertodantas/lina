@@ -8,6 +8,7 @@ The runner intentionally keeps each experiment in its own output directory:
     experiment.json
     external-target.override.yml
     k6.log
+    service_logs/
     metrics_export/
     graphs/
 
@@ -47,6 +48,13 @@ DEFAULT_DASHBOARD = 'infrastructure/grafana/dashboards/monitoring.json'
 DEFAULT_RESULTS_ROOT = 'testing/measurement/runs'
 DEFAULT_PROMETHEUS_SCRAPE_JOBS = (
     'ledger:9460,consumption:9465,device:9466,redis:9461,node:9463,process:9256,cadvisor:9462'
+)
+DEFAULT_SERVICE_LOG_TAIL_LINES = 200
+TARGET_SERVICE_LOGS = (
+    'device',
+    'ledger',
+    'consumption',
+    'lightning',
 )
 EDGE_DATA_SUBDIRS = (
     'postgres',
@@ -248,6 +256,21 @@ def remote_compose_command(destination: str, target_dir: str, compose_file: str,
     return ['ssh', destination, remote]
 
 
+def remote_service_log_command(
+    destination: str,
+    target_dir: str,
+    compose_file: str,
+    service: str,
+    tail_lines: int,
+) -> list[str]:
+    return remote_compose_command(
+        destination,
+        target_dir,
+        compose_file,
+        ['logs', '--no-color', f'--tail={tail_lines}', service],
+    )
+
+
 def validate_remote_data_dir(raw: str) -> str:
     data_dir = raw.strip()
     if not data_dir:
@@ -309,6 +332,35 @@ def collect_target_diagnostics(args: argparse.Namespace, project_root: Path, run
         for command in commands:
             capture_command(command, cwd=project_root, output_file=output_file)
     return diagnostics_path
+
+
+def capture_target_service_logs(args: argparse.Namespace, project_root: Path, run_dir: Path) -> dict[str, str]:
+    destination = ssh_destination(args.target_user, args.target_host)
+    logs_dir = run_dir / 'service_logs'
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    captured_logs = {}
+
+    for service in TARGET_SERVICE_LOGS:
+        log_path = logs_dir / f'{service}.log'
+        command = remote_service_log_command(
+            destination,
+            args.target_dir,
+            args.target_compose_file,
+            service,
+            args.service_log_tail_lines,
+        )
+        captured_logs[service] = str(log_path)
+        print(f"Capturing {service} logs into {log_path}")
+        if args.dry_run:
+            print(f"[dry-run] would capture: {command_text(command)}")
+            continue
+        with open(log_path, 'w') as output_file:
+            output_file.write(f"service={service}\n")
+            output_file.write(f"target={destination}\n")
+            output_file.write(f"collected_at={iso_z(utc_now())}\n\n")
+            capture_command(command, cwd=project_root, output_file=output_file)
+
+    return captured_logs
 
 
 def local_compose_command(project_root: Path, compose_file: Path, override_file: Path, action: list[str]) -> list[str]:
@@ -502,6 +554,8 @@ def parse_args() -> argparse.Namespace:
                         help='Do not plot exported metrics')
     parser.add_argument('--stop-on-k6-failure', action='store_true',
                         help='Skip export/plot if k6 exits non-zero')
+    parser.add_argument('--service-log-tail-lines', type=int, default=DEFAULT_SERVICE_LOG_TAIL_LINES,
+                        help='Number of tail lines to capture from each target service after k6 exits')
 
     parser.add_argument('--results-root', default=DEFAULT_RESULTS_ROOT,
                         help='Directory that receives per-run output directories')
@@ -524,6 +578,7 @@ def main() -> int:
     manifest_path = run_dir / 'experiment.json'
     override_file = run_dir / 'external-target.override.yml'
     k6_log = run_dir / 'k6.log'
+    service_logs_dir = run_dir / 'service_logs'
 
     local_compose_file = path_from_project(project_root, args.local_compose_file)
     loadtest_path = path_from_project(project_root, args.loadtest_file)
@@ -581,6 +636,7 @@ def main() -> int:
         'outputs': {
             'run_dir': str(run_dir),
             'k6_log': str(k6_log),
+            'service_logs_dir': str(service_logs_dir),
             'metrics_dir': str(metrics_dir),
             'graphs_dir': str(graphs_dir),
             'target_diagnostics': str(run_dir / 'target_diagnostics.log'),
@@ -590,6 +646,12 @@ def main() -> int:
             'return_code': None,
             'started_at': None,
             'finished_at': None,
+        },
+        'service_logs': {
+            'services': list(TARGET_SERVICE_LOGS),
+            'tail_lines': args.service_log_tail_lines,
+            'captured_at': None,
+            'files': {},
         },
         'export': {
             'time_range': None,
@@ -690,6 +752,23 @@ def main() -> int:
         manifest['k6']['return_code'] = k6_return_code
         write_json(manifest_path, manifest)
         print(f"k6 finished at {manifest['k6']['finished_at']} with exit code {k6_return_code}")
+
+        service_log_commands = {}
+        destination = ssh_destination(args.target_user, args.target_host)
+        for service in TARGET_SERVICE_LOGS:
+            service_log_commands[service] = command_text(
+                remote_service_log_command(
+                    destination,
+                    args.target_dir,
+                    args.target_compose_file,
+                    service,
+                    args.service_log_tail_lines,
+                )
+            )
+        manifest['commands']['service_logs'] = service_log_commands
+        manifest['service_logs']['files'] = capture_target_service_logs(args, project_root, run_dir)
+        manifest['service_logs']['captured_at'] = iso_z(utc_now())
+        write_json(manifest_path, manifest)
 
         export_from_dt = k6_started_at - timedelta(seconds=args.export_padding_before_seconds)
         export_to_dt = k6_finished_at + timedelta(seconds=args.export_padding_after_seconds)
